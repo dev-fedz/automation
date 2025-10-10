@@ -1,3 +1,4 @@
+from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from . import views
@@ -9,4 +10,6 @@ router.register(r"collections", views.ApiCollectionViewSet, basename="core-colle
 router.register(r"environments", views.ApiEnvironmentViewSet, basename="core-environments")
 router.register(r"runs", views.ApiRunViewSet, basename="core-runs")
 
-urlpatterns = router.urls
+urlpatterns = router.urls + [
+	path("tester/execute/", views.ApiAdhocRequestView.as_view(), name="core-request-execute"),
+]

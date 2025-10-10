@@ -1,5 +1,5 @@
 <ul class="sidebar-menu" data-testid="sidebar-menu">
-        <li class="menu-item" data-menu="dashboard"><a href="/" data-testid="menu-dashboard">Dashboard</a></li>
+    <li class="menu-item" data-menu="dashboard"><a href="/" data-testid="menu-dashboard">Dashboard</a></li>
     <li class="has-submenu">
                 <a href="#" data-testid="menu-user-mgmt">User Management</a>
         <ul class="submenu">
@@ -7,6 +7,8 @@
                         <li class="menu-item" data-menu="roles"><a href="/roles/" data-testid="menu-roles">Role</a></li>
         </ul>
     </li>
+    <li class="menu-item" data-menu="api-tester"><a href="{% url 'api-tester' %}" data-testid="menu-api-tester">API Tester</a></li>
+
 </ul>
 <script>
 document.addEventListener('DOMContentLoaded', function(){
