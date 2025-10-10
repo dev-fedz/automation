@@ -238,6 +238,7 @@
         let jsonCompletionDisposable = null;
         let monacoLoaderPromise = null;
         let hasConfiguredJsonDiagnostics = false;
+        let isRequestInFlight = false;
         const scriptEditors = { pre: null, post: null };
         const scriptFallbacks = { pre: null, post: null };
 
@@ -247,6 +248,23 @@
             }
             elements.status.textContent = message;
             elements.status.dataset.variant = variant;
+        };
+
+        const getTrimmedUrlValue = () => {
+            if (!elements.url) {
+                return '';
+            }
+            return (elements.url.value || '').trim();
+        };
+
+        const hasRunnableUrl = () => Boolean(getTrimmedUrlValue());
+
+        const updateRunButtonState = () => {
+            if (!elements.runButton) {
+                return;
+            }
+            const shouldDisable = isRequestInFlight || !hasRunnableUrl();
+            elements.runButton.disabled = shouldDisable;
         };
 
         const getRawEditorValue = () => {
@@ -345,6 +363,7 @@
             suppressUrlSync = true;
             elements.url.value = combined;
             suppressUrlSync = false;
+            updateRunButtonState();
         };
 
         const ensureHeadersRendered = () => {
@@ -868,6 +887,7 @@
             updateBodyUI();
             updateScriptsUI();
             activateTab(state.activeTab || 'params');
+            updateRunButtonState();
         };
 
         const resetBuilderState = () => {
@@ -882,6 +902,7 @@
             if (parseParams) {
                 parseUrlIntoState(value || '');
             }
+            updateRunButtonState();
         };
 
         const populateForm = (collection, request) => {
@@ -889,7 +910,6 @@
             if (!request) {
                 setUrlValue('', true);
                 elements.method.value = 'GET';
-                elements.runButton.disabled = true;
                 if (elements.runCollectionButton) {
                     elements.runCollectionButton.disabled = !collection;
                 }
@@ -935,7 +955,6 @@
             state.builder.scripts.pre = request.pre_request_script || '';
             state.builder.scripts.post = request.tests_script || '';
 
-            elements.runButton.disabled = false;
             if (elements.runCollectionButton) {
                 elements.runCollectionButton.disabled = false;
             }
@@ -946,6 +965,7 @@
 
             renderBuilder();
             applyParamsToUrl();
+            updateRunButtonState();
         };
 
         const highlightSelection = () => {
@@ -1113,7 +1133,7 @@
 
             const payload = {
                 method: elements.method.value,
-                url: elements.url.value,
+                url: getTrimmedUrlValue(),
                 headers: headersPayload,
                 environment: elements.environmentSelect.value || null,
                 params: paramsPayload,
@@ -1208,14 +1228,19 @@
 
         const submitForm = async (event) => {
             event.preventDefault();
-            if (!elements.runButton || elements.runButton.disabled) {
+            if (isRequestInFlight) {
                 return;
             }
 
             const collection = state.collections.find((item) => item.id === state.selectedCollectionId) || null;
             const request = collection?.requests?.find((item) => item.id === state.selectedRequestId) || null;
-            if (!collection || !request) {
-                setStatus('Select a request to execute.', 'error');
+
+            if (!hasRunnableUrl()) {
+                setStatus('Enter a request URL before sending.', 'error');
+                updateRunButtonState();
+                if (elements.url) {
+                    elements.url.focus();
+                }
                 return;
             }
 
@@ -1228,7 +1253,8 @@
             }
 
             setStatus('Sending request...', 'loading');
-            elements.runButton.disabled = true;
+            isRequestInFlight = true;
+            updateRunButtonState();
 
             try {
                 const response = await fetch(endpoints.execute, {
@@ -1255,7 +1281,8 @@
                 setStatus(error instanceof Error ? error.message : 'Unexpected error during request.', 'error');
                 renderResponse(null);
             } finally {
-                elements.runButton.disabled = false;
+                isRequestInFlight = false;
+                updateRunButtonState();
             }
         };
 
@@ -1403,12 +1430,17 @@
             renderCollections(event.target.value);
         });
 
+        elements.url.addEventListener('input', () => {
+            updateRunButtonState();
+        });
+
         elements.url.addEventListener('change', () => {
             if (suppressUrlSync) {
                 return;
             }
             parseUrlIntoState(elements.url.value || '');
             renderParams();
+            updateRunButtonState();
         });
 
         elements.addParamRow.addEventListener('click', () => {
