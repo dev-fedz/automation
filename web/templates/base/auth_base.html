@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>{% block title %}{% block auth_title %}Auth{% endblock %} - App{% endblock %}</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+    {% block head_extra %}{% endblock %}
+</head>
+<body class="auth-layout">
+    <main class="auth-main">
+        {% block auth_outer %}{% block auth_content %}{% endblock %}{% endblock %}
+    </main>
+    {% block body_js %}<script src="{% static 'js/app.js' %}"></script>{% endblock %}
+</body>
+</html>

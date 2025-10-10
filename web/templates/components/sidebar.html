@@ -1,0 +1,50 @@
+<ul class="sidebar-menu" data-testid="sidebar-menu">
+        <li class="menu-item" data-menu="dashboard"><a href="/" data-testid="menu-dashboard">Dashboard</a></li>
+    <li class="has-submenu">
+                <a href="#" data-testid="menu-user-mgmt">User Management</a>
+        <ul class="submenu">
+                        <li class="menu-item" data-menu="users"><a href="/users/" data-testid="menu-users">Users</a></li>
+                        <li class="menu-item" data-menu="roles"><a href="/roles/" data-testid="menu-roles">Role</a></li>
+        </ul>
+    </li>
+</ul>
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+        // submenu toggle
+        document.querySelectorAll('.sidebar-menu .has-submenu > a').forEach(function(a){
+            a.addEventListener('click', function(e){
+                e.preventDefault();
+                const li = this.parentElement;
+                li.classList.toggle('open');
+            });
+        });
+        const path = window.location.pathname.replace(/\/$/, '');
+        const items = document.querySelectorAll('.sidebar-menu .menu-item');
+        let matched = false;
+        items.forEach(function(li){
+            const link = li.querySelector('a');
+            if(!link) return;
+            const href = link.getAttribute('href').replace(/\/$/, '');
+            if(href && href !== '' && href === path){
+                li.classList.add('active');
+                matched = true;
+                // open & highlight parent submenu if nested
+                const parentSub = li.closest('.has-submenu');
+                if(parentSub) parentSub.classList.add('open','active');
+            }
+        });
+        if(!matched){
+            // default highlight dashboard
+            const dash = document.querySelector('[data-menu="dashboard"]');
+            if(dash) dash.classList.add('active');
+        }
+        // click change active
+        document.querySelectorAll('.sidebar-menu a[href]').forEach(function(a){
+            a.addEventListener('click', function(){
+                items.forEach(li=>li.classList.remove('active'));
+                const li = this.closest('.menu-item');
+                if(li){ li.classList.add('active'); }
+            });
+        });
+});
+</script>

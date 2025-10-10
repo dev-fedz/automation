@@ -1,0 +1,45 @@
+{% extends 'base/base.html' %}
+{% block title %}Users - List{% endblock %}
+{% block content %}
+<div class="page-head users-head">
+  <h1 class="page-title">Users</h1>
+  <a class="btn btn-primary" href="/users/create/" data-testid="user-create-link">New User</a>
+</div>
+<div class="card table-card" data-testid="users-card">
+  <table class="table-modern" data-testid="users-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Name</th>
+        <th>Email</th>
+        <th>Role</th>
+        <th>Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr data-user-id="{{ u.id }}">
+        <td>{{ u.id }}</td>
+        <td><a class="row-link" href="/users/{{ u.id }}/" data-testid="user-name-{{ u.id }}">{{ u.first_name }} {{ u.last_name }}</a></td>
+        <td>{{ u.email }}</td>
+        <td>{% with r=u.groups.first %}{% if r %}{{ r.name }}{% else %}<span class="muted">None</span>{% endif %}{% endwith %}</td>
+        <td>{{ u.get_status_display }}</td>
+        <td class="actions text-center">
+          <div class="action-buttons">
+            <a class="btn-icon edit" title="Edit" href="/users/{{ u.id }}/edit/" data-testid="user-edit-{{ u.id }}">✏</a>
+            <a class="btn-icon delete" title="Delete" href="/users/{{ u.id }}/delete/" data-testid="user-delete-{{ u.id }}">🗑</a>
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="empty" data-testid="users-empty">No users found</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<style>
+.table-modern td.actions .action-buttons{display:flex;align-items:center;justify-content:center;gap:.4rem;}
+.table-modern td.actions{text-align:center;}
+</style>
+{% endblock %}

@@ -1,0 +1,8 @@
+<nav class="navbar">
+    <div class="nav-left">App</div>
+    <div class="nav-right">
+        {% if request.user.is_authenticated %}
+            <span>{{ request.user.email }}</span>
+        {% endif %}
+    </div>
+</nav>

@@ -1,0 +1,51 @@
+{% extends 'base/auth_base.html' %}
+{% block auth_title %}Login{% endblock %}
+{% block auth_content %}
+<div class="auth-center">
+  <div class="login-card">
+    <div class="login-left">
+        <div class="login-brand inline">Automation<span>App</span></div>
+        <h1 class="login-heading">Log In</h1>
+        <p class="login-welcome">Welcome back! Please enter your details</p>
+        <form method="post" id="login-form" class="login-form">{% csrf_token %}
+            <label class="field">
+                <span>Email</span>
+                <input type="email" name="email" autocomplete="email" required>
+            </label>
+            <label class="field">
+                <span>Password</span>
+                <div class="password-wrap">
+                    <input type="password" name="password" autocomplete="current-password" required>
+                    <button type="button" class="pw-toggle" aria-label="Toggle password" onclick="const i=this.previousElementSibling;i.type=i.type==='password'?'text':'password';this.classList.toggle('on');">👁</button>
+                </div>
+            </label>
+            <div class="login-meta">
+                <label class="remember"><input type="checkbox" name="remember"> <span>Remember me</span></label>
+                <a href="#" class="forgot">Forgot password?</a>
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">Log In</button>
+        </form>
+    <p class="signup-hint">Don't have account? <a href="#">Sign up</a></p>
+        <footer class="login-footer">
+            <small>&copy; {{ year|default:2025 }} AutomationApp · <a href="#">Terms</a> · <a href="#">Privacy</a></small>
+        </footer>
+    </div>
+    <div class="login-visual">
+        <div class="scene" aria-hidden="true">
+            <div class="rocket-shell">
+                <div class="window"></div>
+                <div class="fins"></div>
+                <div class="flame-stack">
+                    <div class="flame fx1"></div>
+                    <div class="flame fx2"></div>
+                </div>
+            </div>
+            <!-- Pointy gears (SVG) -->
+        </div>
+    </div>
+  </div>
+</div>
+<script>
+// simple enter submit -> handled by existing JS login logic
+</script>
+{% endblock %}

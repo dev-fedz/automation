@@ -1,0 +1,19 @@
+{% extends 'base/base.html' %}
+{% block title %}User Detail{% endblock %}
+{% block content %}
+<div class="page-head"><h1 class="page-title">User Detail</h1><a class="btn" href="/users/">Back</a></div>
+<div class="card" data-testid="user-detail-card">
+  <h2 style="margin-top:0;">{{ user_obj.first_name }} {{ user_obj.last_name }}</h2>
+  <p><strong>ID:</strong> {{ user_obj.id }}</p>
+  <p><strong>Username:</strong> {{ user_obj.username }}</p>
+  <p><strong>Email:</strong> {{ user_obj.email }}</p>
+  <p><strong>Mobile:</strong> {{ user_obj.mobile_no|default:'-' }}</p>
+  <p><strong>Employee #:</strong> {{ user_obj.employee_no|default:'-' }}</p>
+  <p><strong>Status:</strong> {{ user_obj.get_status_display }}</p>
+  <p><strong>Role:</strong> {% if role_obj %}{{ role_obj.name }}{% else %}-{% endif %}</p>
+  <div class="actions" style="margin-top:1rem;display:flex;gap:.5rem;">
+    <a class="btn btn-primary" href="/users/{{ user_obj.id }}/edit/" data-testid="user-detail-edit-btn">Edit</a>
+    <a class="btn btn-danger" href="/users/{{ user_obj.id }}/delete/" data-testid="user-detail-delete-btn">Delete</a>
+  </div>
+</div>
+{% endblock %}

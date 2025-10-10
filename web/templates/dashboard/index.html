@@ -1,0 +1,97 @@
+{% extends 'base/dashboard_base.html' %}
+{% block dashboard_title %}Overview{% endblock %}
+{% block dashboard_content %}
+<div id="dashboard-root" class="dashboard-sections" data-testid="dashboard-root" data-metrics-version="1">
+	<!-- Row 1: Run overview (primary) + Load snapshot + Environment small card -->
+	<div class="dash-row row-top">
+		<div class="panel panel-run primary" data-testid="panel-run-overview">
+			<div class="panel-header"><h3 class="panel-title" data-testid="panel-run-overview-title">Latest Test Run</h3></div>
+			<ul class="kv compact" data-testid="run-overview-kv">
+				<li><span>Run ID</span><strong data-testid="run-id">RUN-0001</strong></li>
+				<li><span>Started</span><strong data-testid="run-started">--</strong></li>
+				<li><span>Duration</span><strong data-testid="run-duration">--</strong></li>
+				<li><span>Total Cases</span><strong data-testid="run-total">--</strong></li>
+				<li><span>Passed</span><strong data-testid="run-passed">--</strong></li>
+				<li><span>Failed</span><strong data-testid="run-failed">--</strong></li>
+				<li><span>Skipped</span><strong data-testid="run-skipped">--</strong></li>
+				<li><span>Pass Rate</span><strong data-testid="run-passrate">--</strong></li>
+			</ul>
+		</div>
+
+		<div class="panel panel-load" data-testid="panel-load">
+			<div class="panel-header"><h3 class="panel-title" data-testid="panel-load-title">Load Test Snapshot</h3></div>
+			<ul class="kv" data-testid="load-kv">
+				<li><span>Concurrent Users</span><strong data-testid="lt-users">--</strong></li>
+				<li><span>Req/s</span><strong data-testid="lt-rps">--</strong></li>
+				<li><span>P95 Latency</span><strong data-testid="lt-p95">--</strong></li>
+				<li><span>P99 Latency</span><strong data-testid="lt-p99">--</strong></li>
+				<li><span>Error %</span><strong data-testid="lt-errorpct">--</strong></li>
+				<li><span>Throughput</span><strong data-testid="lt-throughput">--</strong></li>
+			</ul>
+		</div>
+
+		<div class="panel panel-env small" data-testid="panel-env">
+			<div class="panel-header"><h3 class="panel-title" data-testid="panel-env-title">Environment</h3></div>
+			<ul class="kv tight" data-testid="env-kv">
+				<li><span>Branch</span><strong data-testid="env-branch">main</strong></li>
+				<li><span>Commit</span><strong data-testid="env-commit">--</strong></li>
+				<li><span>Build</span><strong data-testid="env-buildtime">--</strong></li>
+				<li><span>Version</span><strong data-testid="env-version">1.0.0</strong></li>
+			</ul>
+		</div>
+	</div>
+
+	<!-- Row 2: Performance full width -->
+	<div class="dash-row">
+		<div class="panel panel-performance full" data-testid="panel-performance">
+			<div class="panel-header"><h3 class="panel-title" data-testid="panel-performance-title">Performance Metrics</h3></div>
+			<table class="mini" data-testid="performance-table">
+				<thead><tr><th>Endpoint</th><th>Req/s</th><th>P95</th><th>P99</th><th>Error%</th></tr></thead>
+				<tbody data-testid="performance-tbody">
+					<tr data-testid="performance-row-template" class="template" hidden>
+						<td data-testid="perf-endpoint">/api/auth/login/</td>
+						<td data-testid="perf-rps">--</td>
+						<td data-testid="perf-p95">--</td>
+						<td data-testid="perf-p99">--</td>
+						<td data-testid="perf-error">--</td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+	</div>
+
+	<!-- Row 3: Failures (2/3) + Trend (1/3) -->
+	<div class="dash-row">
+		<div class="panel panel-failures two-thirds" data-testid="panel-failures">
+			<div class="panel-header"><h3 class="panel-title" data-testid="panel-failures-title">Top Failing Tests</h3></div>
+			<table class="mini" data-testid="failures-table">
+				<thead><tr><th>Test</th><th>Fails</th><th>Last Error</th></tr></thead>
+				<tbody data-testid="failures-tbody">
+					<tr data-testid="failure-row-template" class="template" hidden>
+						<td data-testid="failure-name">test_example</td>
+						<td data-testid="failure-count">0</td>
+						<td data-testid="failure-last">AssertionError</td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+		<div class="panel panel-trend one-third" data-testid="panel-trend">
+			<div class="panel-header"><h3 class="panel-title" data-testid="panel-trend-title">Pass Rate Trend</h3></div>
+			<div class="spark large" data-testid="trend-passrate">▁▂▃▄▅▆█</div>
+			<div class="small-note" data-testid="trend-passrate-note">7-day rolling pass rate progression</div>
+		</div>
+	</div>
+
+	<!-- Row 4: Queue / Workers -->
+	<div class="dash-row">
+		<div class="panel panel-queue medium" data-testid="panel-queue">
+			<div class="panel-header"><h3 class="panel-title" data-testid="panel-queue-title">Queue / Workers</h3></div>
+			<ul class="kv" data-testid="queue-kv">
+				<li><span>Pending Jobs</span><strong data-testid="queue-pending">--</strong></li>
+				<li><span>Active Workers</span><strong data-testid="queue-active">--</strong></li>
+				<li><span>Utilization</span><strong data-testid="queue-util">--</strong></li>
+			</ul>
+		</div>
+	</div>
+</div>
+{% endblock %}

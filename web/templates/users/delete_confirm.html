@@ -1,0 +1,15 @@
+{% extends 'base/base.html' %}
+{% block title %}Delete User{% endblock %}
+{% block content %}
+<div class="card" style="max-width:560px;margin:0 auto;" data-testid="user-delete-card">
+  <h1 class="page-title">Delete User</h1>
+  <p>Are you sure you want to delete <strong>{{ user_obj.first_name }} {{ user_obj.last_name }}</strong> ({{ user_obj.email }})?</p>
+  <form method="post">
+    {% csrf_token %}
+    <div class="form-actions" style="display:flex;gap:.5rem;justify-content:flex-end;">
+      <button type="submit" class="btn btn-danger" data-testid="user-confirm-delete-btn">Delete</button>
+      <a href="/users/" class="btn" data-testid="user-cancel-delete-btn">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

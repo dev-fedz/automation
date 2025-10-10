@@ -1,0 +1,17 @@
+django>=3.2
+requests
+djangorestframework
+django-rest-knox
+dj-rest-auth
+django-js-reverse
+django-cors-headers
+celery
+psycopg2-binary
+dj-database-url
+django-environ
+django-filter
+channels==4.0.0
+channels-redis==4.1.0
+daphne==4.1.0
+redis==5.0.3
+fakeredis==2.23.2

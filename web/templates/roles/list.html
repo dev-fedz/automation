@@ -1,0 +1,157 @@
+{% extends 'base/base.html' %}
+{% block title %}Roles - List{% endblock %}
+{% block content %}
+<div class="page-head roles-head">
+  <h1 class="page-title">Roles</h1>
+  <a class="btn btn-primary" href="/roles/create/" data-testid="role-create-link">New Role</a>
+</div>
+<div class="card table-card" data-testid="roles-card">
+  <table class="table-modern" data-testid="roles-table">
+    <thead>
+      <tr>
+        <th class="col-id">ID</th>
+        <th class="col-name">Name</th>
+        <th class="col-modules">Modules</th>
+  <th class="col-actions">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for role in roles %}
+      <tr data-role-id="{{ role.id }}">
+        <td data-label="ID">{{ role.id }}</td>
+        <td data-label="Name"><a class="row-link" href="/roles/{{ role.id }}/" data-testid="role-name-{{ role.id }}">{{ role.name }}</a></td>
+  <td data-label="Modules" class="mono modules-cell">
+          {% for m in role.modules.all %}
+            <span class="tag">{{ m.name }}</span>{% if not forloop.last %}, {% endif %}
+          {% empty %}<span class="muted">None</span>{% endfor %}
+        </td>
+        <td data-label="Actions" class="actions text-center">
+          <div class="action-buttons">
+            <button type="button" class="btn-icon view" data-view-role="{{ role.id }}" title="View" data-testid="role-view-{{ role.id }}">👁</button>
+            <a class="btn-icon edit" title="Edit" href="/roles/{{ role.id }}/edit/" data-testid="role-edit-{{ role.id }}">✏</a>
+            <button type="button" class="btn-icon delete" data-delete-role="{{ role.id }}" title="Delete" data-testid="role-delete-{{ role.id }}">🗑</button>
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr class="empty-row"><td colspan="4" class="empty" data-testid="roles-empty">No roles found</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% block body_js %}{{ block.super }}
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  const modal = ensureModal();
+  function getCsrfToken(){
+    const name = 'csrftoken=';
+    const parts = document.cookie.split(';');
+    for(let c of parts){
+      c = c.trim();
+      if(c.startsWith(name)) return decodeURIComponent(c.substring(name.length));
+    }
+    // fallback: try meta tag if added later
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.getAttribute('content'):'';
+  }
+  function ensureModal(){
+    let existing = document.getElementById('generic-modal');
+    if(existing) return existing;
+    const wrapper = document.createElement('div');
+    // footer removed per requirement (no extra Close button)
+    wrapper.innerHTML = `\n<div class="modal" id="generic-modal" hidden>\n  <div class="modal-dialog">\n    <div class="modal-header"><h4 id="modal-title">Role</h4></div>\n    <div class="modal-body" id="modal-body"></div>\n  </div>\n</div>`;
+    document.body.appendChild(wrapper.firstElementChild);
+    return document.getElementById('generic-modal');
+  }
+  function openModal(title, html){
+    modal.querySelector('#modal-title').textContent = title;
+    modal.querySelector('#modal-body').innerHTML = html;
+    modal.hidden = false;
+    document.body.classList.add('modal-open');
+  }
+  function closeModal(){
+    modal.hidden = true; document.body.classList.remove('modal-open');
+  }
+  modal.addEventListener('click', e=>{ if(e.target.hasAttribute('data-close') || e.target === modal) closeModal(); });
+
+  // View buttons
+  document.querySelectorAll('[data-view-role]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.getAttribute('data-view-role');
+      try {
+  const resp = await fetch(`/api/accounts/roles/${id}/`);
+        if(!resp.ok) throw new Error('Failed');
+        const data = await resp.json();
+        let permsHtml = '';
+        if(data.role_modules){
+          permsHtml = data.role_modules.map(rm=>`<div class="mod-block"><strong>${rm.module.name}</strong>${rm.permissions && rm.permissions.length?'<ul>'+rm.permissions.map(p=>`<li>${p.codename}</li>`).join('')+'</ul>':''}</div>`).join('');
+        } else if(data.modules){
+          permsHtml = data.modules.map(m=>`<div class="mod-block"><strong>${m.name}</strong></div>`).join('');
+        }
+        openModal('Role: '+data.name, `<div><p><strong>ID:</strong> ${data.id}</p><div class="mods">${permsHtml || '<em>No modules / permissions</em>'}</div></div>`);
+      } catch(e){
+        openModal('Error', '<p>Could not load role details.</p>');
+      }
+    });
+  });
+
+  // Delete buttons (improved modal layout)
+  document.querySelectorAll('[data-delete-role]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-delete-role');
+      openModal('Delete Role', `
+        <form id="delete-role-form" class="confirm-form">
+          <p class="confirm-text">Are you sure you want to delete this role?</p>
+          <div class="confirm-buttons" role="group">
+            <button type="submit" class="btn btn-danger" data-testid="confirm-delete-btn">Delete</button>
+            <button type="button" data-close class="btn btn-secondary" data-testid="cancel-delete-btn">Cancel</button>
+          </div>
+        </form>
+      `);
+      const form = document.getElementById('delete-role-form');
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+          const resp = await fetch(`/api/accounts/roles/${id}/delete/`, { method: 'DELETE', headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRFToken': getCsrfToken() } });
+          if (resp.status === 400) {
+            const data = await resp.json();
+            form.innerHTML = `<p class="error">${data.error || 'Cannot delete role with related records.'}</p><div class="confirm-buttons"><button type="button" data-close class="btn btn-secondary">Close</button></div>`;
+            return;
+          }
+            if (!resp.ok) { throw new Error('Delete failed'); }
+          const row = document.querySelector(`tr[data-role-id='${id}']`);
+          if (row) row.remove();
+          closeModal();
+        } catch (err) {
+          form.innerHTML = `<p class="error">Failed to delete role.</p><div class="confirm-buttons"><button type="button" data-close class="btn btn-secondary">Close</button></div>`;
+        }
+      }, { once: true });
+    });
+  });
+});
+</script>
+<style>
+.table-modern td.actions .action-buttons{display:flex;align-items:center;justify-content:center;gap:.4rem;}
+.table-modern td.actions{text-align:center;}
+.btn-icon{background:transparent;border:0;cursor:pointer;font-size:1.1rem;line-height:1;}
+.btn-icon.view{color:#2d6cdf;}
+.btn-icon.delete{color:#fff;background:#c62828;padding:.25rem .45rem;border-radius:4px;}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:1000;}
+.modal[hidden]{display:none;}
+.modal-dialog{background:#fff;padding:1rem 1.25rem;max-width:520px;width:100%;border-radius:6px;box-shadow:0 4px 18px rgba(0,0,0,.2);}
+.modal-header h4{margin:0 0 .5rem;font-size:1.25rem;}
+.modal-body{max-height:55vh;overflow:auto;}
+.mod-block{padding:.4rem .3rem;border-bottom:1px solid #eee;}
+.mod-block ul{margin:.25rem 0 .25rem 1rem;padding:0;font-size:.85rem;}
+.mod-block li{list-style:disc;}
+.form-actions{display:flex;gap:.5rem;margin-top:.75rem;}
+.confirm-form .confirm-buttons{display:flex;align-items:center;justify-content:flex-end;gap:.75rem;margin-top:.75rem;}
+.confirm-form .btn{min-width:90px;}
+.confirm-text{margin:0 0 .75rem;font-size:.95rem;}
+.btn-danger{background:#d32f2f;color:#fff;border:0;padding:.5rem .9rem;border-radius:4px;}
+.btn-secondary{background:#1976d2;color:#fff;border:0;padding:.5rem .9rem;border-radius:4px;}
+.error{color:#c62828;font-weight:600;}
+body.modal-open{overflow:hidden;}
+</style>
+{% endblock %}
+{% endblock %}

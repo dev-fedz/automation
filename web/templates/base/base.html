@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>{% block title %}App{% endblock %}</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    {% load static %}
+    {% block head_css %}<link rel="stylesheet" href="{% static 'css/app.css' %}">{% endblock %}
+    {% block head_js %}{% endblock %}
+</head>
+<body class="layout dashboard-layout">
+    <div class="dash-shell">
+    <aside class="dash-sidebar" id="sidebar" aria-label="Primary sidebar navigation">
+            <div class="sidebar-profile">
+                <div class="avatar"></div>
+                <div class="profile-name">{{ request.user.first_name|default:'User' }} {{ request.user.last_name }}</div>
+            </div>
+            {% include 'components/sidebar.html' %}
+        </aside>
+    <div class="sidebar-overlay" data-testid="sidebar-overlay" aria-hidden="true"></div>
+        <div class="dash-main">
+            <header class="dash-header">
+                <div class="nav-left">
+            <button class="menu-toggle" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="true">☰</button>
+                    <nav class="breadcrumb"><span>Home</span> <span class="sep">›</span> <span>Dashboard</span></nav>
+                </div>
+                <div class="brand"></div>
+                <div class="nav-right">
+                    <div class="icon-group">
+                        <div class="icon-badge" title="Notifications">🔔<span class="badge">7</span></div>
+                        <div class="icon-badge" title="Messages">✉</div>
+                    </div>
+                    <div class="range-buttons">
+                        <button class="range active">Today</button>
+                        <button class="range">7 Days</button>
+                        <button class="range">30 Days</button>
+                    </div>
+                    <div class="user-box mini">
+                        <div class="user-meta">
+                            <div class="user-name">{{ request.user.first_name }} {{ request.user.last_name }}</div>
+                            <div class="user-email">{{ request.user.email }}</div>
+                        </div>
+                    </div>
+                </div>
+            </header>
+            <main class="dash-content">
+                {% if request.resolver_match and request.resolver_match.url_name == 'dashboard' %}
+                <div class="metric-tiles" data-testid="automation-metrics-tiles">
+                    <div class="metric-tile" data-testid="tile-suites"><span class="label">Suites</span><span class="val" data-testid="tile-suites-val">42</span></div>
+                    <div class="metric-tile" data-testid="tile-passed"><span class="label">Passed</span><span class="val" data-testid="tile-passed-val">1180</span></div>
+                    <div class="metric-tile" data-testid="tile-failed"><span class="label">Failed</span><span class="val" data-testid="tile-failed-val">23</span></div>
+                    <div class="metric-tile" data-testid="tile-passrate"><span class="label">Pass Rate</span><span class="val" data-testid="tile-passrate-val">97%</span></div>
+                </div>
+                {% endif %}
+                {% include 'components/alerts.html' %}
+                {% block content %}{% endblock %}
+            </main>
+        </div>
+    </div>
+    {% block footer %}{% endblock %}
+    {% block body_js %}<script src="{% static 'js/app.js' %}"></script>{% endblock %}
+</body>
+</html>

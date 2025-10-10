@@ -1,0 +1,93 @@
+{% extends 'base/base.html' %}
+{% block title %}{{ form_title }} Role{% endblock %}
+{% block content %}
+<div class="card role-form-card" data-testid="role-form-card">
+  <div class="page-head"><h1 class="page-title">{{ form_title }} Role</h1><a class="btn" href="/roles/" data-testid="back-roles">Back</a></div>
+  <form method="post" class="role-form" data-testid="role-form">
+  {% csrf_token %}
+  <div class="form-row">
+    <label>Name</label>
+    <input class="short" type="text" name="name" maxlength="60" value="{{ role.name|default:'' }}" required data-testid="role-name-input" placeholder="e.g. QA Lead" />
+  </div>
+  <div class="form-row modules-field">
+    <label>Modules & Permissions</label>
+    <div class="modules-groups" data-testid="modules-picker">
+      {% regroup modules by category as category_list %}
+      {% for cat in category_list %}
+      <div class="module-group" data-category="{{ cat.grouper }}">
+        <div class="group-head">
+          <h4>{{ cat.grouper }}</h4>
+          <button type="button" class="group-toggle" aria-expanded="true">−</button>
+        </div>
+        <div class="group-body">
+          {% for m in cat.list %}
+          <div class="mod-item">
+            <div class="mod-header">
+              <label class="mod-check">
+                <input type="checkbox" name="modules" value="{{ m.id }}" {% if m.id in selected_module_ids %}checked{% endif %}/> <span class="mod-name">{{ m.name }}</span>
+              </label>
+              {% if m.permissions %}<button type="button" class="perm-toggle" aria-label="Toggle permissions for {{ m.name }}">⚙</button>{% endif %}
+            </div>
+            {% if m.permissions %}
+            <div class="perm-box" data-perms>
+              {% for perm in m.permissions %}
+              <label class="perm"><input type="checkbox" name="perm_{{ m.id }}" value="{{ perm.permission.id }}" {% if perm.permission.id in selected_permission_ids %}checked{% endif %}/> <span>{{ perm.permission.codename }}</span></label>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit" data-testid="role-save-btn">Save</button>
+      {% if role.id %}<a class="btn btn-danger" href="/roles/{{ role.id }}/delete/" data-testid="role-delete-btn">Delete</a>{% endif %}
+    </div>
+  </form>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  document.querySelectorAll('.group-toggle').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const body = btn.closest('.module-group').querySelector('.group-body');
+      const expanded = btn.getAttribute('aria-expanded') === 'true';
+      body.style.display = expanded ? 'none':'grid';
+      btn.textContent = expanded ? '+' : '−';
+      btn.setAttribute('aria-expanded', expanded ? 'false':'true');
+    });
+  });
+  document.querySelectorAll('.perm-toggle').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const box = btn.closest('.mod-item').querySelector('[data-perms]');
+      if(!box) return;
+      const hidden = box.classList.toggle('collapsed');
+      if(hidden){ box.style.maxHeight='0'; box.style.overflow='hidden'; }
+      else { box.style.maxHeight='500px'; box.style.overflow='visible'; }
+    });
+  });
+  // parent module checkbox controls all its permission checkboxes
+  document.querySelectorAll('.mod-item .mod-check input[type="checkbox"]').forEach(parentCb=>{
+    parentCb.addEventListener('change',()=>{
+      const modItem = parentCb.closest('.mod-item');
+      if(!modItem) return;
+      const perms = modItem.querySelectorAll('[data-perms] input[type="checkbox"]');
+      perms.forEach(p=>{ p.checked = parentCb.checked; });
+    });
+  });
+  // if all perms unchecked manually, uncheck parent; if any checked, ensure parent checked
+  document.querySelectorAll('.mod-item [data-perms] input[type="checkbox"]').forEach(childCb=>{
+    childCb.addEventListener('change',()=>{
+      const modItem = childCb.closest('.mod-item');
+      if(!modItem) return;
+      const parent = modItem.querySelector('.mod-check input[type="checkbox"]');
+      const allPerms = modItem.querySelectorAll('[data-perms] input[type="checkbox"]');
+      const anyChecked = Array.from(allPerms).some(p=>p.checked);
+      parent.checked = anyChecked; // if none selected, parent becomes unchecked
+    });
+  });
+});
+</script>
+{% endblock %}

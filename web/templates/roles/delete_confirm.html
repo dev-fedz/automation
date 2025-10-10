@@ -1,0 +1,10 @@
+{% extends 'base/base.html' %}
+{% block title %}Delete Role{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Delete Role</h1><a class="btn" href="/roles/" data-testid="back-roles">Cancel</a></div>
+<form method="post" data-testid="role-delete-form">
+  {% csrf_token %}
+  <p>Are you sure you want to delete role <strong>{{ role.name }}</strong>? This action cannot be undone.</p>
+  <button class="btn btn-danger" type="submit" data-testid="role-delete-confirm-btn">Yes, Delete</button>
+</form>
+{% endblock %}
