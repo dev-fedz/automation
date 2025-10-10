@@ -1,8 +1,7 @@
 """ASGI entrypoint for Django Channels.
 
-Relies on DJANGO_SETTINGS_MODULE being set to the desired microservice
-settings module before import (e.g. config.settings_core or
-config.settings_accounts).
+Relies on DJANGO_SETTINGS_MODULE (default ``config.settings``) and the optional
+``SERVICE`` environment variable to choose the appropriate service profile.
 """
 import os
 

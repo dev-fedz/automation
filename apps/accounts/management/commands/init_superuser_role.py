@@ -12,6 +12,6 @@ class Command(BaseCommand):
 		role_modules = []
 		for module in Module.objects.all():
 			perms = [mp.permission for mp in module.permissions.all() if mp.permission]
-			role_modules.append({'module': module, 'permissions': perms})
+			role_modules.append({'module': module.pk, 'permissions': perms})
 		role_update(role=role, data={'name': role_name, 'role_modules': role_modules})
 		self.stdout.write(self.style.SUCCESS(f'Ensured role {role_name}'))

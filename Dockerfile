@@ -1,35 +1,20 @@
-# Python slim base
-FROM python:3.11-slim
+FROM python:3.10-alpine
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    POETRY_VIRTUALENVS_CREATE=false
+ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# System deps (psycopg2, pillow build libs minimal)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+COPY requirements.txt /app
+RUN pip install -r requirements.txt
 
-COPY automation_app/requirements.txt /tmp/requirements.txt
-RUN pip install --upgrade pip && pip install -r /tmp/requirements.txt
+COPY . /app
+RUN python manage.py collectstatic --no-input
 
-# Copy project (only automation_app context)
-COPY automation_app /app
-COPY automation_app/docker-entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh \
-    && useradd -m appuser \
-    && chown -R appuser /app /entrypoint.sh
+COPY docker-entrypoint.sh /usr/local/bin
 
-USER appuser
+RUN chmod 777 /usr/local/bin/docker-entrypoint.sh \
+    && ln -s /usr/local/bin/docker-entrypoint.sh /
 
-EXPOSE 8000 8001 8002
+ENTRYPOINT ["docker-entrypoint.sh"]
 
-ENV DJANGO_SETTINGS_MODULE=config.settings_accounts
-
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["daphne", "-b", "0.0.0.0", "-p", "8001", "config.asgi:application"]
+CMD ["runprod"]
