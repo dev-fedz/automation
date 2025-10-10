@@ -1,0 +1,380 @@
+{% extends 'base/dashboard_base.html' %}
+{% load static %}
+
+{% block head_css %}
+{{ block.super }}
+{% endblock %}
+
+{% block dashboard_title %}API Tester{% endblock %}
+
+{% block dashboard_content %}
+<div id="api-tester-app"
+     class="api-tester"
+     data-collections-url="{% url 'core:core-collections-list' %}"
+     data-environments-url="{% url 'core:core-environments-list' %}"
+    data-run-url-template="{% url 'core:core-collections-run' pk=0 %}"
+    data-execute-url="{% url 'core:core-request-execute' %}">
+    <section class="api-tester__panel api-tester__collections">
+        <header>
+            <h2>Collections</h2>
+            <input type="search" id="collection-search" placeholder="Search collections" aria-label="Search collections" />
+        </header>
+        <div class="api-tester__collections-list" aria-live="polite"></div>
+    </section>
+    <section class="api-tester__panel api-tester__builder">
+        <header>
+            <h2>Request Builder</h2>
+            <div class="builder-meta" id="builder-meta">Select a request to preview details.</div>
+        </header>
+        <form id="api-request-form" class="api-tester__form" autocomplete="off">
+            <div class="form-grid form-grid--request">
+                <div class="form-field">
+                    <label for="request-method">Method</label>
+                    <select id="request-method" name="method">
+                        <option>GET</option>
+                        <option>POST</option>
+                        <option>PUT</option>
+                        <option>PATCH</option>
+                        <option>DELETE</option>
+                        <option>HEAD</option>
+                        <option>OPTIONS</option>
+                    </select>
+                </div>
+                <div class="form-field form-field--wide">
+                    <label for="request-url">URL</label>
+                    <input type="url" id="request-url" name="url" placeholder="https://api.example.com/path" required />
+                </div>
+                <div class="form-field form-field--actions">
+                    <button type="submit" id="run-request" class="btn btn-primary" disabled>SEND</button>
+                </div>
+            </div>
+
+            <div class="form-grid form-grid--meta">
+                <div class="form-field">
+                    <label for="environment-select">Environment</label>
+                    <select id="environment-select" name="environment">
+                        <option value="">No environment</option>
+                    </select>
+                </div>
+            </div>
+
+        <nav class="builder-tabs" role="tablist" aria-label="Request builder sections">
+        <button type="button"
+            class="builder-tab is-active"
+            data-tab="params"
+            role="tab"
+            aria-selected="true"
+            aria-controls="builder-panel-params">Params</button>
+        <button type="button"
+            class="builder-tab"
+            data-tab="authorization"
+            role="tab"
+            aria-selected="false"
+            aria-controls="builder-panel-authorization"
+            tabindex="-1">Authorization</button>
+        <button type="button"
+            class="builder-tab"
+            data-tab="headers"
+            role="tab"
+            aria-selected="false"
+            aria-controls="builder-panel-headers"
+            tabindex="-1">Headers</button>
+        <button type="button"
+            class="builder-tab"
+            data-tab="body"
+            role="tab"
+            aria-selected="false"
+            aria-controls="builder-panel-body"
+            tabindex="-1">Body</button>
+        <button type="button"
+            class="builder-tab"
+            data-tab="scripts"
+            role="tab"
+            aria-selected="false"
+            aria-controls="builder-panel-scripts"
+            tabindex="-1">Scripts</button>
+        </nav>
+
+        <section class="builder-section"
+             id="builder-panel-params"
+             data-tab-panel="params"
+             aria-labelledby="params-heading"
+             role="tabpanel"
+             aria-hidden="false">
+                <header class="builder-section__head builder-section__head--right">
+                    <button type="button" id="add-param-row" class="btn btn-tertiary">Add Param</button>
+                </header>
+                <div class="kv-table" role="table" aria-label="Query parameters">
+                    <div class="kv-table__scroll">
+                        <table>
+                            <colgroup>
+                                <col class="kv-col-key">
+                                <col class="kv-col-value">
+                                <col class="kv-col-description">
+                                <col class="kv-col-actions">
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Key</th>
+                                    <th scope="col">Value</th>
+                                    <th scope="col">Description</th>
+                                    <th scope="col" aria-hidden="true"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="params-rows"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <p class="builder-hint">Params are appended to the URL automatically.</p>
+            </section>
+
+            <section class="builder-section"
+                     id="builder-panel-authorization"
+                     data-tab-panel="authorization"
+                     aria-labelledby="auth-heading"
+                     role="tabpanel"
+                     aria-hidden="true"
+                     hidden>
+                <div class="auth-controls">
+                    <label for="auth-type">Auth Type</label>
+                    <select id="auth-type" name="auth-type">
+                        <option value="none">No Auth</option>
+                        <option value="basic">Basic Auth</option>
+                        <option value="bearer">Bearer Token</option>
+                    </select>
+                </div>
+                <div class="auth-fields">
+                    <div class="auth-none" data-auth-section="none">
+                        <p class="builder-hint">No authorization header will be sent.</p>
+                    </div>
+                    <div class="auth-basic" data-auth-section="basic" hidden aria-hidden="true">
+                        <div class="auth-basic__field form-field">
+                            <label for="auth-basic-username">Username</label>
+                            <input type="text" id="auth-basic-username" autocomplete="off" />
+                        </div>
+                        <div class="auth-basic__field form-field">
+                            <label for="auth-basic-password">Password</label>
+                            <input type="password" id="auth-basic-password" autocomplete="new-password" />
+                        </div>
+                    </div>
+                    <div class="auth-bearer" data-auth-section="bearer" hidden aria-hidden="true">
+                        <div class="form-field">
+                            <label for="auth-bearer-token">Bearer Token</label>
+                            <textarea id="auth-bearer-token" rows="2" placeholder="Paste access token"></textarea>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="builder-section"
+                     id="builder-panel-headers"
+                     data-tab-panel="headers"
+                     aria-labelledby="headers-heading"
+                     role="tabpanel"
+                     aria-hidden="true"
+                     hidden>
+                <header class="builder-section__head builder-section__head--right">
+                    <button type="button" id="add-header-row" class="btn btn-tertiary">Add Header</button>
+                </header>
+                <div class="kv-table" role="table" aria-label="Request headers">
+                    <div class="kv-table__scroll">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Key</th>
+                                    <th scope="col">Value</th>
+                                    <th scope="col" aria-hidden="true"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="headers-rows"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <section class="builder-section"
+                     id="builder-panel-body"
+                     data-tab-panel="body"
+                     aria-labelledby="body-heading"
+                     role="tabpanel"
+                     aria-hidden="true"
+                     hidden>
+                <div class="body-mode-list" role="radiogroup" aria-label="Body type">
+                    <label><input type="radio" name="body-mode" value="none" checked /> None</label>
+                    <label><input type="radio" name="body-mode" value="form-data" /> form-data</label>
+                    <label><input type="radio" name="body-mode" value="urlencoded" /> x-www-form-urlencoded</label>
+                    <label><input type="radio" name="body-mode" value="raw" /> raw</label>
+                    <label><input type="radio" name="body-mode" value="binary" /> binary</label>
+                </div>
+                <div class="body-panel" data-body-panel="raw">
+                    <div class="form-field">
+                        <label for="body-raw-type">Raw Type</label>
+                        <select id="body-raw-type" name="body-raw-type">
+                            <option value="text">Text</option>
+                            <option value="javascript">JavaScript</option>
+                            <option value="json" selected>JSON</option>
+                            <option value="html">HTML</option>
+                            <option value="xml">XML</option>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label id="body-raw-editor-label">Body</label>
+                        <div id="body-raw-editor" class="code-editor" aria-label="Raw body editor" aria-labelledby="body-raw-editor-label"></div>
+                    </div>
+                </div>
+                <div class="body-panel" data-body-panel="form-data" hidden>
+                    <div class="builder-section__head builder-section__head--sub builder-section__head--right">
+                        <button type="button" id="add-body-form-row" class="btn btn-tertiary">Add Field</button>
+                    </div>
+                    <div class="kv-table">
+                        <div class="kv-table__scroll">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Key</th>
+                                        <th scope="col">Type</th>
+                                        <th scope="col">Value</th>
+                                        <th scope="col" aria-hidden="true"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="body-form-rows"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="body-panel" data-body-panel="urlencoded" hidden>
+                    <div class="builder-section__head builder-section__head--sub builder-section__head--right">
+                        <button type="button" id="add-body-urlencoded-row" class="btn btn-tertiary">Add Field</button>
+                    </div>
+                    <div class="kv-table">
+                        <div class="kv-table__scroll">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Key</th>
+                                        <th scope="col">Value</th>
+                                        <th scope="col" aria-hidden="true"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="body-urlencoded-rows"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="body-panel" data-body-panel="binary" hidden>
+                    <div class="form-field">
+                        <label for="body-binary-input">Binary File</label>
+                        <input type="file" id="body-binary-input" />
+                        <p id="body-binary-info" class="builder-hint">No file selected.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="builder-section"
+                     id="builder-panel-scripts"
+                     data-tab-panel="scripts"
+                     aria-labelledby="scripts-heading"
+                     role="tabpanel"
+                     aria-hidden="true"
+                     hidden>
+                <div class="scripts-wrapper">
+                    <div class="scripts-tabs" role="tablist" aria-label="Script editors">
+            <button type="button"
+                class="scripts-tab is-active"
+                id="scripts-tab-pre"
+                data-script-tab="pre"
+                                role="tab"
+                                aria-selected="true"
+                                aria-controls="scripts-panel-pre">
+                            Pre-request
+                        </button>
+                        <button type="button"
+                                class="scripts-tab"
+                id="scripts-tab-post"
+                                data-script-tab="post"
+                                role="tab"
+                                aria-selected="false"
+                                aria-controls="scripts-panel-post"
+                                tabindex="-1">
+                            Post-request
+                        </button>
+                    </div>
+                    <div class="scripts-panels">
+                    <div class="scripts-panel"
+                             id="scripts-panel-pre"
+                             data-script-panel="pre"
+                             role="tabpanel"
+                             aria-labelledby="scripts-tab-pre"
+                        aria-hidden="false">
+                            <span id="scripts-pre-label" class="sr-only">Pre-request Script</span>
+                            <div id="script-pre-editor"
+                                 class="code-editor script-editor is-empty"
+                                 data-script-editor="pre"
+                                 data-placeholder="// Runs before the request"
+                                 role="region"
+                                 aria-labelledby="scripts-pre-label"></div>
+                        </div>
+                        <div class="scripts-panel"
+                             id="scripts-panel-post"
+                             data-script-panel="post"
+                             role="tabpanel"
+                             aria-labelledby="scripts-tab-post"
+                             aria-hidden="true"
+                             hidden>
+                            <span id="scripts-post-label" class="sr-only">Post-request Script</span>
+                            <div id="script-post-editor"
+                                 class="code-editor script-editor is-empty"
+                                 data-script-editor="post"
+                                 data-placeholder="// Runs after the response"
+                                 role="region"
+                                 aria-labelledby="scripts-post-label"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </form>
+    </section>
+    <section class="api-tester__panel api-tester__response" aria-live="polite">
+        <header>
+            <h2>Response</h2>
+            <div id="response-summary" class="response-summary">No request executed yet.</div>
+        </header>
+        <div class="response-body">
+            <div class="response-section">
+                <h3>Headers</h3>
+                <pre id="response-headers" class="response-pre">{}</pre>
+            </div>
+            <div class="response-section">
+                <h3>Body</h3>
+                <pre id="response-body" class="response-pre">{}</pre>
+            </div>
+            <div class="response-section">
+                <h3>Assertions</h3>
+                <div id="response-assertions" class="assertions-list"></div>
+            </div>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block body_js %}
+{{ block.super }}
+<script>
+    window.require = {
+        paths: {
+            vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs',
+        },
+    };
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js" integrity="sha512-ZG31AN9z/CQD1YDDAK4RUAvogwbJHv6bHrumrnMLzdCrVu4HeAqrUX7Jsal/cbUwXGfaMUNmQU04tQ8XXl5Znw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+    window.MonacoEnvironment = {
+        getWorkerUrl: function () {
+            const base = 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/';
+            const script = `self.MonacoEnvironment={baseUrl:"${base}"};importScripts("${base}vs/base/worker/workerMain.js");`;
+            return `data:text/javascript;charset=utf-8,${encodeURIComponent(script)}`;
+        },
+    };
+</script>
+<script src="{% static 'js/api_tester.js' %}"></script>
+{% endblock %}

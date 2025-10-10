@@ -71,6 +71,7 @@ urlpatterns = [
 	# Preserve old /dashboard/ URL as a redirect for existing links/bookmarks
 	path('dashboard/', RedirectView.as_view(pattern_name='dashboard', permanent=False), name='dashboard_redirect'),
 	path('logout/', logout_view, name='logout'),
+	path('automation/api-tester/', app_views.api_tester_page, name='api-tester'),
 	path('healthz/', healthz, name='healthz'),
 	path('healthz', healthz),  # fallback no slash
 	path('api/metrics/', metrics_api, name='metrics'),
