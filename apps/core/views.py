@@ -9,6 +9,8 @@ import binascii
 import io
 import time
 
+import json
+
 import requests
 
 from django.contrib.auth.decorators import login_required
@@ -69,6 +71,79 @@ class ApiCollectionViewSet(viewsets.ModelViewSet):
         )
         serializer = serializers.ApiRunSerializer(run, context=self.get_serializer_context())
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"], url_path="import-postman")
+    def import_postman(self, request):
+        file_obj = request.FILES.get("file")
+        raw_payload: Any = None
+
+        if file_obj is not None:
+            try:
+                raw_text = file_obj.read().decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValidationError({"file": "File must be UTF-8 encoded JSON."}) from exc
+            try:
+                raw_payload = json.loads(raw_text)
+            except json.JSONDecodeError as exc:
+                raise ValidationError({"file": "Invalid JSON file."}) from exc
+        else:
+            payload = request.data.get("collection")
+            if isinstance(payload, (dict, list)):
+                raw_payload = payload
+            elif isinstance(payload, str) and payload.strip():
+                try:
+                    raw_payload = json.loads(payload)
+                except json.JSONDecodeError as exc:
+                    raise ValidationError({"collection": "Invalid JSON payload."}) from exc
+
+        if raw_payload is None:
+            raise ValidationError({"collection": "Postman collection JSON is required."})
+        if not isinstance(raw_payload, dict):
+            raise ValidationError({"collection": "Collection must be a JSON object."})
+
+        try:
+            collection = services.import_postman_collection(raw_payload)
+        except ValueError as exc:
+            raise ValidationError({"collection": str(exc)}) from exc
+
+        serializer = self.get_serializer(collection)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class ApiRequestViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.ApiRequestSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = models.ApiRequest.objects.select_related("collection").prefetch_related("assertions").order_by("order", "id")
+        collection_id = self.request.query_params.get("collection")
+        if collection_id:
+            queryset = queryset.filter(collection_id=collection_id)
+        return queryset
+
+
+class ApiCollectionDirectoryViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.ApiCollectionDirectorySerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = models.ApiCollectionDirectory.objects.select_related("collection", "parent").prefetch_related("requests").order_by("parent_id", "order", "id")
+        collection_id = self.request.query_params.get("collection")
+        if collection_id:
+            queryset = queryset.filter(collection_id=collection_id)
+        parent_id = self.request.query_params.get("parent")
+        if parent_id:
+            queryset = queryset.filter(parent_id=parent_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        collection = serializer.validated_data["collection"]
+        parent = serializer.validated_data.get("parent")
+        if "order" not in serializer.validated_data:
+            sibling_count = models.ApiCollectionDirectory.objects.filter(collection=collection, parent=parent).count()
+            serializer.save(order=sibling_count)
+            return
+        serializer.save()
 
 
 class ApiRunViewSet(viewsets.ReadOnlyModelViewSet):

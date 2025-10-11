@@ -10,20 +10,32 @@
 {% block dashboard_content %}
 <div id="api-tester-app"
      class="api-tester"
-     data-collections-url="{% url 'core:core-collections-list' %}"
-     data-environments-url="{% url 'core:core-environments-list' %}"
+    data-collections-url="{% url 'core:core-collections-list' %}"
+    data-environments-url="{% url 'core:core-environments-list' %}"
+    data-requests-url="{% url 'core:core-requests-list' %}"
+    data-directories-url="{% url 'core:core-directories-list' %}"
+    data-collections-import-url="{% url 'core:core-collections-import-postman' %}"
     data-run-url-template="{% url 'core:core-collections-run' pk=0 %}"
     data-execute-url="{% url 'core:core-request-execute' %}">
     <section class="api-tester__panel api-tester__collections">
         <header>
             <h2>Collections</h2>
+            <div class="api-tester__collections-actions">
+                <button type="button" id="create-collection" class="btn btn-secondary">New Collection</button>
+                <button type="button" id="create-directory" class="btn btn-secondary" disabled>New Folder</button>
+                <button type="button" id="import-postman" class="btn btn-secondary">Import Postman</button>
+                <input type="file" id="import-postman-input" accept="application/json" hidden />
+            </div>
             <input type="search" id="collection-search" placeholder="Search collections" aria-label="Search collections" />
         </header>
         <div class="api-tester__collections-list" aria-live="polite"></div>
     </section>
     <section class="api-tester__panel api-tester__builder">
-        <header>
-            <h2>Request Builder</h2>
+        <header class="api-tester__builder-head">
+            <div class="api-tester__builder-title-row">
+                <h2>Request Builder</h2>
+                <button type="button" id="create-request" class="btn btn-secondary" disabled>New Request</button>
+            </div>
             <div class="builder-meta" id="builder-meta">Select a request to preview details.</div>
         </header>
         <form id="api-request-form" class="api-tester__form" autocomplete="off">
@@ -45,7 +57,10 @@
                     <input type="url" id="request-url" name="url" placeholder="https://api.example.com/path" required />
                 </div>
                 <div class="form-field form-field--actions">
-                    <button type="submit" id="run-request" class="btn btn-primary" disabled>SEND</button>
+                    <div class="form-actions">
+                        <button type="button" id="save-request" class="btn btn-secondary">Save</button>
+                        <button type="submit" id="run-request" class="btn btn-primary" disabled>SEND</button>
+                    </div>
                 </div>
             </div>
 
@@ -354,6 +369,22 @@
             </div>
         </div>
     </section>
+</div>
+
+<div class="modal" id="save-request-modal" hidden aria-hidden="true" tabindex="-1">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="save-request-modal-title">
+        <div class="modal-header">
+            <h3 id="save-request-modal-title">Save Request</h3>
+        </div>
+        <div class="modal-body">
+            <label for="save-request-name">Request Name</label>
+            <input type="text" id="save-request-name" class="form-control" autocomplete="off" />
+        </div>
+        <div class="modal-footer">
+            <button type="button" id="save-request-cancel" class="btn btn-tertiary">Cancel</button>
+            <button type="button" id="save-request-confirm" class="btn btn-primary">Save</button>
+        </div>
+    </div>
 </div>
 {% endblock %}
 

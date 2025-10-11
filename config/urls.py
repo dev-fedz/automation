@@ -75,7 +75,7 @@ urlpatterns = [
 	path('healthz/', healthz, name='healthz'),
 	path('healthz', healthz),  # fallback no slash
 	path('api/metrics/', metrics_api, name='metrics'),
-	path('api/core/', include('apps.core.urls')),
+	path('api/core/', include(('apps.core.urls', 'core'), namespace='core')),
 ] + account_page_patterns
 
 if django_apps.is_installed('apps.accounts'):

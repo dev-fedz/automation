@@ -29,6 +29,10 @@
         pre: '// Runs before the request',
         post: '// Runs after the response',
     };
+    const BODY_MODE_CONTENT_TYPES = {
+        urlencoded: 'application/x-www-form-urlencoded; charset=UTF-8',
+        binary: 'application/octet-stream',
+    };
 
     const escapeHtml = (value) => {
         if (value === null || value === undefined) {
@@ -164,10 +168,12 @@
         environments: [],
         selectedCollectionId: null,
         selectedRequestId: null,
+        selectedDirectoryId: null,
         urlBase: '',
         builder: getInitialBuilderState(),
         activeTab: 'params',
         activeScriptsTab: 'pre',
+        collapsedCollections: new Set(),
     };
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -184,6 +190,11 @@
             environmentSelect: document.getElementById('environment-select'),
             runButton: document.getElementById('run-request'),
             runCollectionButton: document.getElementById('run-collection'),
+            saveRequestButton: document.getElementById('save-request'),
+            saveRequestModal: document.getElementById('save-request-modal'),
+            saveRequestNameInput: document.getElementById('save-request-name'),
+            saveRequestCancelButton: document.getElementById('save-request-cancel'),
+            saveRequestConfirmButton: document.getElementById('save-request-confirm'),
             status: document.getElementById('run-status'),
             responseSummary: document.getElementById('response-summary'),
             responseHeaders: document.getElementById('response-headers'),
@@ -216,6 +227,9 @@
             scriptsPanels: Array.from(root.querySelectorAll('[data-script-panel]')),
             scriptEditorPre: document.getElementById('script-pre-editor'),
             scriptEditorPost: document.getElementById('script-post-editor'),
+            createCollectionButton: document.getElementById('create-collection'),
+            createDirectoryButton: document.getElementById('create-directory'),
+            createRequestButton: document.getElementById('create-request'),
         };
 
         const endpoints = {
@@ -223,6 +237,7 @@
             environments: root.dataset.environmentsUrl,
             execute: root.dataset.executeUrl,
             runTemplate: root.dataset.runUrlTemplate,
+            requests: root.dataset.requestsUrl,
         };
 
         const tabButtons = elements.tabButtons;
@@ -337,6 +352,112 @@
                 throw new Error(`Request failed with status ${response.status}`);
             }
             return response.json();
+        };
+
+        const postJson = async (url, payload, method = 'POST') => {
+            const response = await fetch(url, {
+                method,
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken') || '',
+                },
+                body: JSON.stringify(payload),
+            });
+            const data = await response.json().catch(() => null);
+            if (!response.ok) {
+                const message = data?.detail || data?.error || `Request failed with status ${response.status}`;
+                throw new Error(message);
+            }
+            return data;
+        };
+
+        const promptForCollectionName = async (defaultName) => {
+            return window.prompt('Enter a name for the new collection:', defaultName);
+        };
+
+        let saveModalResolver = null;
+        let saveModalPreviousFocus = null;
+
+        const handleSaveModalKeydown = (event) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                cancelSaveModal();
+            } else if (event.key === 'Enter' && event.target === elements.saveRequestNameInput) {
+                event.preventDefault();
+                confirmSaveModal();
+            }
+        };
+
+        const closeSaveModal = () => {
+            if (!elements.saveRequestModal) {
+                return;
+            }
+            elements.saveRequestModal.hidden = true;
+            elements.saveRequestModal.setAttribute('aria-hidden', 'true');
+            elements.saveRequestModal.removeEventListener('keydown', handleSaveModalKeydown, true);
+            if (elements.saveRequestNameInput) {
+                elements.saveRequestNameInput.value = '';
+                elements.saveRequestNameInput.removeAttribute('aria-invalid');
+            }
+            if (saveModalPreviousFocus && typeof saveModalPreviousFocus.focus === 'function') {
+                saveModalPreviousFocus.focus();
+            }
+            saveModalPreviousFocus = null;
+        };
+
+        const resolveSaveModal = (value) => {
+            if (!saveModalResolver) {
+                return;
+            }
+            const resolver = saveModalResolver;
+            saveModalResolver = null;
+            closeSaveModal();
+            resolver(value);
+        };
+
+        const confirmSaveModal = () => {
+            if (!elements.saveRequestNameInput) {
+                resolveSaveModal(null);
+                return;
+            }
+            const trimmed = elements.saveRequestNameInput.value.trim();
+            if (!trimmed) {
+                elements.saveRequestNameInput.setAttribute('aria-invalid', 'true');
+                elements.saveRequestNameInput.focus();
+                return;
+            }
+            elements.saveRequestNameInput.removeAttribute('aria-invalid');
+            resolveSaveModal(trimmed);
+        };
+
+        const cancelSaveModal = () => {
+            resolveSaveModal(null);
+        };
+
+        const openSaveModal = (defaultName) => {
+            if (!elements.saveRequestModal || !elements.saveRequestNameInput) {
+                return Promise.resolve(null);
+            }
+            saveModalPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            elements.saveRequestModal.hidden = false;
+            elements.saveRequestModal.setAttribute('aria-hidden', 'false');
+            elements.saveRequestModal.addEventListener('keydown', handleSaveModalKeydown, true);
+            elements.saveRequestNameInput.value = defaultName || '';
+            elements.saveRequestNameInput.removeAttribute('aria-invalid');
+            elements.saveRequestNameInput.focus();
+            return new Promise((resolve) => {
+                saveModalResolver = resolve;
+            });
+        };
+
+        const promptForRequestName = async (defaultName) => {
+            if (elements.saveRequestModal && elements.saveRequestNameInput) {
+                return openSaveModal(defaultName ?? 'New Request');
+            }
+            const response = window.prompt('Enter a name for the request:', defaultName ?? 'New Request');
+            return response === null ? null : response.trim();
         };
 
         const parseUrlIntoState = (url) => {
@@ -968,64 +1089,174 @@
             updateRunButtonState();
         };
 
+        const startNewRequestDraft = (collection) => {
+            if (!collection) {
+                setStatus('Select a collection before creating a request.', 'error');
+                return;
+            }
+            state.selectedCollectionId = collection.id;
+            state.selectedRequestId = null;
+            state.selectedDirectoryId = null;
+            renderEnvironmentOptions(collection);
+            populateForm(collection, null);
+            elements.builderMeta.textContent = `${collection.name} · New request`;
+            highlightSelection();
+            setStatus('Draft ready. Configure the request and press Save.', 'neutral');
+        };
+
+        const updateCardCollapseState = (card, collapsed) => {
+            if (!card) {
+                return;
+            }
+            card.classList.toggle('is-collapsed', collapsed);
+            const body = card.querySelector('.collection-body');
+            if (body) {
+                body.hidden = collapsed;
+                body.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
+            }
+            const toggle = card.querySelector('.collection-toggle');
+            if (toggle) {
+                toggle.setAttribute('aria-expanded', String(!collapsed));
+            }
+            const indicator = card.querySelector('.collection-toggle-indicator');
+            if (indicator) {
+                indicator.textContent = '>';
+            }
+        };
+
+        const updateCollectionActionState = () => {
+            if (elements.createDirectoryButton) {
+                elements.createDirectoryButton.disabled = state.selectedCollectionId === null;
+            }
+            if (elements.createRequestButton) {
+                elements.createRequestButton.disabled = state.selectedCollectionId === null;
+            }
+        };
+
         const highlightSelection = () => {
+            if (!elements.collectionsList) {
+                return;
+            }
             const cards = elements.collectionsList.querySelectorAll('.collection-card');
             cards.forEach((card) => {
-                card.classList.toggle('active', Number(card.dataset.collectionId) === state.selectedCollectionId);
+                const collectionId = Number(card.dataset.collectionId);
+                const isActiveCollection = collectionId === state.selectedCollectionId;
+                card.classList.toggle('active', isActiveCollection);
+                if (isActiveCollection) {
+                    state.collapsedCollections.delete(collectionId);
+                }
+                updateCardCollapseState(card, state.collapsedCollections.has(collectionId));
                 const requestButtons = card.querySelectorAll('.request-item button');
                 requestButtons.forEach((button) => {
-                    const isActive = Number(button.dataset.requestId) === state.selectedRequestId;
-                    button.classList.toggle('active', isActive);
+                    const isActiveRequest = Number(button.dataset.requestId) === state.selectedRequestId;
+                    button.classList.toggle('active', isActiveRequest);
                 });
             });
+            updateCollectionActionState();
         };
 
         const renderEnvironmentOptions = (collection) => {
-            const select = elements.environmentSelect;
+            if (!elements.environmentSelect) {
+                return;
+            }
             const options = ['<option value="">No environment</option>'];
             state.environments.forEach((env) => {
                 const isLinked = collection?.environments?.some((item) => item.id === env.id);
                 const suffix = isLinked ? ' (linked)' : '';
                 options.push(`<option value="${env.id}" data-linked="${isLinked}">${escapeHtml(env.name)}${suffix}</option>`);
             });
-            select.innerHTML = options.join('');
+            elements.environmentSelect.innerHTML = options.join('');
             if (collection?.environments?.length) {
-                select.value = collection.environments[0].id;
+                elements.environmentSelect.value = collection.environments[0].id;
             } else {
-                select.value = '';
+                elements.environmentSelect.value = '';
             }
         };
 
         const renderCollections = (filterText = '') => {
+            if (!elements.collectionsList) {
+                return;
+            }
             const list = elements.collectionsList;
             list.innerHTML = '';
-            const normalized = filterText.trim().toLowerCase();
-            const filtered = !normalized
-                ? state.collections
-                : state.collections.filter((collection) =>
-                      collection.name.toLowerCase().includes(normalized) ||
-                      (collection.description || '').toLowerCase().includes(normalized),
-                  );
+            const normalizedFilter = filterText.trim().toLowerCase();
+
+            const filtered = state.collections
+                .map((collection) => ({
+                    ...collection,
+                    requests: Array.isArray(collection.requests)
+                        ? [...collection.requests].sort(
+                              (a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name),
+                          )
+                        : [],
+                }))
+                .filter((collection) => {
+                    if (!normalizedFilter) {
+                        return true;
+                    }
+                    const description = collection.description ? collection.description.toLowerCase() : '';
+                    if (collection.name.toLowerCase().includes(normalizedFilter) || description.includes(normalizedFilter)) {
+                        return true;
+                    }
+                    return collection.requests.some((request) => {
+                        const label = `${request.method} ${request.name}`.toLowerCase();
+                        return label.includes(normalizedFilter);
+                    });
+                });
 
             if (!filtered.length) {
                 list.innerHTML = '<p class="muted">No collections found.</p>';
+                updateCollectionActionState();
                 return;
             }
 
             filtered.forEach((collection) => {
-                const sortedRequests = Array.isArray(collection.requests)
-                    ? [...collection.requests].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-                    : [];
+                const collapsed = state.collapsedCollections.has(collection.id);
                 const card = document.createElement('article');
                 card.className = 'collection-card';
                 card.dataset.collectionId = collection.id;
-                card.innerHTML = `
-                    <div class="collection-name">
-                        <span>${escapeHtml(collection.name)}</span>
-                        <span class="request-count">${sortedRequests.length} requests</span>
-                    </div>
-                    <div class="collection-desc">${escapeHtml(collection.description || 'No description provided.')}</div>
+
+                const header = document.createElement('div');
+                header.className = 'collection-card__header';
+
+                const toggleButton = document.createElement('button');
+                toggleButton.type = 'button';
+                toggleButton.className = 'collection-toggle';
+                toggleButton.id = `collection-toggle-${collection.id}`;
+                toggleButton.setAttribute('aria-expanded', String(!collapsed));
+                toggleButton.innerHTML = `
+                    <span class="collection-toggle-indicator" aria-hidden="true">></span>
+                    <span class="collection-name">
+                        <span class="collection-name-text">${escapeHtml(collection.name)}</span>
+                        <span class="request-count">${collection.requests.length} requests</span>
+                    </span>
                 `;
+                toggleButton.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    const nextCollapsed = !state.collapsedCollections.has(collection.id);
+                    if (nextCollapsed) {
+                        state.collapsedCollections.add(collection.id);
+                    } else {
+                        state.collapsedCollections.delete(collection.id);
+                    }
+                    updateCardCollapseState(card, nextCollapsed);
+                    highlightSelection();
+                });
+
+                header.appendChild(toggleButton);
+                card.appendChild(header);
+
+                const body = document.createElement('div');
+                body.id = `collection-body-${collection.id}`;
+                body.className = 'collection-body';
+                body.setAttribute('role', 'region');
+                body.setAttribute('aria-labelledby', toggleButton.id);
+                toggleButton.setAttribute('aria-controls', body.id);
+
+                const desc = document.createElement('div');
+                desc.className = 'collection-desc';
+                desc.textContent = collection.description || 'No description provided.';
+                body.appendChild(desc);
 
                 if (collection.environments?.length) {
                     const envWrap = document.createElement('div');
@@ -1036,51 +1267,121 @@
                         pill.textContent = env.name;
                         envWrap.appendChild(pill);
                     });
-                    card.appendChild(envWrap);
+                    body.appendChild(envWrap);
                 }
 
-                const requestList = document.createElement('ul');
-                requestList.className = 'request-list';
-                sortedRequests.forEach((request) => {
-                    const listItem = document.createElement('li');
-                    listItem.className = 'request-item';
-                    const button = document.createElement('button');
-                    button.type = 'button';
-                    button.dataset.collectionId = collection.id;
-                    button.dataset.requestId = request.id;
-                    button.textContent = `${request.method} · ${request.name}`;
-                    button.addEventListener('click', (event) => {
-                        event.stopPropagation();
-                        state.selectedCollectionId = collection.id;
-                        state.selectedRequestId = request.id;
-                        highlightSelection();
-                        renderEnvironmentOptions(collection);
-                        populateForm(collection, request);
+                if (collection.requests.length) {
+                    const requestList = document.createElement('ul');
+                    requestList.className = 'request-list';
+                    collection.requests.forEach((request) => {
+                        const listItem = document.createElement('li');
+                        listItem.className = 'request-item';
+                        const button = document.createElement('button');
+                        button.type = 'button';
+                        button.dataset.collectionId = collection.id;
+                        button.dataset.requestId = request.id;
+                        button.textContent = `${request.method} · ${request.name}`;
+                        button.addEventListener('click', (event) => {
+                            event.stopPropagation();
+                            state.selectedCollectionId = collection.id;
+                            state.selectedRequestId = request.id;
+                            state.collapsedCollections.delete(collection.id);
+                            renderEnvironmentOptions(collection);
+                            populateForm(collection, request);
+                            highlightSelection();
+                        });
+                        listItem.appendChild(button);
+                        requestList.appendChild(listItem);
                     });
-                    listItem.appendChild(button);
-                    requestList.appendChild(listItem);
-                });
-
-                card.addEventListener('click', () => {
-                    state.selectedCollectionId = collection.id;
-                    const firstRequest = collection.requests[0];
-                    state.selectedRequestId = firstRequest ? firstRequest.id : null;
-                    highlightSelection();
-                    renderEnvironmentOptions(collection);
-                    populateForm(collection, firstRequest || null);
-                });
-
-                if (!sortedRequests.length) {
+                    body.appendChild(requestList);
+                } else {
                     const empty = document.createElement('p');
                     empty.className = 'muted';
                     empty.textContent = 'Collection has no requests yet.';
-                    card.appendChild(empty);
-                } else {
-                    card.appendChild(requestList);
+                    body.appendChild(empty);
                 }
+
+                card.appendChild(body);
+                updateCardCollapseState(card, collapsed);
+
+                card.addEventListener('click', () => {
+                    state.selectedCollectionId = collection.id;
+                    state.collapsedCollections.delete(collection.id);
+                    const firstRequest = collection.requests[0] || null;
+                    state.selectedRequestId = firstRequest ? firstRequest.id : null;
+                    renderEnvironmentOptions(collection);
+                    populateForm(collection, firstRequest || null);
+                    highlightSelection();
+                });
 
                 list.appendChild(card);
             });
+
+            highlightSelection();
+        };
+
+        const refreshCollections = async ({
+            preserveSelection = true,
+            focusCollectionId = null,
+            focusRequestId = null,
+        } = {}) => {
+            const previousCollectionId = state.selectedCollectionId;
+            const previousRequestId = state.selectedRequestId;
+
+            const collections = await fetchJson(endpoints.collections);
+            state.collections = normalizeList(collections).map((collection) => ({
+                ...collection,
+                requests: Array.isArray(collection.requests)
+                    ? [...collection.requests].sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name))
+                    : [],
+            }));
+
+            const validCollapsed = new Set();
+            state.collections.forEach((collection) => {
+                if (state.collapsedCollections.has(collection.id)) {
+                    validCollapsed.add(collection.id);
+                }
+            });
+            state.collapsedCollections = validCollapsed;
+
+            const currentFilter = elements.search ? elements.search.value : '';
+            renderCollections(currentFilter);
+
+            let nextCollectionId = focusCollectionId;
+            if (nextCollectionId === null) {
+                if (preserveSelection && previousCollectionId && state.collections.some((item) => item.id === previousCollectionId)) {
+                    nextCollectionId = previousCollectionId;
+                } else {
+                    nextCollectionId = state.collections[0]?.id ?? null;
+                }
+            }
+
+            state.selectedCollectionId = nextCollectionId;
+            const collection = state.collections.find((item) => item.id === nextCollectionId) || null;
+            state.selectedDirectoryId = null;
+
+            let nextRequestId = focusRequestId;
+            if (collection) {
+                if (nextRequestId === null) {
+                    if (
+                        preserveSelection &&
+                        previousRequestId &&
+                        collection.requests.some((item) => item.id === previousRequestId)
+                    ) {
+                        nextRequestId = previousRequestId;
+                    } else {
+                        nextRequestId = collection.requests[0]?.id ?? null;
+                    }
+                }
+                state.selectedRequestId = nextRequestId;
+                const request = collection.requests.find((item) => item.id === nextRequestId) || null;
+                renderEnvironmentOptions(collection);
+                populateForm(collection, request || null);
+            } else {
+                state.selectedRequestId = null;
+                renderEnvironmentOptions(null);
+                populateForm(null, null);
+            }
 
             highlightSelection();
         };
@@ -1286,28 +1587,97 @@
             }
         };
 
+        const buildRequestDefinition = ({ name, collectionId }) => {
+            const trimmedName = (name || '').trim();
+            if (!trimmedName) {
+                throw new Error('Request name is required.');
+            }
+            const urlValue = getTrimmedUrlValue();
+            if (!urlValue) {
+                throw new Error('Enter a request URL before saving.');
+            }
+
+            const headersPayload = rowsToObject(state.builder.headers);
+            const paramsPayload = rowsToObject(state.builder.params);
+
+            const definition = {
+                collection: collectionId,
+                name: trimmedName,
+                method: elements.method.value || 'GET',
+                url: urlValue,
+                description: '',
+                timeout_ms: 30000,
+                headers: headersPayload,
+                query_params: paramsPayload,
+                body_type: 'none',
+                body_json: {},
+                body_form: {},
+                body_raw: '',
+                auth_type: state.builder.auth.type || 'none',
+                auth_basic: {},
+                auth_bearer: '',
+                pre_request_script: state.builder.scripts.pre || '',
+                tests_script: state.builder.scripts.post || '',
+                assertions: [],
+            };
+
+            if (definition.auth_type === 'basic') {
+                definition.auth_basic = {
+                    username: state.builder.auth.username || '',
+                    password: state.builder.auth.password || '',
+                };
+            } else if (definition.auth_type === 'bearer') {
+                definition.auth_bearer = state.builder.auth.token || '';
+            }
+
+            const { bodyMode, bodyRawType, bodyRawText, bodyFormData, bodyUrlEncoded, bodyBinary } = state.builder;
+            if (bodyMode === 'raw') {
+                if (bodyRawType === 'json') {
+                    try {
+                        definition.body_json = JSON.parse(bodyRawText || '{}');
+                        definition.body_type = 'json';
+                    } catch (error) {
+                        throw new Error('Raw body must be valid JSON before saving.');
+                    }
+                } else {
+                    definition.body_type = 'raw';
+                    definition.body_raw = bodyRawText || '';
+                }
+            } else if (bodyMode === 'form-data') {
+                const textFields = {};
+                bodyFormData
+                    .filter((row) => row && row.type !== 'file')
+                    .forEach((row) => {
+                        if (row.key && row.key.trim()) {
+                            textFields[row.key.trim()] = row.value ?? '';
+                        }
+                    });
+                if (Object.keys(textFields).length) {
+                    definition.body_type = 'form';
+                    definition.body_form = textFields;
+                }
+            } else if (bodyMode === 'urlencoded') {
+                const textFields = rowsToObject(bodyUrlEncoded);
+                if (Object.keys(textFields).length) {
+                    definition.body_type = 'form';
+                    definition.body_form = textFields;
+                }
+            } else if (bodyMode === 'binary') {
+                if (bodyBinary && bodyBinary.dataUrl) {
+                    definition.body_type = 'raw';
+                    definition.body_raw = '';
+                }
+            }
+
+            return definition;
+        };
+
         const bootstrap = async () => {
             try {
-                const [collections, environments] = await Promise.all([
-                    fetchJson(endpoints.collections),
-                    fetchJson(endpoints.environments),
-                ]);
-                state.collections = normalizeList(collections).map((collection) => ({
-                    ...collection,
-                    requests: Array.isArray(collection.requests)
-                        ? [...collection.requests].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-                        : [],
-                }));
+                const environments = await fetchJson(endpoints.environments);
                 state.environments = normalizeList(environments);
-                renderEnvironmentOptions(null);
-                renderCollections();
-                const firstCollection = state.collections.find((item) => Array.isArray(item.requests) && item.requests.length);
-                if (firstCollection) {
-                    state.selectedCollectionId = firstCollection.id;
-                    state.selectedRequestId = firstCollection.requests[0]?.id || null;
-                    renderEnvironmentOptions(firstCollection);
-                    populateForm(firstCollection, firstCollection.requests[0] || null);
-                    highlightSelection();
+                await refreshCollections({ preserveSelection: false });
+                if (state.selectedCollectionId && state.selectedRequestId) {
                     setStatus('Ready to send the selected request.', 'neutral');
                 }
                 if (elements.runCollectionButton) {
@@ -1710,6 +2080,141 @@
             };
             reader.readAsDataURL(file);
         });
+
+        if (elements.saveRequestButton) {
+            elements.saveRequestButton.addEventListener('click', async () => {
+                const collection = state.collections.find((item) => item.id === state.selectedCollectionId) || null;
+                if (!collection) {
+                    setStatus('Select a collection before saving.', 'error');
+                    return;
+                }
+
+                const existingRequest = collection.requests.find((item) => item.id === state.selectedRequestId) || null;
+                const defaultName = existingRequest?.name || 'New Request';
+                const inputName = await promptForRequestName(defaultName);
+                if (inputName === null) {
+                    setStatus('Save cancelled.', 'neutral');
+                    return;
+                }
+
+                const sanitizedName = inputName.trim();
+                if (!sanitizedName) {
+                    setStatus('Enter a request name to save.', 'error');
+                    return;
+                }
+
+                if (!hasRunnableUrl()) {
+                    setStatus('Enter a request URL before saving.', 'error');
+                    return;
+                }
+
+                let definition;
+                try {
+                    definition = buildRequestDefinition({
+                        name: sanitizedName,
+                        collectionId: collection.id,
+                    });
+                } catch (error) {
+                    setStatus(error instanceof Error ? error.message : 'Unable to build request payload.', 'error');
+                    return;
+                }
+
+                const baseRequestsUrl = endpoints.requests;
+                if (!baseRequestsUrl) {
+                    setStatus('Save endpoint unavailable.', 'error');
+                    return;
+                }
+                const requestsEndpoint = baseRequestsUrl.endsWith('/') ? baseRequestsUrl : `${baseRequestsUrl}/`;
+                const detailUrl = existingRequest ? `${requestsEndpoint}${existingRequest.id}/` : requestsEndpoint;
+                const method = existingRequest ? 'PATCH' : 'POST';
+
+                setStatus('Saving request...', 'loading');
+                try {
+                    const response = await postJson(detailUrl, definition, method);
+                    const savedRequestId = existingRequest?.id || response?.id || null;
+                    await refreshCollections({
+                        preserveSelection: false,
+                        focusCollectionId: collection.id,
+                        focusRequestId: savedRequestId,
+                    });
+                    setStatus('Request saved successfully.', 'success');
+                } catch (error) {
+                    setStatus(error instanceof Error ? error.message : 'Failed to save request.', 'error');
+                }
+            });
+        }
+
+        if (elements.saveRequestCancelButton) {
+            elements.saveRequestCancelButton.addEventListener('click', cancelSaveModal);
+        }
+
+        if (elements.saveRequestConfirmButton) {
+            elements.saveRequestConfirmButton.addEventListener('click', confirmSaveModal);
+        }
+
+        if (elements.saveRequestModal) {
+            elements.saveRequestModal.addEventListener('click', (event) => {
+                if (event.target === elements.saveRequestModal) {
+                    cancelSaveModal();
+                }
+            });
+        }
+
+        if (elements.saveRequestNameInput) {
+            elements.saveRequestNameInput.addEventListener('input', () => {
+                elements.saveRequestNameInput.removeAttribute('aria-invalid');
+            });
+        }
+
+        if (elements.createRequestButton) {
+            elements.createRequestButton.addEventListener('click', () => {
+                const collection = state.collections.find((item) => item.id === state.selectedCollectionId) || null;
+                if (!collection) {
+                    setStatus('Select a collection before creating a request.', 'error');
+                    return;
+                }
+                startNewRequestDraft(collection);
+            });
+        }
+
+        if (elements.createCollectionButton) {
+            elements.createCollectionButton.addEventListener('click', async () => {
+                const inputName = await promptForCollectionName('New Collection');
+                if (inputName === null) {
+                    setStatus('Collection creation cancelled.', 'neutral');
+                    return;
+                }
+                const sanitizedName = inputName.trim();
+                if (!sanitizedName) {
+                    setStatus('Enter a collection name to continue.', 'error');
+                    return;
+                }
+                const baseCollectionsUrl = endpoints.collections;
+                if (!baseCollectionsUrl) {
+                    setStatus('Collection endpoint unavailable.', 'error');
+                    return;
+                }
+                const collectionsEndpoint = baseCollectionsUrl.endsWith('/') ? baseCollectionsUrl : `${baseCollectionsUrl}/`;
+
+                setStatus('Creating collection...', 'loading');
+                try {
+                    const response = await postJson(collectionsEndpoint, {
+                        name: sanitizedName,
+                        description: '',
+                        requests: [],
+                        environment_ids: [],
+                    });
+                    await refreshCollections({
+                        preserveSelection: false,
+                        focusCollectionId: response?.id || null,
+                        focusRequestId: response?.requests?.[0]?.id || null,
+                    });
+                    setStatus('Collection created successfully.', 'success');
+                } catch (error) {
+                    setStatus(error instanceof Error ? error.message : 'Failed to create collection.', 'error');
+                }
+            });
+        }
 
         setStatus('Select a request to begin.', 'neutral');
         renderBuilder();
