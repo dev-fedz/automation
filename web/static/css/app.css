@@ -328,7 +328,15 @@ body.auth-layout { background:#f5f7fb; min-height:100dvh; display:flex; justify-
 .collection-card {border:1px solid #f0e3b8;border-radius:10px;padding:.65rem .75rem;background:#fff;cursor:pointer;display:flex;flex-direction:column;gap:.35rem;transition:box-shadow .2s,transform .2s;}
 .collection-card:hover {box-shadow:0 4px 12px -6px rgba(90,70,0,.35);transform:translateY(-1px);} 
 .collection-card.active {border-color:#f4b400;background:#fff8d9;box-shadow:0 4px 14px -6px rgba(244,180,0,.45);} 
-.collection-card__header {display:flex;align-items:center;}
+.collection-card__header {display:flex;align-items:center;gap:.4rem;}
+.collection-menu-wrapper {position:relative;margin-left:auto;display:flex;align-items:center;}
+.collection-menu-toggle {display:inline-flex;align-items:center;justify-content:center;width:1.75rem;height:1.75rem;border-radius:999px;border:1px solid #e5d9af;background:#fffdf5;color:#8b6f16;font-size:.85rem;line-height:1;transition:background .15s ease,border-color .15s ease,color .15s ease;}
+.collection-menu-toggle:hover,.collection-menu-toggle[aria-expanded="true"] {background:#fff4c7;border-color:#f0c95a;color:#71560c;}
+.collection-menu-toggle span {display:block;font-weight:700;letter-spacing:.1em;}
+.collection-menu {position:absolute;top:calc(100% + .35rem);right:0;min-width:9.5rem;padding:.4rem 0;border:1px solid #ecdba0;border-radius:.6rem;background:#fffdfa;box-shadow:0 8px 18px -10px rgba(50,40,0,.25),0 4px 10px -8px rgba(50,40,0,.18);display:flex;flex-direction:column;z-index:10;}
+.collection-menu[hidden] {display:none !important;}
+.collection-menu-item {background:transparent;border:none;text-align:left;padding:.45rem .85rem;font-size:.74rem;font-weight:600;color:#5a450f;letter-spacing:.03em;transition:background .15s ease,color .15s ease;}
+.collection-menu-item:hover {background:#fff2bd;color:#40300a;}
 .collection-toggle {display:flex;align-items:center;gap:.55rem;width:100%;background:transparent;border:none;padding:0;color:#3a2b00;font-weight:700;font-size:.95rem;justify-content:space-between;text-align:left;cursor:pointer;}
 .collection-toggle:focus-visible {outline:2px solid #f4b400;outline-offset:3px;border-radius:6px;}
 .collection-toggle-indicator {display:inline-block;width:.85rem;text-align:center;font-weight:700;color:#ab8d33;transition:transform .2s ease;transform:rotate(0deg);}
@@ -339,8 +347,17 @@ body.auth-layout { background:#f5f7fb; min-height:100dvh; display:flex; justify-
 .collection-card .request-count {font-size:.7rem;font-weight:600;text-transform:uppercase;color:#ab8d33;letter-spacing:.05em;}
 .collection-card .collection-body {display:flex;flex-direction:column;gap:.45rem;margin-top:.55rem;}
 .collection-card.is-collapsed .collection-body {display:none;}
-.request-list {margin-top:.4rem;padding-left:1.2rem;font-size:.78rem;line-height:1.35;color:#4a3d18;max-height:160px;overflow:auto;}
+.request-list {margin-top:.35rem;padding-left:1rem;font-size:.78rem;line-height:1.35;color:#4a3d18;list-style:none;}
 .request-list li {margin-bottom:.25rem;}
+.request-tree {display:flex;flex-direction:column;gap:.35rem;margin-top:.5rem;}
+.request-tree.nested {margin-left:1rem;padding-left:.75rem;border-left:1px dashed rgba(171,141,51,.35);}
+.directory-item {display:flex;flex-direction:column;gap:.3rem;}
+.directory-button {display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;border:1px solid #f1dba0;border-radius:.55rem;background:#fff9e6;color:#6b520f;padding:.35rem .6rem;font-size:.72rem;font-weight:600;letter-spacing:.03em;transition:background .15s ease,color .15s ease,border-color .15s ease,box-shadow .15s ease;}
+.directory-button:hover {background:#fff2bd;color:#503909;border-color:#f0c86e;}
+.directory-button.active {background:#ffe38a;color:#3b2803;border-color:#f4b400;box-shadow:0 3px 8px -4px rgba(90,70,0,.35);}
+.request-tree .request-list {margin-top:.25rem;padding-left:0;}
+.request-tree .request-list .request-item {margin:0;}
+.request-tree .request-list .request-item button {padding-left:.65rem;}
 .env-pill-group {display:flex;flex-wrap:wrap;gap:.35rem;}
 .env-pill {background:#fff3cc;border:1px solid #f1d27a;border-radius:999px;padding:.18rem .55rem;font-size:.65rem;font-weight:700;color:#6a4b00;letter-spacing:.05em;}
 .request-item button {width:100%;text-align:left;border:none;background:transparent;color:inherit;padding:.35rem .45rem;border-radius:8px;font-size:.76rem;transition:background .18s,box-shadow .18s;display:flex;align-items:center;justify-content:space-between;gap:.45rem;}

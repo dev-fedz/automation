@@ -174,6 +174,8 @@
         activeTab: 'params',
         activeScriptsTab: 'pre',
         collapsedCollections: new Set(),
+        openCollectionMenuId: null,
+        directoryMaps: new Map(),
     };
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -238,6 +240,7 @@
             execute: root.dataset.executeUrl,
             runTemplate: root.dataset.runUrlTemplate,
             requests: root.dataset.requestsUrl,
+            directories: root.dataset.directoriesUrl,
         };
 
         const tabButtons = elements.tabButtons;
@@ -375,6 +378,10 @@
 
         const promptForCollectionName = async (defaultName) => {
             return window.prompt('Enter a name for the new collection:', defaultName);
+        };
+
+        const promptForDirectoryName = async (defaultName) => {
+            return window.prompt('Enter a name for the new folder:', defaultName);
         };
 
         let saveModalResolver = null;
@@ -1133,6 +1140,34 @@
             }
         };
 
+        const getCurrentFilterText = () => (elements.search ? elements.search.value || '' : '');
+
+        const hideMenuForCollection = (collectionId) => {
+            if (!elements.collectionsList || collectionId === null || collectionId === undefined) {
+                return;
+            }
+            const card = elements.collectionsList.querySelector(`.collection-card[data-collection-id="${collectionId}"]`);
+            if (!card) {
+                return;
+            }
+            const menu = card.querySelector('.collection-menu');
+            const menuToggle = card.querySelector('.collection-menu-toggle');
+            if (menu) {
+                menu.hidden = true;
+            }
+            if (menuToggle) {
+                menuToggle.setAttribute('aria-expanded', 'false');
+            }
+        };
+
+        const closeCollectionMenu = () => {
+            if (state.openCollectionMenuId === null) {
+                return;
+            }
+            hideMenuForCollection(state.openCollectionMenuId);
+            state.openCollectionMenuId = null;
+        };
+
         const highlightSelection = () => {
             if (!elements.collectionsList) {
                 return;
@@ -1150,6 +1185,15 @@
                 requestButtons.forEach((button) => {
                     const isActiveRequest = Number(button.dataset.requestId) === state.selectedRequestId;
                     button.classList.toggle('active', isActiveRequest);
+                });
+                const directoryButtons = card.querySelectorAll('.directory-button');
+                directoryButtons.forEach((button) => {
+                    const dirAttr = button.dataset.directoryId;
+                    const dirId = dirAttr === '' ? null : Number(dirAttr);
+                    const isActiveDirectory =
+                        isActiveCollection &&
+                        ((dirId === null && state.selectedDirectoryId === null) || dirId === state.selectedDirectoryId);
+                    button.classList.toggle('active', isActiveDirectory);
                 });
             });
             updateCollectionActionState();
@@ -1177,32 +1221,25 @@
             if (!elements.collectionsList) {
                 return;
             }
+            closeCollectionMenu();
             const list = elements.collectionsList;
             list.innerHTML = '';
             const normalizedFilter = filterText.trim().toLowerCase();
 
-            const filtered = state.collections
-                .map((collection) => ({
-                    ...collection,
-                    requests: Array.isArray(collection.requests)
-                        ? [...collection.requests].sort(
-                              (a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name),
-                          )
-                        : [],
-                }))
-                .filter((collection) => {
-                    if (!normalizedFilter) {
-                        return true;
-                    }
-                    const description = collection.description ? collection.description.toLowerCase() : '';
-                    if (collection.name.toLowerCase().includes(normalizedFilter) || description.includes(normalizedFilter)) {
-                        return true;
-                    }
-                    return collection.requests.some((request) => {
-                        const label = `${request.method} ${request.name}`.toLowerCase();
-                        return label.includes(normalizedFilter);
-                    });
+            const filtered = state.collections.filter((collection) => {
+                if (!normalizedFilter) {
+                    return true;
+                }
+                const description = collection.description ? collection.description.toLowerCase() : '';
+                if (collection.name.toLowerCase().includes(normalizedFilter) || description.includes(normalizedFilter)) {
+                    return true;
+                }
+                const requests = Array.isArray(collection.requests) ? collection.requests : [];
+                return requests.some((request) => {
+                    const label = `${request.method} ${request.name}`.toLowerCase();
+                    return label.includes(normalizedFilter);
                 });
+            });
 
             if (!filtered.length) {
                 list.innerHTML = '<p class="muted">No collections found.</p>';
@@ -1212,6 +1249,7 @@
 
             filtered.forEach((collection) => {
                 const collapsed = state.collapsedCollections.has(collection.id);
+                const isMenuOpen = state.openCollectionMenuId === collection.id;
                 const card = document.createElement('article');
                 card.className = 'collection-card';
                 card.dataset.collectionId = collection.id;
@@ -1228,11 +1266,12 @@
                     <span class="collection-toggle-indicator" aria-hidden="true">></span>
                     <span class="collection-name">
                         <span class="collection-name-text">${escapeHtml(collection.name)}</span>
-                        <span class="request-count">${collection.requests.length} requests</span>
+                        <span class="request-count">${(collection.requests || []).length} requests</span>
                     </span>
                 `;
                 toggleButton.addEventListener('click', (event) => {
                     event.stopPropagation();
+                    state.openCollectionMenuId = null;
                     const nextCollapsed = !state.collapsedCollections.has(collection.id);
                     if (nextCollapsed) {
                         state.collapsedCollections.add(collection.id);
@@ -1244,6 +1283,103 @@
                 });
 
                 header.appendChild(toggleButton);
+
+                const menuWrapper = document.createElement('div');
+                menuWrapper.className = 'collection-menu-wrapper';
+
+                const menuButton = document.createElement('button');
+                menuButton.type = 'button';
+                menuButton.className = 'collection-menu-toggle';
+                menuButton.setAttribute('aria-label', `Collection actions for ${collection.name}`);
+                menuButton.setAttribute('aria-expanded', String(isMenuOpen));
+                menuButton.innerHTML = '<span aria-hidden="true">...</span>';
+
+                const menu = document.createElement('div');
+                menu.className = 'collection-menu';
+                menu.hidden = !isMenuOpen;
+
+                menuButton.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    const wasOpen = state.openCollectionMenuId === collection.id;
+                    if (state.openCollectionMenuId !== null) {
+                        hideMenuForCollection(state.openCollectionMenuId);
+                        state.openCollectionMenuId = null;
+                    }
+                    if (!wasOpen) {
+                        state.openCollectionMenuId = collection.id;
+                        menu.hidden = false;
+                        menuButton.setAttribute('aria-expanded', 'true');
+                    } else {
+                        menu.hidden = true;
+                        menuButton.setAttribute('aria-expanded', 'false');
+                    }
+                });
+
+                const addFolderButton = document.createElement('button');
+                addFolderButton.type = 'button';
+                addFolderButton.className = 'collection-menu-item';
+                addFolderButton.textContent = 'Add New Folder';
+                addFolderButton.addEventListener('click', async (event) => {
+                    event.stopPropagation();
+                    hideMenuForCollection(collection.id);
+                    state.openCollectionMenuId = null;
+                    const inputName = await promptForDirectoryName('New Folder');
+                    if (inputName === null) {
+                        setStatus('Folder creation cancelled.', 'neutral');
+                        return;
+                    }
+                    const sanitizedName = inputName.trim();
+                    if (!sanitizedName) {
+                        setStatus('Enter a folder name to continue.', 'error');
+                        return;
+                    }
+
+                    const baseDirectoriesUrl = endpoints.directories;
+                    if (!baseDirectoriesUrl) {
+                        setStatus('Directory endpoint unavailable.', 'error');
+                        return;
+                    }
+                    const directoriesEndpoint = baseDirectoriesUrl.endsWith('/')
+                        ? baseDirectoriesUrl
+                        : `${baseDirectoriesUrl}/`;
+
+                    setStatus('Creating folder...', 'loading');
+                    try {
+                        const newDirectory = await postJson(directoriesEndpoint, {
+                            collection: collection.id,
+                            parent: null,
+                            name: sanitizedName,
+                            description: '',
+                        });
+                        await refreshCollections({
+                            preserveSelection: true,
+                            focusCollectionId: collection.id,
+                            focusDirectoryId: newDirectory?.id ?? null,
+                            focusRequestId: state.selectedRequestId,
+                        });
+                        setStatus('Folder created successfully.', 'success');
+                    } catch (error) {
+                        setStatus(error instanceof Error ? error.message : 'Failed to create folder.', 'error');
+                    }
+                });
+
+                const addRequestButton = document.createElement('button');
+                addRequestButton.type = 'button';
+                addRequestButton.className = 'collection-menu-item';
+                addRequestButton.textContent = 'Add New Request';
+                addRequestButton.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    hideMenuForCollection(collection.id);
+                    state.openCollectionMenuId = null;
+                    startNewRequestDraft(collection);
+                });
+
+                menu.appendChild(addFolderButton);
+                menu.appendChild(addRequestButton);
+                menuWrapper.appendChild(menuButton);
+                menuWrapper.appendChild(menu);
+                header.appendChild(menuWrapper);
+
                 card.appendChild(header);
 
                 const body = document.createElement('div');
@@ -1270,22 +1406,95 @@
                     body.appendChild(envWrap);
                 }
 
-                if (collection.requests.length) {
+                const requests = Array.isArray(collection.requests) ? collection.requests : [];
+                const directories = Array.isArray(collection.directories) ? collection.directories : [];
+
+                const requestsByDirectory = new Map();
+                requests.forEach((request) => {
+                    const key = request.directory_id ?? null;
+                    if (!requestsByDirectory.has(key)) {
+                        requestsByDirectory.set(key, []);
+                    }
+                    requestsByDirectory.get(key).push(request);
+                });
+
+                const directoryChildren = new Map();
+                const directoryLookup = new Map();
+                directories.forEach((directory) => {
+                    directoryLookup.set(directory.id, directory);
+                    const parentKey = directory.parent_id ?? null;
+                    if (!directoryChildren.has(parentKey)) {
+                        directoryChildren.set(parentKey, []);
+                    }
+                    directoryChildren.get(parentKey).push(directory);
+                });
+                directoryChildren.forEach((children) => {
+                    children.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name));
+                });
+
+                const requestDirectoryMap = new Map();
+                requests.forEach((request) => {
+                    requestDirectoryMap.set(request.id, request.directory_id ?? null);
+                });
+
+                const isRequestInDirectorySubtree = (requestId, directoryId) => {
+                    if (!requestId) {
+                        return false;
+                    }
+                    let currentDirectoryId = requestDirectoryMap.get(requestId) ?? null;
+                    if (currentDirectoryId === null) {
+                        return directoryId === null;
+                    }
+                    while (currentDirectoryId !== null) {
+                        if (currentDirectoryId === directoryId) {
+                            return true;
+                        }
+                        const parentDirectory = directoryLookup.get(currentDirectoryId);
+                        if (!parentDirectory) {
+                            break;
+                        }
+                        currentDirectoryId = parentDirectory.parent_id ?? null;
+                    }
+                    return false;
+                };
+
+                const findFirstRequestInDirectory = (directoryId) => {
+                    const direct = requestsByDirectory.get(directoryId) || [];
+                    if (direct.length) {
+                        return direct[0];
+                    }
+                    const children = directoryChildren.get(directoryId) || [];
+                    for (const child of children) {
+                        const found = findFirstRequestInDirectory(child.id);
+                        if (found) {
+                            return found;
+                        }
+                    }
+                    return null;
+                };
+
+                const buildRequestList = (requestItems) => {
+                    if (!requestItems || !requestItems.length) {
+                        return null;
+                    }
                     const requestList = document.createElement('ul');
                     requestList.className = 'request-list';
-                    collection.requests.forEach((request) => {
+                    requestItems.forEach((request) => {
                         const listItem = document.createElement('li');
                         listItem.className = 'request-item';
                         const button = document.createElement('button');
                         button.type = 'button';
                         button.dataset.collectionId = collection.id;
                         button.dataset.requestId = request.id;
+                        button.dataset.directoryId = request.directory_id ?? '';
                         button.textContent = `${request.method} · ${request.name}`;
                         button.addEventListener('click', (event) => {
                             event.stopPropagation();
                             state.selectedCollectionId = collection.id;
+                            state.selectedDirectoryId = request.directory_id ?? null;
                             state.selectedRequestId = request.id;
                             state.collapsedCollections.delete(collection.id);
+                            state.openCollectionMenuId = null;
                             renderEnvironmentOptions(collection);
                             populateForm(collection, request);
                             highlightSelection();
@@ -1293,7 +1502,70 @@
                         listItem.appendChild(button);
                         requestList.appendChild(listItem);
                     });
-                    body.appendChild(requestList);
+                    return requestList;
+                };
+
+                const buildDirectoryBranch = (parentId) => {
+                    const branchItems = [];
+
+                    const directoryRequests = requestsByDirectory.get(parentId) || [];
+                    const requestList = buildRequestList(directoryRequests);
+                    if (requestList) {
+                        branchItems.push(requestList);
+                    }
+
+                    const children = directoryChildren.get(parentId) || [];
+                    children.forEach((directory) => {
+                        const directoryItem = document.createElement('div');
+                        directoryItem.className = 'directory-item';
+
+                        const button = document.createElement('button');
+                        button.type = 'button';
+                        button.className = 'directory-button';
+                        button.dataset.collectionId = collection.id;
+                        button.dataset.directoryId = directory.id;
+                        button.textContent = directory.name;
+                        button.addEventListener('click', (event) => {
+                            event.stopPropagation();
+                            state.selectedCollectionId = collection.id;
+                            state.selectedDirectoryId = directory.id;
+                            let nextRequest = null;
+                            if (isRequestInDirectorySubtree(state.selectedRequestId, directory.id)) {
+                                nextRequest = requests.find((req) => req.id === state.selectedRequestId) || null;
+                            }
+                            if (!nextRequest) {
+                                nextRequest = findFirstRequestInDirectory(directory.id);
+                            }
+                            state.selectedRequestId = nextRequest ? nextRequest.id : null;
+                            state.collapsedCollections.delete(collection.id);
+                            state.openCollectionMenuId = null;
+                            renderEnvironmentOptions(collection);
+                            populateForm(collection, nextRequest || null);
+                            highlightSelection();
+                        });
+                        directoryItem.appendChild(button);
+
+                        const childBranch = buildDirectoryBranch(directory.id);
+                        if (childBranch) {
+                            directoryItem.appendChild(childBranch);
+                        }
+
+                        branchItems.push(directoryItem);
+                    });
+
+                    if (!branchItems.length) {
+                        return null;
+                    }
+
+                    const container = document.createElement('div');
+                    container.className = parentId === null ? 'request-tree' : 'request-tree nested';
+                    branchItems.forEach((item) => container.appendChild(item));
+                    return container;
+                };
+
+                const tree = buildDirectoryBranch(null);
+                if (tree) {
+                    body.appendChild(tree);
                 } else {
                     const empty = document.createElement('p');
                     empty.className = 'muted';
@@ -1307,7 +1579,9 @@
                 card.addEventListener('click', () => {
                     state.selectedCollectionId = collection.id;
                     state.collapsedCollections.delete(collection.id);
-                    const firstRequest = collection.requests[0] || null;
+                    state.openCollectionMenuId = null;
+                    const firstRequest = requests[0] || null;
+                    state.selectedDirectoryId = firstRequest ? firstRequest.directory_id ?? null : null;
                     state.selectedRequestId = firstRequest ? firstRequest.id : null;
                     renderEnvironmentOptions(collection);
                     populateForm(collection, firstRequest || null);
@@ -1324,17 +1598,33 @@
             preserveSelection = true,
             focusCollectionId = null,
             focusRequestId = null,
+            focusDirectoryId = null,
         } = {}) => {
             const previousCollectionId = state.selectedCollectionId;
             const previousRequestId = state.selectedRequestId;
+            const previousDirectoryId = state.selectedDirectoryId;
 
             const collections = await fetchJson(endpoints.collections);
             state.collections = normalizeList(collections).map((collection) => ({
                 ...collection,
+                directories: Array.isArray(collection.directories)
+                    ? [...collection.directories].sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name))
+                    : [],
                 requests: Array.isArray(collection.requests)
                     ? [...collection.requests].sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name))
                     : [],
             }));
+
+            state.collections.sort((a, b) => a.name.localeCompare(b.name));
+
+            state.directoryMaps = new Map();
+            state.collections.forEach((collection) => {
+                const directoryMap = new Map();
+                (collection.directories || []).forEach((directory) => {
+                    directoryMap.set(directory.id, directory);
+                });
+                state.directoryMaps.set(collection.id, directoryMap);
+            });
 
             const validCollapsed = new Set();
             state.collections.forEach((collection) => {
@@ -1358,31 +1648,68 @@
 
             state.selectedCollectionId = nextCollectionId;
             const collection = state.collections.find((item) => item.id === nextCollectionId) || null;
-            state.selectedDirectoryId = null;
 
-            let nextRequestId = focusRequestId;
-            if (collection) {
-                if (nextRequestId === null) {
-                    if (
-                        preserveSelection &&
-                        previousRequestId &&
-                        collection.requests.some((item) => item.id === previousRequestId)
-                    ) {
-                        nextRequestId = previousRequestId;
-                    } else {
-                        nextRequestId = collection.requests[0]?.id ?? null;
-                    }
-                }
-                state.selectedRequestId = nextRequestId;
-                const request = collection.requests.find((item) => item.id === nextRequestId) || null;
-                renderEnvironmentOptions(collection);
-                populateForm(collection, request || null);
-            } else {
+            if (!collection) {
+                state.selectedCollectionId = null;
                 state.selectedRequestId = null;
+                state.selectedDirectoryId = null;
                 renderEnvironmentOptions(null);
                 populateForm(null, null);
+                highlightSelection();
+                return;
             }
 
+            let nextRequestId = focusRequestId;
+            if (nextRequestId === null) {
+                if (
+                    preserveSelection &&
+                    previousRequestId &&
+                    collection.requests.some((item) => item.id === previousRequestId)
+                ) {
+                    nextRequestId = previousRequestId;
+                } else {
+                    nextRequestId = collection.requests[0]?.id ?? null;
+                }
+            }
+            state.selectedRequestId = nextRequestId;
+
+            let nextDirectoryId = focusDirectoryId;
+            if (nextDirectoryId === null) {
+                if (state.selectedRequestId) {
+                    const matchingRequest = collection.requests.find((item) => item.id === state.selectedRequestId);
+                    nextDirectoryId = matchingRequest?.directory_id ?? null;
+                } else if (
+                    preserveSelection &&
+                    previousDirectoryId &&
+                    state.directoryMaps.get(collection.id)?.has(previousDirectoryId)
+                ) {
+                    nextDirectoryId = previousDirectoryId;
+                } else {
+                    nextDirectoryId = null;
+                }
+            }
+            state.selectedDirectoryId = nextDirectoryId;
+
+            if (
+                focusDirectoryId !== null &&
+                state.selectedDirectoryId === focusDirectoryId &&
+                state.selectedRequestId !== null
+            ) {
+                const alignedRequest = collection.requests.find((item) => item.id === state.selectedRequestId);
+                if (!alignedRequest || (alignedRequest.directory_id ?? null) !== focusDirectoryId) {
+                    state.selectedRequestId = null;
+                }
+            }
+
+            const request = state.selectedRequestId
+                ? collection.requests.find((item) => item.id === state.selectedRequestId) || null
+                : null;
+            if (!request && collection.requests.length === 0) {
+                state.selectedRequestId = null;
+            }
+
+            renderEnvironmentOptions(collection);
+            populateForm(collection, request || null);
             highlightSelection();
         };
 
