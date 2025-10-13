@@ -176,10 +176,12 @@
         collapsedCollections: new Set(),
         collapsedDirectoryKeys: new Set(),
         knownDirectoryKeys: new Set(),
+        knownCollectionIds: new Set(),
         openCollectionMenuId: null,
         openDirectoryMenuKey: null,
         openRequestMenuKey: null,
         isCollectionsActionMenuOpen: false,
+        isInitialized: false,
         directoryMaps: new Map(),
         dragState: null,
     };
@@ -1223,6 +1225,7 @@
             state.selectedCollectionId = collection.id;
             state.selectedRequestId = null;
             state.selectedDirectoryId = directoryId ?? null;
+            expandCollectionExclusive(collection.id);
             renderEnvironmentOptions(collection);
             populateForm(collection, null);
             if (directoryId !== null) {
@@ -1260,6 +1263,40 @@
             if (elements.createRequestButton) {
                 elements.createRequestButton.disabled = state.selectedCollectionId === null;
             }
+        };
+
+        const expandCollectionExclusive = (collectionId) => {
+            if (collectionId === null || collectionId === undefined) {
+                return;
+            }
+            const nextCollapsed = new Set();
+            state.collections.forEach((collection) => {
+                if (collection.id !== collectionId) {
+                    nextCollapsed.add(collection.id);
+                }
+            });
+            state.collapsedCollections = nextCollapsed;
+        };
+
+        const activateCollection = (collection, { request = null, preserveExistingRequest = true } = {}) => {
+            if (!collection) {
+                return;
+            }
+            const previousSelectionMatches = preserveExistingRequest && state.selectedCollectionId === collection.id;
+            let nextRequest = request || null;
+            if (!nextRequest && previousSelectionMatches && state.selectedRequestId !== null) {
+                nextRequest = collection.requests?.find((item) => item.id === state.selectedRequestId) || null;
+            }
+            if (!nextRequest) {
+                nextRequest = collection.requests?.[0] || null;
+            }
+            state.selectedCollectionId = collection.id;
+            state.selectedRequestId = nextRequest ? nextRequest.id : null;
+            state.selectedDirectoryId = nextRequest ? nextRequest.directory_id ?? null : null;
+            expandCollectionExclusive(collection.id);
+            renderEnvironmentOptions(collection);
+            populateForm(collection, nextRequest || null);
+            highlightSelection();
         };
 
         const closeCollectionsActionMenu = () => {
@@ -1909,9 +1946,6 @@
                 const collectionId = Number(card.dataset.collectionId);
                 const isActiveCollection = collectionId === state.selectedCollectionId;
                 card.classList.toggle('active', isActiveCollection);
-                if (isActiveCollection) {
-                    state.collapsedCollections.delete(collectionId);
-                }
                 updateCardCollapseState(card, state.collapsedCollections.has(collectionId));
                 const requestButtons = card.querySelectorAll('.request-item .request-select');
                 requestButtons.forEach((button) => {
@@ -2019,15 +2053,17 @@
                     event.stopPropagation();
                     closeCollectionMenu();
                     closeDirectoryMenu();
+                    closeRequestMenu();
                     state.openCollectionMenuId = null;
-                    const nextCollapsed = !state.collapsedCollections.has(collection.id);
-                    if (nextCollapsed) {
-                        state.collapsedCollections.add(collection.id);
+                    const currentlyCollapsed = state.collapsedCollections.has(collection.id);
+                    if (currentlyCollapsed) {
+                        state.openRequestMenuKey = null;
+                        activateCollection(collection, { preserveExistingRequest: true });
                     } else {
-                        state.collapsedCollections.delete(collection.id);
+                        state.collapsedCollections.add(collection.id);
+                        updateCardCollapseState(card, true);
+                        highlightSelection();
                     }
-                    updateCardCollapseState(card, nextCollapsed);
-                    highlightSelection();
                 });
 
                 header.appendChild(toggleButton);
@@ -2212,7 +2248,7 @@
                             state.selectedCollectionId = collection.id;
                             state.selectedDirectoryId = request.directory_id ?? null;
                             state.selectedRequestId = request.id;
-                            state.collapsedCollections.delete(collection.id);
+                            expandCollectionExclusive(collection.id);
                             state.openCollectionMenuId = null;
                             renderEnvironmentOptions(collection);
                             populateForm(collection, request);
@@ -2408,7 +2444,7 @@
                                     nextRequest = findFirstRequestInDirectory(directory.id);
                                 }
                                 state.selectedRequestId = nextRequest ? nextRequest.id : null;
-                                state.collapsedCollections.delete(collection.id);
+                                expandCollectionExclusive(collection.id);
                                 state.openCollectionMenuId = null;
                                 renderEnvironmentOptions(collection);
                                 populateForm(collection, nextRequest || null);
@@ -2579,15 +2615,10 @@
                 card.addEventListener('click', () => {
                     closeCollectionMenu();
                     closeDirectoryMenu();
-                    state.selectedCollectionId = collection.id;
-                    state.collapsedCollections.delete(collection.id);
+                    closeRequestMenu();
                     state.openCollectionMenuId = null;
-                    const firstRequest = requests[0] || null;
-                    state.selectedDirectoryId = firstRequest ? firstRequest.directory_id ?? null : null;
-                    state.selectedRequestId = firstRequest ? firstRequest.id : null;
-                    renderEnvironmentOptions(collection);
-                    populateForm(collection, firstRequest || null);
-                    highlightSelection();
+                    state.openRequestMenuKey = null;
+                    activateCollection(collection, { preserveExistingRequest: false });
                 });
 
                 list.appendChild(card);
@@ -2618,6 +2649,16 @@
             }));
 
             state.collections.sort((a, b) => a.name.localeCompare(b.name));
+
+            const previousKnownCollectionIds = state.knownCollectionIds || new Set();
+            const collapsedCollections = new Set(state.collapsedCollections || []);
+            state.collections.forEach((collection) => {
+                if (!previousKnownCollectionIds.has(collection.id)) {
+                    collapsedCollections.add(collection.id);
+                }
+            });
+            state.collapsedCollections = collapsedCollections;
+            state.knownCollectionIds = new Set(state.collections.map((collection) => collection.id));
 
             state.directoryMaps = new Map();
             state.collections.forEach((collection) => {
@@ -2673,7 +2714,7 @@
                 if (preserveSelection && previousCollectionId && state.collections.some((item) => item.id === previousCollectionId)) {
                     nextCollectionId = previousCollectionId;
                 } else {
-                    nextCollectionId = state.collections[0]?.id ?? null;
+                    nextCollectionId = null;
                 }
             }
 
@@ -2687,8 +2728,11 @@
                 renderEnvironmentOptions(null);
                 populateForm(null, null);
                 highlightSelection();
+                state.isInitialized = true;
                 return;
             }
+
+            expandCollectionExclusive(collection.id);
 
             let nextRequestId = focusRequestId;
             if (nextRequestId === null) {
@@ -2742,6 +2786,7 @@
             renderEnvironmentOptions(collection);
             populateForm(collection, request || null);
             highlightSelection();
+            state.isInitialized = true;
         };
 
         const importCollectionFromPostman = async (file) => {
