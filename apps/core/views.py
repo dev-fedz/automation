@@ -14,6 +14,7 @@ import json
 import requests
 
 from django.contrib.auth.decorators import login_required
+from django.db import transaction
 from django.http import Http404
 from django.shortcuts import render
 from rest_framework import status, viewsets
@@ -121,6 +122,49 @@ class ApiRequestViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(collection_id=collection_id)
         return queryset
 
+    @action(detail=False, methods=["post"], url_path="reorder")
+    def reorder(self, request):
+        collection_id = request.data.get("collection")
+        if collection_id in (None, ""):
+            raise ValidationError({"collection": "Collection is required."})
+        try:
+            collection_id = int(collection_id)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError({"collection": "Collection must be a valid integer."}) from exc
+
+        directory_id = request.data.get("directory")
+        if directory_id in (None, ""):
+            directory_id = None
+        else:
+            try:
+                directory_id = int(directory_id)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"directory": "Directory must be a valid integer or null."}) from exc
+
+        ordered_ids = request.data.get("ordered_ids") or []
+        if not isinstance(ordered_ids, list):
+            raise ValidationError({"ordered_ids": "ordered_ids must be a list."})
+        try:
+            ordered_ids = [int(item) for item in ordered_ids]
+        except (TypeError, ValueError) as exc:
+            raise ValidationError({"ordered_ids": "ordered_ids must contain only integers."}) from exc
+
+        queryset = models.ApiRequest.objects.filter(collection_id=collection_id)
+        if directory_id is None:
+            queryset = queryset.filter(directory__isnull=True)
+        else:
+            queryset = queryset.filter(directory_id=directory_id)
+
+        existing_ids = list(queryset.values_list("id", flat=True))
+        if len(existing_ids) != len(ordered_ids) or set(existing_ids) != set(ordered_ids):
+            raise ValidationError({"ordered_ids": "ordered_ids must match the existing request ids."})
+
+        with transaction.atomic():
+            for index, request_id in enumerate(ordered_ids):
+                models.ApiRequest.objects.filter(pk=request_id).update(order=index)
+
+        return Response({"status": "ok"}, status=status.HTTP_200_OK)
+
 
 class ApiCollectionDirectoryViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.ApiCollectionDirectorySerializer
@@ -144,6 +188,49 @@ class ApiCollectionDirectoryViewSet(viewsets.ModelViewSet):
             serializer.save(order=sibling_count)
             return
         serializer.save()
+
+    @action(detail=False, methods=["post"], url_path="reorder")
+    def reorder(self, request):
+        collection_id = request.data.get("collection")
+        if collection_id in (None, ""):
+            raise ValidationError({"collection": "Collection is required."})
+        try:
+            collection_id = int(collection_id)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError({"collection": "Collection must be a valid integer."}) from exc
+
+        parent_id = request.data.get("parent")
+        if parent_id in (None, ""):
+            parent_id = None
+        else:
+            try:
+                parent_id = int(parent_id)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"parent": "Parent must be a valid integer or null."}) from exc
+
+        ordered_ids = request.data.get("ordered_ids") or []
+        if not isinstance(ordered_ids, list):
+            raise ValidationError({"ordered_ids": "ordered_ids must be a list."})
+        try:
+            ordered_ids = [int(item) for item in ordered_ids]
+        except (TypeError, ValueError) as exc:
+            raise ValidationError({"ordered_ids": "ordered_ids must contain only integers."}) from exc
+
+        queryset = models.ApiCollectionDirectory.objects.filter(collection_id=collection_id)
+        if parent_id is None:
+            queryset = queryset.filter(parent__isnull=True)
+        else:
+            queryset = queryset.filter(parent_id=parent_id)
+
+        existing_ids = list(queryset.values_list("id", flat=True))
+        if len(existing_ids) != len(ordered_ids) or set(existing_ids) != set(ordered_ids):
+            raise ValidationError({"ordered_ids": "ordered_ids must match the existing folder ids."})
+
+        with transaction.atomic():
+            for index, directory_id in enumerate(ordered_ids):
+                models.ApiCollectionDirectory.objects.filter(pk=directory_id).update(order=index)
+
+        return Response({"status": "ok"}, status=status.HTTP_200_OK)
 
 
 class ApiRunViewSet(viewsets.ReadOnlyModelViewSet):

@@ -177,6 +177,7 @@
         openCollectionMenuId: null,
         openDirectoryMenuKey: null,
         directoryMaps: new Map(),
+        dragState: null,
     };
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -244,12 +245,65 @@
             directories: root.dataset.directoriesUrl,
         };
 
+        const ensureTrailingSlash = (url) => {
+            if (!url) {
+                return '';
+            }
+            return url.endsWith('/') ? url : `${url}/`;
+        };
+
         const getDirectoriesEndpoint = () => {
-            const base = endpoints.directories;
+            if (!endpoints.directories) {
+                return null;
+            }
+            return ensureTrailingSlash(endpoints.directories);
+        };
+
+        const getDirectoryReorderEndpoint = () => {
+            const base = getDirectoriesEndpoint();
             if (!base) {
                 return null;
             }
-            return base.endsWith('/') ? base : `${base}/`;
+            return `${base}reorder/`;
+        };
+
+        const getRequestsEndpointBase = () => {
+            if (!endpoints.requests) {
+                return null;
+            }
+            return ensureTrailingSlash(endpoints.requests);
+        };
+
+        const getRequestReorderEndpoint = () => {
+            const base = getRequestsEndpointBase();
+            if (!base) {
+                return null;
+            }
+            return `${base}reorder/`;
+        };
+
+        const reorderDirectories = async ({ collectionId, parentId, orderedIds }) => {
+            const endpoint = getDirectoryReorderEndpoint();
+            if (!endpoint) {
+                throw new Error('Directory endpoint unavailable.');
+            }
+            return postJson(endpoint, {
+                collection: collectionId,
+                parent: parentId,
+                ordered_ids: orderedIds,
+            });
+        };
+
+        const reorderRequests = async ({ collectionId, directoryId, orderedIds }) => {
+            const endpoint = getRequestReorderEndpoint();
+            if (!endpoint) {
+                throw new Error('Request endpoint unavailable.');
+            }
+            return postJson(endpoint, {
+                collection: collectionId,
+                directory: directoryId,
+                ordered_ids: orderedIds,
+            });
         };
 
         const tabButtons = elements.tabButtons;
@@ -1242,6 +1296,425 @@
             state.openCollectionMenuId = null;
         };
 
+        const cancelDragState = () => {
+            const drag = state.dragState;
+            if (!drag) {
+                return;
+            }
+            if (drag.placeholder?.parentNode) {
+                drag.placeholder.parentNode.removeChild(drag.placeholder);
+            }
+            if (drag.sourceElement) {
+                drag.sourceElement.classList.remove('is-dragging');
+            }
+            state.dragState = null;
+        };
+
+        const createDragPlaceholder = (type) => {
+            if (type === 'request') {
+                const placeholder = document.createElement('li');
+                placeholder.className = 'drag-placeholder drag-placeholder--request';
+                placeholder.setAttribute('aria-hidden', 'true');
+                return placeholder;
+            }
+            const placeholder = document.createElement('div');
+            placeholder.className = 'drag-placeholder drag-placeholder--directory';
+            placeholder.setAttribute('aria-hidden', 'true');
+            return placeholder;
+        };
+
+        const positionDragPlaceholder = (container, referenceElement, before = true) => {
+            const drag = state.dragState;
+            if (!drag) {
+                return;
+            }
+            if (!drag.placeholder) {
+                drag.placeholder = createDragPlaceholder(drag.type);
+            }
+            const placeholder = drag.placeholder;
+            if (!placeholder) {
+                return;
+            }
+            if (placeholder.parentNode && placeholder.parentNode !== container) {
+                placeholder.parentNode.removeChild(placeholder);
+            }
+            if (!placeholder.parentNode) {
+                container.appendChild(placeholder);
+            }
+            if (referenceElement) {
+                if (before) {
+                    container.insertBefore(placeholder, referenceElement);
+                } else if (referenceElement.nextSibling) {
+                    container.insertBefore(placeholder, referenceElement.nextSibling);
+                } else {
+                    container.appendChild(placeholder);
+                }
+            } else {
+                if (before) {
+                    container.insertBefore(placeholder, container.firstChild);
+                } else {
+                    container.appendChild(placeholder);
+                }
+            }
+            drag.targetContainer = container;
+        };
+
+        const positionPlaceholderByPoint = (container, clientY, selector) => {
+            if (!container) {
+                return;
+            }
+            const elements = Array.from(container.children).filter((node) =>
+                node.nodeType === Node.ELEMENT_NODE && node.matches(selector)
+            );
+            if (!elements.length) {
+                positionDragPlaceholder(container, null, false);
+                return;
+            }
+            for (const element of elements) {
+                const rect = element.getBoundingClientRect();
+                const midpoint = rect.top + rect.height / 2;
+                if (clientY < midpoint) {
+                    positionDragPlaceholder(container, element, true);
+                    return;
+                }
+            }
+            positionDragPlaceholder(container, null, false);
+        };
+
+        const getRequestContainerMeta = (container) => {
+            if (!container) {
+                return { collectionId: null, directoryId: null };
+            }
+            const collectionAttr = container.dataset.collectionId;
+            const directoryAttr = container.dataset.directoryId;
+            const collectionId = collectionAttr ? Number(collectionAttr) : null;
+            const directoryId = directoryAttr === '' ? null : Number(directoryAttr);
+            return { collectionId, directoryId: Number.isNaN(directoryId) ? null : directoryId };
+        };
+
+        const getDirectoryContainerMeta = (container) => {
+            if (!container) {
+                return { collectionId: null, parentId: null };
+            }
+            const collectionAttr = container.dataset.collectionId;
+            const parentAttr = container.dataset.parentId;
+            const collectionId = collectionAttr ? Number(collectionAttr) : null;
+            const parentId = parentAttr === '' ? null : Number(parentAttr);
+            return { collectionId, parentId: Number.isNaN(parentId) ? null : parentId };
+        };
+
+        const beginRequestDrag = (event, { element, container, requestId, directoryId, collectionId }) => {
+            if (!event.dataTransfer) {
+                return;
+            }
+            closeCollectionMenu();
+            closeDirectoryMenu();
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', 'request');
+            const initialOrder = Array.from(container.querySelectorAll('.request-item')).map((item) => Number(item.dataset.requestId));
+            state.dragState = {
+                type: 'request',
+                sourceId: requestId,
+                parentId: directoryId ?? null,
+                collectionId,
+                sourceElement: element,
+                originContainer: container,
+                targetContainer: container,
+                placeholder: null,
+                initialOrder,
+            };
+            element.classList.add('is-dragging');
+        };
+
+        const handleRequestDragOver = (event, targetElement, parentDirectoryId, collectionId) => {
+            const drag = state.dragState;
+            if (!drag || drag.type !== 'request') {
+                return;
+            }
+            if (drag.collectionId !== collectionId) {
+                return;
+            }
+            const normalizedParentId = parentDirectoryId ?? null;
+            if (drag.parentId !== normalizedParentId) {
+                return;
+            }
+            const container = targetElement.parentElement;
+            if (!container) {
+                return;
+            }
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+            positionPlaceholderByPoint(container, event.clientY, '.request-item');
+        };
+
+        const handleRequestContainerDragOver = (event, container) => {
+            const drag = state.dragState;
+            if (!drag || drag.type !== 'request') {
+                return;
+            }
+            const { collectionId, directoryId } = getRequestContainerMeta(container);
+            if (drag.collectionId !== collectionId) {
+                return;
+            }
+            const normalizedDirectory = directoryId ?? null;
+            if (drag.parentId !== normalizedDirectory) {
+                return;
+            }
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+            positionPlaceholderByPoint(container, event.clientY, '.request-item');
+        };
+
+        const completeRequestDrop = async (container) => {
+            const drag = state.dragState;
+            if (!drag || drag.type !== 'request') {
+                return;
+            }
+            const placeholder = drag.placeholder;
+            const sourceElement = drag.sourceElement;
+            const targetContainer = drag.targetContainer || container;
+            const { directoryId } = getRequestContainerMeta(targetContainer);
+            if (placeholder && placeholder.parentNode && sourceElement) {
+                placeholder.parentNode.insertBefore(sourceElement, placeholder);
+            }
+            if (placeholder && placeholder.parentNode) {
+                placeholder.parentNode.removeChild(placeholder);
+            }
+            if (sourceElement) {
+                sourceElement.classList.remove('is-dragging');
+            }
+            const orderedIds = Array.from(targetContainer.querySelectorAll('.request-item')).map((item) => Number(item.dataset.requestId));
+            const hasChanged = orderedIds.length === drag.initialOrder.length
+                ? orderedIds.some((id, index) => id !== drag.initialOrder[index])
+                : true;
+            state.dragState = null;
+            if (!hasChanged) {
+                return;
+            }
+            setStatus('Updating request order...', 'loading');
+            try {
+                await reorderRequests({
+                    collectionId: drag.collectionId,
+                    directoryId: drag.parentId,
+                    orderedIds,
+                });
+                await refreshCollections({
+                    preserveSelection: true,
+                    focusCollectionId: drag.collectionId,
+                    focusDirectoryId: directoryId ?? drag.parentId,
+                    focusRequestId: drag.sourceId,
+                });
+                setStatus('Request order updated.', 'success');
+            } catch (error) {
+                setStatus(error instanceof Error ? error.message : 'Failed to reorder request.', 'error');
+            }
+        };
+
+        const beginDirectoryDrag = (event, { element, parentId, collectionId, container, directoryId }) => {
+            if (!event.dataTransfer) {
+                return;
+            }
+            closeCollectionMenu();
+            closeDirectoryMenu();
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', 'directory');
+            const siblings = Array.from(container.children).filter((node) => node.classList && node.classList.contains('directory-item'));
+            const initialOrder = siblings.map((node) => Number(node.dataset.directoryId));
+            state.dragState = {
+                type: 'directory',
+                sourceId: directoryId,
+                parentId: parentId ?? null,
+                collectionId,
+                sourceElement: element,
+                originContainer: container,
+                targetContainer: container,
+                placeholder: null,
+                initialOrder,
+            };
+            element.classList.add('is-dragging');
+        };
+
+        const handleDirectoryDragOver = (event, targetElement, collectionId) => {
+            const drag = state.dragState;
+            if (!drag || drag.type !== 'directory') {
+                return;
+            }
+            if (drag.collectionId !== collectionId) {
+                return;
+            }
+            const container = targetElement.parentElement;
+            if (!container) {
+                return;
+            }
+            const { parentId } = getDirectoryContainerMeta(container);
+            const normalizedParent = parentId ?? null;
+            if (drag.parentId !== normalizedParent) {
+                return;
+            }
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+            positionPlaceholderByPoint(container, event.clientY, '.directory-item');
+        };
+
+        const handleDirectoryContainerDragOver = (event, container) => {
+            const drag = state.dragState;
+            if (!drag || drag.type !== 'directory') {
+                return;
+            }
+            const { collectionId, parentId } = getDirectoryContainerMeta(container);
+            if (drag.collectionId !== collectionId) {
+                return;
+            }
+            const normalizedParent = parentId ?? null;
+            if (drag.parentId !== normalizedParent) {
+                return;
+            }
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+            positionPlaceholderByPoint(container, event.clientY, '.directory-item');
+        };
+
+        const completeDirectoryDrop = async (container) => {
+            const drag = state.dragState;
+            if (!drag || drag.type !== 'directory') {
+                return;
+            }
+            const placeholder = drag.placeholder;
+            const sourceElement = drag.sourceElement;
+            const targetContainer = drag.targetContainer || container;
+            const { parentId } = getDirectoryContainerMeta(targetContainer);
+            if (placeholder && placeholder.parentNode && sourceElement) {
+                placeholder.parentNode.insertBefore(sourceElement, placeholder);
+            }
+            if (placeholder && placeholder.parentNode) {
+                placeholder.parentNode.removeChild(placeholder);
+            }
+            if (sourceElement) {
+                sourceElement.classList.remove('is-dragging');
+            }
+            const orderedIds = Array.from(targetContainer.children)
+                .filter((node) => node.classList && node.classList.contains('directory-item'))
+                .map((node) => Number(node.dataset.directoryId));
+            const hasChanged = orderedIds.length === drag.initialOrder.length
+                ? orderedIds.some((id, index) => id !== drag.initialOrder[index])
+                : true;
+            state.dragState = null;
+            if (!hasChanged) {
+                return;
+            }
+            setStatus('Updating folder order...', 'loading');
+            try {
+                await reorderDirectories({
+                    collectionId: drag.collectionId,
+                    parentId: drag.parentId,
+                    orderedIds,
+                });
+                await refreshCollections({
+                    preserveSelection: true,
+                    focusCollectionId: drag.collectionId,
+                    focusDirectoryId: drag.sourceId,
+                    focusRequestId: state.selectedRequestId,
+                });
+                setStatus('Folder order updated.', 'success');
+            } catch (error) {
+                setStatus(error instanceof Error ? error.message : 'Failed to reorder folder.', 'error');
+            }
+        };
+
+        const setupRequestContainerDrag = (container, parentDirectoryId, collection) => {
+            if (!container) {
+                return;
+            }
+            container.dataset.collectionId = String(collection.id);
+            container.dataset.directoryId = parentDirectoryId ?? '';
+            if (container.dataset.dragBound === 'true') {
+                return;
+            }
+            container.dataset.dragBound = 'true';
+            container.addEventListener('dragover', (event) => handleRequestContainerDragOver(event, container));
+            container.addEventListener('drop', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                completeRequestDrop(container);
+            });
+        };
+
+        const setupRequestDrag = (listItem, request, parentDirectoryId, collection, container) => {
+            listItem.dataset.requestId = request.id;
+            listItem.dataset.collectionId = collection.id;
+            listItem.dataset.directoryId = parentDirectoryId ?? '';
+
+            const handle = document.createElement('span');
+            handle.className = 'drag-handle drag-handle--request';
+            handle.setAttribute('title', 'Drag to reorder requests');
+            handle.textContent = '::';
+            handle.draggable = true;
+            handle.addEventListener('dragstart', (event) => beginRequestDrag(event, {
+                element: listItem,
+                container,
+                requestId: request.id,
+                directoryId: parentDirectoryId ?? null,
+                collectionId: collection.id,
+            }));
+            handle.addEventListener('dragend', cancelDragState);
+            handle.addEventListener('click', (event) => event.preventDefault());
+            listItem.insertBefore(handle, listItem.firstChild);
+
+            listItem.addEventListener('dragover', (event) => handleRequestDragOver(event, listItem, parentDirectoryId ?? null, collection.id));
+            listItem.addEventListener('drop', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                completeRequestDrop(container);
+            });
+        };
+
+        const setupDirectoryContainerDrag = (container, parentId, collection) => {
+            if (!container) {
+                return;
+            }
+            container.dataset.collectionId = String(collection.id);
+            container.dataset.parentId = parentId ?? '';
+            if (container.dataset.dragBound === 'true') {
+                return;
+            }
+            container.dataset.dragBound = 'true';
+            container.addEventListener('dragover', (event) => handleDirectoryContainerDragOver(event, container));
+            container.addEventListener('drop', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                completeDirectoryDrop(container);
+            });
+        };
+
+        const setupDirectoryDrag = (directoryItem, headerRow, directory, parentId, collection, container) => {
+            directoryItem.dataset.directoryId = directory.id;
+            directoryItem.dataset.collectionId = collection.id;
+            directoryItem.dataset.parentId = parentId ?? '';
+
+            const handle = document.createElement('span');
+            handle.className = 'drag-handle drag-handle--directory';
+            handle.setAttribute('title', 'Drag to reorder folders');
+            handle.textContent = '::';
+            handle.draggable = true;
+            handle.addEventListener('dragstart', (event) => beginDirectoryDrag(event, {
+                element: directoryItem,
+                parentId: parentId ?? null,
+                collectionId: collection.id,
+                container,
+                directoryId: directory.id,
+            }));
+            handle.addEventListener('dragend', cancelDragState);
+            handle.addEventListener('click', (event) => event.preventDefault());
+            headerRow.insertBefore(handle, headerRow.firstChild);
+
+            directoryItem.addEventListener('dragover', (event) => handleDirectoryDragOver(event, directoryItem, collection.id));
+            directoryItem.addEventListener('drop', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                completeDirectoryDrop(directoryItem.parentElement || container);
+            });
+        };
+
         const highlightSelection = () => {
             if (!elements.collectionsList) {
                 return;
@@ -1255,7 +1728,7 @@
                     state.collapsedCollections.delete(collectionId);
                 }
                 updateCardCollapseState(card, state.collapsedCollections.has(collectionId));
-                const requestButtons = card.querySelectorAll('.request-item button');
+                const requestButtons = card.querySelectorAll('.request-item .request-select');
                 requestButtons.forEach((button) => {
                     const isActiveRequest = Number(button.dataset.requestId) === state.selectedRequestId;
                     button.classList.toggle('active', isActiveRequest);
@@ -1550,17 +2023,23 @@
                     return null;
                 };
 
-                const buildRequestList = (requestItems) => {
+                const buildRequestList = (requestItems, parentDirectoryId) => {
                     if (!requestItems || !requestItems.length) {
                         return null;
                     }
                     const requestList = document.createElement('ul');
                     requestList.className = 'request-list';
-                    requestItems.forEach((request) => {
+                    setupRequestContainerDrag(requestList, parentDirectoryId, collection);
+
+                    requestItems.forEach((request, index) => {
                         const listItem = document.createElement('li');
                         listItem.className = 'request-item';
+                        listItem.dataset.requestId = request.id;
+                        listItem.dataset.directoryId = request.directory_id ?? '';
+                        listItem.dataset.collectionId = collection.id;
                         const button = document.createElement('button');
                         button.type = 'button';
+                        button.className = 'request-select';
                         button.dataset.collectionId = collection.id;
                         button.dataset.requestId = request.id;
                         button.dataset.directoryId = request.directory_id ?? '';
@@ -1579,194 +2058,205 @@
                             highlightSelection();
                         });
                         listItem.appendChild(button);
+
+                        setupRequestDrag(listItem, request, parentDirectoryId, collection, requestList);
                         requestList.appendChild(listItem);
                     });
                     return requestList;
                 };
 
                 const buildDirectoryBranch = (parentId) => {
-                    const branchItems = [];
-
                     const directoryRequests = requestsByDirectory.get(parentId) || [];
-                    const requestList = buildRequestList(directoryRequests);
-                    if (requestList) {
-                        branchItems.push(requestList);
-                    }
-
+                    const requestList = buildRequestList(directoryRequests, parentId);
                     const children = directoryChildren.get(parentId) || [];
-                    children.forEach((directory) => {
-                        const directoryItem = document.createElement('div');
-                        directoryItem.className = 'directory-item';
-                        directoryItem.dataset.directoryId = directory.id;
-                        directoryItem.dataset.collectionId = collection.id;
 
-                        const headerRow = document.createElement('div');
-                        headerRow.className = 'directory-item__header';
-
-                        const button = document.createElement('button');
-                        button.type = 'button';
-                        button.className = 'directory-button';
-                        button.dataset.collectionId = collection.id;
-                        button.dataset.directoryId = directory.id;
-                        button.textContent = directory.name;
-                        button.addEventListener('click', (event) => {
-                            event.stopPropagation();
-                            closeCollectionMenu();
-                            closeDirectoryMenu();
-                            state.selectedCollectionId = collection.id;
-                            state.selectedDirectoryId = directory.id;
-                            let nextRequest = null;
-                            if (isRequestInDirectorySubtree(state.selectedRequestId, directory.id)) {
-                                nextRequest = requests.find((req) => req.id === state.selectedRequestId) || null;
-                            }
-                            if (!nextRequest) {
-                                nextRequest = findFirstRequestInDirectory(directory.id);
-                            }
-                            state.selectedRequestId = nextRequest ? nextRequest.id : null;
-                            state.collapsedCollections.delete(collection.id);
-                            state.openCollectionMenuId = null;
-                            renderEnvironmentOptions(collection);
-                            populateForm(collection, nextRequest || null);
-                            highlightSelection();
-                        });
-
-                        const menuWrapper = document.createElement('div');
-                        menuWrapper.className = 'directory-menu-wrapper';
-                        const menuKey = buildDirectoryMenuKey(collection.id, directory.id);
-                        const isMenuOpen = state.openDirectoryMenuKey === menuKey;
-
-                        const menuButton = document.createElement('button');
-                        menuButton.type = 'button';
-                        menuButton.className = 'directory-menu-toggle';
-                        menuButton.setAttribute('aria-label', `Folder actions for ${directory.name}`);
-                        menuButton.setAttribute('aria-expanded', String(isMenuOpen));
-                        menuButton.innerHTML = '<span aria-hidden="true">...</span>';
-
-                        const menu = document.createElement('div');
-                        menu.className = 'directory-menu';
-                        menu.hidden = !isMenuOpen;
-
-                        menuButton.addEventListener('click', (event) => {
-                            event.stopPropagation();
-                            closeCollectionMenu();
-                            const wasOpen = state.openDirectoryMenuKey === menuKey;
-                            if (state.openDirectoryMenuKey && state.openDirectoryMenuKey !== menuKey) {
-                                closeDirectoryMenu();
-                            }
-                            if (!wasOpen) {
-                                state.openDirectoryMenuKey = menuKey;
-                                menu.hidden = false;
-                                menuButton.setAttribute('aria-expanded', 'true');
-                            } else {
-                                menu.hidden = true;
-                                menuButton.setAttribute('aria-expanded', 'false');
-                                state.openDirectoryMenuKey = null;
-                            }
-                        });
-
-                        const renameButton = document.createElement('button');
-                        renameButton.type = 'button';
-                        renameButton.className = 'directory-menu-item';
-                        renameButton.textContent = 'Rename Folder';
-                        renameButton.addEventListener('click', async (event) => {
-                            event.stopPropagation();
-                            closeDirectoryMenu();
-                            const inputName = await promptForDirectoryName(directory.name, 'Rename folder:');
-                            if (inputName === null) {
-                                setStatus('Folder rename cancelled.', 'neutral');
-                                return;
-                            }
-                            const sanitizedName = inputName.trim();
-                            if (!sanitizedName) {
-                                setStatus('Enter a folder name to continue.', 'error');
-                                return;
-                            }
-                            const directoriesEndpoint = getDirectoriesEndpoint();
-                            if (!directoriesEndpoint) {
-                                setStatus('Directory endpoint unavailable.', 'error');
-                                return;
-                            }
-                            const detailUrl = `${directoriesEndpoint}${directory.id}/`;
-                            setStatus('Renaming folder...', 'loading');
-                            try {
-                                await postJson(detailUrl, { name: sanitizedName }, 'PATCH');
-                                await refreshCollections({
-                                    preserveSelection: true,
-                                    focusCollectionId: collection.id,
-                                    focusDirectoryId: directory.id,
-                                    focusRequestId: state.selectedRequestId,
-                                });
-                                setStatus('Folder renamed successfully.', 'success');
-                            } catch (error) {
-                                setStatus(error instanceof Error ? error.message : 'Failed to rename folder.', 'error');
-                            }
-                        });
-
-                        const deleteButton = document.createElement('button');
-                        deleteButton.type = 'button';
-                        deleteButton.className = 'directory-menu-item';
-                        deleteButton.textContent = 'Delete Folder';
-                        deleteButton.addEventListener('click', async (event) => {
-                            event.stopPropagation();
-                            closeDirectoryMenu();
-                            const confirmed = window.confirm(`Delete folder "${directory.name}" and all nested items?`);
-                            if (!confirmed) {
-                                setStatus('Folder deletion cancelled.', 'neutral');
-                                return;
-                            }
-                            const directoriesEndpoint = getDirectoriesEndpoint();
-                            if (!directoriesEndpoint) {
-                                setStatus('Directory endpoint unavailable.', 'error');
-                                return;
-                            }
-                            const detailUrl = `${directoriesEndpoint}${directory.id}/`;
-                            const requestStays = state.selectedRequestId
-                                ? !isRequestInDirectorySubtree(state.selectedRequestId, directory.id)
-                                : true;
-                            const focusDirectoryId = state.selectedDirectoryId === directory.id
-                                ? directory.parent_id ?? null
-                                : state.selectedDirectoryId;
-                            const focusRequestId = requestStays ? state.selectedRequestId : null;
-
-                            setStatus('Deleting folder...', 'loading');
-                            try {
-                                await deleteResource(detailUrl);
-                                await refreshCollections({
-                                    preserveSelection: requestStays,
-                                    focusCollectionId: collection.id,
-                                    focusDirectoryId,
-                                    focusRequestId,
-                                });
-                                setStatus('Folder deleted successfully.', 'success');
-                            } catch (error) {
-                                setStatus(error instanceof Error ? error.message : 'Failed to delete folder.', 'error');
-                            }
-                        });
-
-                        menu.appendChild(renameButton);
-                        menu.appendChild(deleteButton);
-                        menuWrapper.appendChild(menuButton);
-                        menuWrapper.appendChild(menu);
-
-                        headerRow.appendChild(button);
-                        headerRow.appendChild(menuWrapper);
-                        directoryItem.appendChild(headerRow);
-
-                        const childBranch = buildDirectoryBranch(directory.id);
-                        if (childBranch) {
-                            directoryItem.appendChild(childBranch);
-                        }
-
-                        branchItems.push(directoryItem);
-                    });
-
-                    if (!branchItems.length) {
+                    if (!requestList && !children.length) {
                         return null;
                     }
 
                     const container = document.createElement('div');
                     container.className = parentId === null ? 'request-tree' : 'request-tree nested';
-                    branchItems.forEach((item) => container.appendChild(item));
+
+                    if (requestList) {
+                        container.appendChild(requestList);
+                    }
+
+                    if (children.length) {
+                        const directoriesContainer = document.createElement('div');
+                        directoriesContainer.className = 'directory-children';
+                        setupDirectoryContainerDrag(directoriesContainer, parentId ?? null, collection);
+
+                        children.forEach((directory) => {
+                            const directoryItem = document.createElement('div');
+                            directoryItem.className = 'directory-item';
+                            directoryItem.dataset.directoryId = directory.id;
+                            directoryItem.dataset.collectionId = collection.id;
+                            directoryItem.dataset.parentId = directory.parent_id ?? '';
+
+                            const headerRow = document.createElement('div');
+                            headerRow.className = 'directory-item__header';
+
+                            const button = document.createElement('button');
+                            button.type = 'button';
+                            button.className = 'directory-button';
+                            button.dataset.collectionId = collection.id;
+                            button.dataset.directoryId = directory.id;
+                            button.textContent = directory.name;
+                            button.addEventListener('click', (event) => {
+                                event.stopPropagation();
+                                closeCollectionMenu();
+                                closeDirectoryMenu();
+                                state.selectedCollectionId = collection.id;
+                                state.selectedDirectoryId = directory.id;
+                                let nextRequest = null;
+                                if (isRequestInDirectorySubtree(state.selectedRequestId, directory.id)) {
+                                    nextRequest = requests.find((req) => req.id === state.selectedRequestId) || null;
+                                }
+                                if (!nextRequest) {
+                                    nextRequest = findFirstRequestInDirectory(directory.id);
+                                }
+                                state.selectedRequestId = nextRequest ? nextRequest.id : null;
+                                state.collapsedCollections.delete(collection.id);
+                                state.openCollectionMenuId = null;
+                                renderEnvironmentOptions(collection);
+                                populateForm(collection, nextRequest || null);
+                                highlightSelection();
+                            });
+
+                            const menuWrapper = document.createElement('div');
+                            menuWrapper.className = 'directory-menu-wrapper';
+                            const menuKey = buildDirectoryMenuKey(collection.id, directory.id);
+                            const isMenuOpen = state.openDirectoryMenuKey === menuKey;
+
+                            const menuButton = document.createElement('button');
+                            menuButton.type = 'button';
+                            menuButton.className = 'directory-menu-toggle';
+                            menuButton.setAttribute('aria-label', `Folder actions for ${directory.name}`);
+                            menuButton.setAttribute('aria-expanded', String(isMenuOpen));
+                            menuButton.innerHTML = '<span aria-hidden="true">...</span>';
+
+                            const menu = document.createElement('div');
+                            menu.className = 'directory-menu';
+                            menu.hidden = !isMenuOpen;
+
+                            menuButton.addEventListener('click', (event) => {
+                                event.stopPropagation();
+                                closeCollectionMenu();
+                                const wasOpen = state.openDirectoryMenuKey === menuKey;
+                                if (state.openDirectoryMenuKey && state.openDirectoryMenuKey !== menuKey) {
+                                    closeDirectoryMenu();
+                                }
+                                if (!wasOpen) {
+                                    state.openDirectoryMenuKey = menuKey;
+                                    menu.hidden = false;
+                                    menuButton.setAttribute('aria-expanded', 'true');
+                                } else {
+                                    menu.hidden = true;
+                                    menuButton.setAttribute('aria-expanded', 'false');
+                                    state.openDirectoryMenuKey = null;
+                                }
+                            });
+
+                            const renameButton = document.createElement('button');
+                            renameButton.type = 'button';
+                            renameButton.className = 'directory-menu-item';
+                            renameButton.textContent = 'Rename Folder';
+                            renameButton.addEventListener('click', async (event) => {
+                                event.stopPropagation();
+                                closeDirectoryMenu();
+                                const inputName = await promptForDirectoryName(directory.name, 'Rename folder:');
+                                if (inputName === null) {
+                                    setStatus('Folder rename cancelled.', 'neutral');
+                                    return;
+                                }
+                                const sanitizedName = inputName.trim();
+                                if (!sanitizedName) {
+                                    setStatus('Enter a folder name to continue.', 'error');
+                                    return;
+                                }
+                                const directoriesEndpoint = getDirectoriesEndpoint();
+                                if (!directoriesEndpoint) {
+                                    setStatus('Directory endpoint unavailable.', 'error');
+                                    return;
+                                }
+                                const detailUrl = `${directoriesEndpoint}${directory.id}/`;
+                                setStatus('Renaming folder...', 'loading');
+                                try {
+                                    await postJson(detailUrl, { name: sanitizedName }, 'PATCH');
+                                    await refreshCollections({
+                                        preserveSelection: true,
+                                        focusCollectionId: collection.id,
+                                        focusDirectoryId: directory.id,
+                                        focusRequestId: state.selectedRequestId,
+                                    });
+                                    setStatus('Folder renamed successfully.', 'success');
+                                } catch (error) {
+                                    setStatus(error instanceof Error ? error.message : 'Failed to rename folder.', 'error');
+                                }
+                            });
+
+                            const deleteButton = document.createElement('button');
+                            deleteButton.type = 'button';
+                            deleteButton.className = 'directory-menu-item';
+                            deleteButton.textContent = 'Delete Folder';
+                            deleteButton.addEventListener('click', async (event) => {
+                                event.stopPropagation();
+                                closeDirectoryMenu();
+                                const confirmed = window.confirm(`Delete folder "${directory.name}" and all nested items?`);
+                                if (!confirmed) {
+                                    setStatus('Folder deletion cancelled.', 'neutral');
+                                    return;
+                                }
+                                const directoriesEndpoint = getDirectoriesEndpoint();
+                                if (!directoriesEndpoint) {
+                                    setStatus('Directory endpoint unavailable.', 'error');
+                                    return;
+                                }
+                                const detailUrl = `${directoriesEndpoint}${directory.id}/`;
+                                const requestStays = state.selectedRequestId
+                                    ? !isRequestInDirectorySubtree(state.selectedRequestId, directory.id)
+                                    : true;
+                                const focusDirectoryId = state.selectedDirectoryId === directory.id
+                                    ? directory.parent_id ?? null
+                                    : state.selectedDirectoryId;
+                                const focusRequestId = requestStays ? state.selectedRequestId : null;
+
+                                setStatus('Deleting folder...', 'loading');
+                                try {
+                                    await deleteResource(detailUrl);
+                                    await refreshCollections({
+                                        preserveSelection: requestStays,
+                                        focusCollectionId: collection.id,
+                                        focusDirectoryId,
+                                        focusRequestId,
+                                    });
+                                    setStatus('Folder deleted successfully.', 'success');
+                                } catch (error) {
+                                    setStatus(error instanceof Error ? error.message : 'Failed to delete folder.', 'error');
+                                }
+                            });
+
+                            menu.appendChild(renameButton);
+                            menu.appendChild(deleteButton);
+                            menuWrapper.appendChild(menuButton);
+                            menuWrapper.appendChild(menu);
+
+                            headerRow.appendChild(button);
+                            headerRow.appendChild(menuWrapper);
+                            directoryItem.appendChild(headerRow);
+
+                            const childBranch = buildDirectoryBranch(directory.id);
+                            if (childBranch) {
+                                directoryItem.appendChild(childBranch);
+                            }
+
+                            setupDirectoryDrag(directoryItem, headerRow, directory, directory.parent_id ?? null, collection, directoriesContainer);
+                            directoriesContainer.appendChild(directoryItem);
+                        });
+
+                        container.appendChild(directoriesContainer);
+                    }
+
                     return container;
                 };
 
