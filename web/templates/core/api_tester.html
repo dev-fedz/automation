@@ -19,13 +19,25 @@
     data-execute-url="{% url 'core:core-request-execute' %}">
     <section class="api-tester__panel api-tester__collections">
         <header>
-            <h2>Collections</h2>
-            <div class="api-tester__collections-actions">
-                <button type="button" id="create-collection" class="btn btn-secondary">New Collection</button>
-                <button type="button" id="create-directory" class="btn btn-secondary" disabled>New Folder</button>
-                <button type="button" id="import-postman" class="btn btn-secondary">Import Postman</button>
-                <input type="file" id="import-postman-input" accept="application/json" hidden />
+            <div class="api-tester__collections-title">
+                <h2>Collections</h2>
+                <div class="collections-actions-wrapper">
+                    <button type="button"
+                            id="collections-actions-toggle"
+                            class="collections-actions-toggle"
+                            aria-haspopup="true"
+                            aria-expanded="false"
+                            aria-controls="collections-actions-menu"
+                            aria-label="Collections actions">
+                        <span aria-hidden="true">...</span>
+                    </button>
+                    <div id="collections-actions-menu" class="collections-actions-menu" hidden>
+                        <button type="button" id="collections-action-create" class="collections-actions-item">New Collection</button>
+                        <button type="button" id="collections-action-import" class="collections-actions-item">Import Postman</button>
+                    </div>
+                </div>
             </div>
+            <input type="file" id="import-postman-input" accept="application/json" hidden />
             <input type="search" id="collection-search" placeholder="Search collections" aria-label="Search collections" />
         </header>
         <div class="api-tester__collections-list" aria-live="polite"></div>

@@ -323,6 +323,15 @@ body.auth-layout { background:#f5f7fb; min-height:100dvh; display:flex; justify-
 .api-tester__builder-title-row{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;}
 .api-tester__builder-title-row h2{margin:0;}
 .api-tester__panel header h2 {margin:0;font-size:1.1rem;font-weight:700;color:#5a4100;letter-spacing:.04em;text-transform:uppercase;}
+.api-tester__collections-title {display:flex;align-items:center;justify-content:space-between;gap:.75rem;}
+.collections-actions-wrapper {position:relative;display:flex;align-items:center;margin-left:auto;}
+.collections-actions-toggle {display:inline-flex;align-items:center;justify-content:center;width:1.75rem;height:1.75rem;border-radius:999px;border:1px solid #e5d9af;background:#fffdf5;color:#8b6f16;font-size:.85rem;line-height:1;transition:background .15s ease,border-color .15s ease,color .15s ease;}
+.collections-actions-toggle:hover,.collections-actions-toggle[aria-expanded="true"] {background:#fff4c7;border-color:#f0c95a;color:#71560c;}
+.collections-actions-toggle span {display:block;font-weight:700;letter-spacing:.1em;}
+.collections-actions-menu {position:absolute;top:calc(100% + .35rem);right:0;min-width:9.5rem;padding:.4rem 0;border:1px solid #ecdba0;border-radius:.6rem;background:#fffdfa;box-shadow:0 8px 18px -10px rgba(50,40,0,.25),0 4px 10px -8px rgba(50,40,0,.18);display:flex;flex-direction:column;z-index:20;}
+.collections-actions-menu[hidden] {display:none !important;}
+.collections-actions-item {background:transparent;border:none;text-align:left;padding:.45rem .85rem;font-size:.74rem;font-weight:600;color:#5a450f;letter-spacing:.03em;transition:background .15s ease,color .15s ease;}
+.collections-actions-item:hover {background:#fff2bd;color:#40300a;}
 .api-tester__collections header input[type="search"] {padding:.55rem .7rem;border:1px solid #e5d9af;border-radius:8px;font-size:.85rem;background:#fffdf5;}
 .api-tester__collections-list {flex:1;overflow:auto;border:1px solid #f1e5be;border-radius:12px;background:#fffdfa;padding:.5rem;display:flex;flex-direction:column;gap:.45rem;}
 .collection-card {border:1px solid #f0e3b8;border-radius:10px;padding:.65rem .75rem;background:#fff;cursor:pointer;display:flex;flex-direction:column;gap:.35rem;transition:box-shadow .2s,transform .2s;}

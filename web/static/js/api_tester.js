@@ -173,12 +173,13 @@
         builder: getInitialBuilderState(),
         activeTab: 'params',
         activeScriptsTab: 'pre',
-    collapsedCollections: new Set(),
-    collapsedDirectoryKeys: new Set(),
-    knownDirectoryKeys: new Set(),
-    openCollectionMenuId: null,
-    openDirectoryMenuKey: null,
-    openRequestMenuKey: null,
+        collapsedCollections: new Set(),
+        collapsedDirectoryKeys: new Set(),
+        knownDirectoryKeys: new Set(),
+        openCollectionMenuId: null,
+        openDirectoryMenuKey: null,
+        openRequestMenuKey: null,
+        isCollectionsActionMenuOpen: false,
         directoryMaps: new Map(),
         dragState: null,
     };
@@ -234,13 +235,17 @@
             scriptsPanels: Array.from(root.querySelectorAll('[data-script-panel]')),
             scriptEditorPre: document.getElementById('script-pre-editor'),
             scriptEditorPost: document.getElementById('script-post-editor'),
-            createCollectionButton: document.getElementById('create-collection'),
-            createDirectoryButton: document.getElementById('create-directory'),
+            collectionsActionsToggle: document.getElementById('collections-actions-toggle'),
+            collectionsActionsMenu: document.getElementById('collections-actions-menu'),
+            collectionsCreateAction: document.getElementById('collections-action-create'),
+            collectionsImportAction: document.getElementById('collections-action-import'),
+            importPostmanInput: document.getElementById('import-postman-input'),
             createRequestButton: document.getElementById('create-request'),
         };
 
         const endpoints = {
             collections: root.dataset.collectionsUrl,
+            collectionsImport: root.dataset.collectionsImportUrl,
             environments: root.dataset.environmentsUrl,
             execute: root.dataset.executeUrl,
             runTemplate: root.dataset.runUrlTemplate,
@@ -442,6 +447,24 @@
                     'X-CSRFToken': getCookie('csrftoken') || '',
                 },
                 body: JSON.stringify(payload),
+            });
+            const data = await response.json().catch(() => null);
+            if (!response.ok) {
+                const message = data?.detail || data?.error || `Request failed with status ${response.status}`;
+                throw new Error(message);
+            }
+            return data;
+        };
+
+        const postFormData = async (url, formData) => {
+            const response = await fetch(url, {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    Accept: 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken') || '',
+                },
+                body: formData,
             });
             const data = await response.json().catch(() => null);
             if (!response.ok) {
@@ -1234,12 +1257,31 @@
         };
 
         const updateCollectionActionState = () => {
-            if (elements.createDirectoryButton) {
-                elements.createDirectoryButton.disabled = state.selectedCollectionId === null;
-            }
             if (elements.createRequestButton) {
                 elements.createRequestButton.disabled = state.selectedCollectionId === null;
             }
+        };
+
+        const closeCollectionsActionMenu = () => {
+            if (!state.isCollectionsActionMenuOpen) {
+                return;
+            }
+            if (elements.collectionsActionsMenu) {
+                elements.collectionsActionsMenu.hidden = true;
+            }
+            if (elements.collectionsActionsToggle) {
+                elements.collectionsActionsToggle.setAttribute('aria-expanded', 'false');
+            }
+            state.isCollectionsActionMenuOpen = false;
+        };
+
+        const openCollectionsActionMenu = () => {
+            if (!elements.collectionsActionsMenu || !elements.collectionsActionsToggle) {
+                return;
+            }
+            elements.collectionsActionsMenu.hidden = false;
+            elements.collectionsActionsToggle.setAttribute('aria-expanded', 'true');
+            state.isCollectionsActionMenuOpen = true;
         };
 
         const getCurrentFilterText = () => (elements.search ? elements.search.value || '' : '');
@@ -1351,6 +1393,7 @@
         };
 
         const closeCollectionMenu = () => {
+            closeCollectionsActionMenu();
             if (state.openCollectionMenuId === null) {
                 return;
             }
@@ -2005,6 +2048,7 @@
 
                 menuButton.addEventListener('click', (event) => {
                     event.stopPropagation();
+                    closeCollectionsActionMenu();
                     closeDirectoryMenu();
                     const wasOpen = state.openCollectionMenuId === collection.id;
                     if (state.openCollectionMenuId !== null) {
@@ -2021,52 +2065,6 @@
                     }
                 });
 
-                const addFolderButton = document.createElement('button');
-                addFolderButton.type = 'button';
-                addFolderButton.className = 'collection-menu-item';
-                addFolderButton.textContent = 'Add New Folder';
-                addFolderButton.addEventListener('click', async (event) => {
-                    event.stopPropagation();
-                    closeDirectoryMenu();
-                    hideMenuForCollection(collection.id);
-                    state.openCollectionMenuId = null;
-                    const inputName = await promptForDirectoryName('New Folder');
-                    if (inputName === null) {
-                        setStatus('Folder creation cancelled.', 'neutral');
-                        return;
-                    }
-                    const sanitizedName = inputName.trim();
-                    if (!sanitizedName) {
-                        setStatus('Enter a folder name to continue.', 'error');
-                        return;
-                    }
-
-                    const directoriesEndpoint = getDirectoriesEndpoint();
-                    if (!directoriesEndpoint) {
-                        setStatus('Directory endpoint unavailable.', 'error');
-                        return;
-                    }
-
-                    setStatus('Creating folder...', 'loading');
-                    try {
-                        const newDirectory = await postJson(directoriesEndpoint, {
-                            collection: collection.id,
-                            parent: null,
-                            name: sanitizedName,
-                            description: '',
-                        });
-                        await refreshCollections({
-                            preserveSelection: true,
-                            focusCollectionId: collection.id,
-                            focusDirectoryId: newDirectory?.id ?? null,
-                            focusRequestId: state.selectedRequestId,
-                        });
-                        setStatus('Folder created successfully.', 'success');
-                    } catch (error) {
-                        setStatus(error instanceof Error ? error.message : 'Failed to create folder.', 'error');
-                    }
-                });
-
                 const addRequestButton = document.createElement('button');
                 addRequestButton.type = 'button';
                 addRequestButton.className = 'collection-menu-item';
@@ -2079,7 +2077,6 @@
                     startNewRequestDraft(collection);
                 });
 
-                menu.appendChild(addFolderButton);
                 menu.appendChild(addRequestButton);
                 menuWrapper.appendChild(menuButton);
                 menuWrapper.appendChild(menu);
@@ -2745,6 +2742,35 @@
             renderEnvironmentOptions(collection);
             populateForm(collection, request || null);
             highlightSelection();
+        };
+
+        const importCollectionFromPostman = async (file) => {
+            if (!file) {
+                return;
+            }
+            const importUrl = endpoints.collectionsImport ? ensureTrailingSlash(endpoints.collectionsImport) : '';
+            if (!importUrl) {
+                setStatus('Import endpoint unavailable.', 'error');
+                return;
+            }
+            const formData = new FormData();
+            formData.append('file', file);
+            setStatus('Importing Postman collection...', 'loading');
+            try {
+                const response = await postFormData(importUrl, formData);
+                const importedId = response?.id ?? response?.collection_id ?? null;
+                await refreshCollections({
+                    preserveSelection: false,
+                    focusCollectionId: importedId,
+                });
+                setStatus('Collection imported successfully.', 'success');
+            } catch (error) {
+                setStatus(error instanceof Error ? error.message : 'Failed to import Postman collection.', 'error');
+            } finally {
+                if (elements.importPostmanInput) {
+                    elements.importPostmanInput.value = '';
+                }
+            }
         };
 
         const renderResponse = (payload) => {
@@ -3539,8 +3565,22 @@
             });
         }
 
-        if (elements.createCollectionButton) {
-            elements.createCollectionButton.addEventListener('click', async () => {
+        if (elements.collectionsActionsToggle) {
+            elements.collectionsActionsToggle.addEventListener('click', (event) => {
+                event.stopPropagation();
+                if (state.isCollectionsActionMenuOpen) {
+                    closeCollectionsActionMenu();
+                } else {
+                    closeCollectionMenu();
+                    openCollectionsActionMenu();
+                }
+            });
+        }
+
+        if (elements.collectionsCreateAction) {
+            elements.collectionsCreateAction.addEventListener('click', async (event) => {
+                event.stopPropagation();
+                closeCollectionsActionMenu();
                 const inputName = await promptForCollectionName('New Collection');
                 if (inputName === null) {
                     setStatus('Collection creation cancelled.', 'neutral');
@@ -3577,6 +3617,48 @@
                 }
             });
         }
+
+        if (elements.collectionsImportAction) {
+            elements.collectionsImportAction.addEventListener('click', (event) => {
+                event.stopPropagation();
+                closeCollectionsActionMenu();
+                if (elements.importPostmanInput) {
+                    elements.importPostmanInput.click();
+                } else {
+                    setStatus('Import input unavailable.', 'error');
+                }
+            });
+        }
+
+        if (elements.importPostmanInput) {
+            elements.importPostmanInput.addEventListener('change', async (event) => {
+                const target = event.target;
+                const file = target instanceof HTMLInputElement && target.files ? target.files[0] : null;
+                if (!file) {
+                    return;
+                }
+                await importCollectionFromPostman(file);
+            });
+        }
+
+        document.addEventListener('click', (event) => {
+            if (!state.isCollectionsActionMenuOpen) {
+                return;
+            }
+            if (
+                (elements.collectionsActionsMenu && elements.collectionsActionsMenu.contains(event.target)) ||
+                (elements.collectionsActionsToggle && elements.collectionsActionsToggle.contains(event.target))
+            ) {
+                return;
+            }
+            closeCollectionsActionMenu();
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && state.isCollectionsActionMenuOpen) {
+                closeCollectionsActionMenu();
+            }
+        });
 
         setStatus('Select a request to begin.', 'neutral');
         renderBuilder();
