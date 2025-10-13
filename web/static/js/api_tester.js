@@ -174,6 +174,8 @@
         activeTab: 'params',
         activeScriptsTab: 'pre',
         collapsedCollections: new Set(),
+        collapsedDirectoryKeys: new Set(),
+        knownDirectoryKeys: new Set(),
         openCollectionMenuId: null,
         openDirectoryMenuKey: null,
         directoryMaps: new Map(),
@@ -304,6 +306,15 @@
                 directory: directoryId,
                 ordered_ids: orderedIds,
             });
+        };
+
+        const updateRequestDirectory = async ({ requestId, directoryId }) => {
+            const base = getRequestsEndpointBase();
+            if (!base) {
+                throw new Error('Request endpoint unavailable.');
+            }
+            const detailUrl = `${base}${requestId}/`;
+            return postJson(detailUrl, { directory: directoryId }, 'PATCH');
         };
 
         const tabButtons = elements.tabButtons;
@@ -1180,17 +1191,23 @@
             updateRunButtonState();
         };
 
-        const startNewRequestDraft = (collection) => {
+        const startNewRequestDraft = (collection, directoryId = null) => {
             if (!collection) {
                 setStatus('Select a collection before creating a request.', 'error');
                 return;
             }
             state.selectedCollectionId = collection.id;
             state.selectedRequestId = null;
-            state.selectedDirectoryId = null;
+            state.selectedDirectoryId = directoryId ?? null;
             renderEnvironmentOptions(collection);
             populateForm(collection, null);
-            elements.builderMeta.textContent = `${collection.name} · New request`;
+            if (directoryId !== null) {
+                const directory = collection.directories?.find((item) => item.id === directoryId) || null;
+                const directoryLabel = directory ? ` · ${directory.name}` : '';
+                elements.builderMeta.textContent = `${collection.name}${directoryLabel} · New request`;
+            } else {
+                elements.builderMeta.textContent = `${collection.name} · New request`;
+            }
             highlightSelection();
             setStatus('Draft ready. Configure the request and press Save.', 'neutral');
         };
@@ -1308,6 +1325,19 @@
                 drag.sourceElement.classList.remove('is-dragging');
             }
             state.dragState = null;
+        };
+
+        const applyDirectoryCollapse = (directoryItem, toggleButton, collapsed) => {
+            if (!directoryItem || !toggleButton) {
+                return;
+            }
+            directoryItem.classList.toggle('is-collapsed', collapsed);
+            toggleButton.setAttribute('aria-expanded', String(!collapsed));
+            const icon = collapsed ? '>' : 'v';
+            toggleButton.innerHTML = `<span aria-hidden="true">${icon}</span>`;
+            const name = directoryItem.dataset.directoryName || 'folder';
+            toggleButton.setAttribute('title', `${collapsed ? 'Expand' : 'Collapse'} ${name}`);
+            toggleButton.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} ${name}`);
         };
 
         const createDragPlaceholder = (type) => {
@@ -1434,10 +1464,6 @@
             if (drag.collectionId !== collectionId) {
                 return;
             }
-            const normalizedParentId = parentDirectoryId ?? null;
-            if (drag.parentId !== normalizedParentId) {
-                return;
-            }
             const container = targetElement.parentElement;
             if (!container) {
                 return;
@@ -1456,10 +1482,6 @@
             if (drag.collectionId !== collectionId) {
                 return;
             }
-            const normalizedDirectory = directoryId ?? null;
-            if (drag.parentId !== normalizedDirectory) {
-                return;
-            }
             event.preventDefault();
             event.dataTransfer.dropEffect = 'move';
             positionPlaceholderByPoint(container, event.clientY, '.request-item');
@@ -1473,7 +1495,7 @@
             const placeholder = drag.placeholder;
             const sourceElement = drag.sourceElement;
             const targetContainer = drag.targetContainer || container;
-            const { directoryId } = getRequestContainerMeta(targetContainer);
+            const { directoryId: targetDirectoryRaw } = getRequestContainerMeta(targetContainer);
             if (placeholder && placeholder.parentNode && sourceElement) {
                 placeholder.parentNode.insertBefore(sourceElement, placeholder);
             }
@@ -1483,30 +1505,69 @@
             if (sourceElement) {
                 sourceElement.classList.remove('is-dragging');
             }
-            const orderedIds = Array.from(targetContainer.querySelectorAll('.request-item')).map((item) => Number(item.dataset.requestId));
-            const hasChanged = orderedIds.length === drag.initialOrder.length
-                ? orderedIds.some((id, index) => id !== drag.initialOrder[index])
+            const targetDirectoryId = targetDirectoryRaw ?? null;
+            const originContainer = drag.originContainer;
+            const sameContainer = originContainer === targetContainer;
+            const targetOrderedIds = Array.from(targetContainer.querySelectorAll('.request-item')).map((item) => Number(item.dataset.requestId));
+            const remainingIds = !sameContainer && originContainer
+                ? Array.from(originContainer.querySelectorAll('.request-item')).map((item) => Number(item.dataset.requestId))
+                : null;
+
+            targetContainer.classList.toggle('request-list--empty', targetOrderedIds.length === 0);
+            const targetMeta = getRequestContainerMeta(targetContainer);
+            if (targetMeta.directoryId !== null) {
+                targetContainer.hidden = targetOrderedIds.length === 0;
+            }
+            if (!sameContainer && originContainer) {
+                originContainer.classList.toggle('request-list--empty', !remainingIds || remainingIds.length === 0);
+                const originMeta = getRequestContainerMeta(originContainer);
+                if (originMeta.directoryId !== null) {
+                    originContainer.hidden = !remainingIds || remainingIds.length === 0;
+                }
+            }
+            const hasChanged = sameContainer
+                ? (targetOrderedIds.length === drag.initialOrder.length
+                    ? targetOrderedIds.some((id, index) => id !== drag.initialOrder[index])
+                    : true)
                 : true;
             state.dragState = null;
             if (!hasChanged) {
                 return;
             }
-            setStatus('Updating request order...', 'loading');
+            const movesDirectory = targetDirectoryId !== drag.parentId;
+            const actionLabel = movesDirectory ? 'Moving request...' : 'Updating request order...';
+            setStatus(actionLabel, 'loading');
             try {
+                if (movesDirectory) {
+                    await updateRequestDirectory({
+                        requestId: drag.sourceId,
+                        directoryId: targetDirectoryId,
+                    });
+                }
                 await reorderRequests({
                     collectionId: drag.collectionId,
-                    directoryId: drag.parentId,
-                    orderedIds,
+                    directoryId: targetDirectoryId,
+                    orderedIds: targetOrderedIds,
                 });
+
+                if (movesDirectory && originContainer && originContainer !== targetContainer && remainingIds) {
+                    if (remainingIds.length) {
+                        await reorderRequests({
+                            collectionId: drag.collectionId,
+                            directoryId: drag.parentId,
+                            orderedIds: remainingIds,
+                        });
+                    }
+                }
                 await refreshCollections({
                     preserveSelection: true,
                     focusCollectionId: drag.collectionId,
-                    focusDirectoryId: directoryId ?? drag.parentId,
+                    focusDirectoryId: targetDirectoryId,
                     focusRequestId: drag.sourceId,
                 });
-                setStatus('Request order updated.', 'success');
+                setStatus(movesDirectory ? 'Request moved successfully.' : 'Request order updated.', 'success');
             } catch (error) {
-                setStatus(error instanceof Error ? error.message : 'Failed to reorder request.', 'error');
+                setStatus(error instanceof Error ? error.message : 'Failed to update request order.', 'error');
             }
         };
 
@@ -1686,10 +1747,11 @@
             });
         };
 
-        const setupDirectoryDrag = (directoryItem, headerRow, directory, parentId, collection, container) => {
+        const setupDirectoryDrag = (directoryItem, headerRow, directory, parentId, collection, container, toggleButton, directoryKey) => {
             directoryItem.dataset.directoryId = directory.id;
             directoryItem.dataset.collectionId = collection.id;
             directoryItem.dataset.parentId = parentId ?? '';
+            directoryItem.dataset.directoryName = directory.name;
 
             const handle = document.createElement('span');
             handle.className = 'drag-handle drag-handle--directory';
@@ -1707,11 +1769,43 @@
             handle.addEventListener('click', (event) => event.preventDefault());
             headerRow.insertBefore(handle, headerRow.firstChild);
 
-            directoryItem.addEventListener('dragover', (event) => handleDirectoryDragOver(event, directoryItem, collection.id));
+            directoryItem.addEventListener('dragover', (event) => {
+                const drag = state.dragState;
+                if (!drag) {
+                    return;
+                }
+                if (drag.type === 'directory') {
+                    handleDirectoryDragOver(event, directoryItem, collection.id);
+                } else if (drag.type === 'request') {
+                    if (directoryKey && toggleButton && state.collapsedDirectoryKeys.has(directoryKey)) {
+                        state.collapsedDirectoryKeys.delete(directoryKey);
+                        applyDirectoryCollapse(directoryItem, toggleButton, false);
+                    }
+                    const requestList = directoryItem.querySelector('.request-list');
+                    if (requestList) {
+                        requestList.hidden = false;
+                        handleRequestContainerDragOver(event, requestList);
+                    }
+                }
+            });
             directoryItem.addEventListener('drop', (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                completeDirectoryDrop(directoryItem.parentElement || container);
+                const drag = state.dragState;
+                if (!drag) {
+                    return;
+                }
+                if (drag.type === 'directory') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    completeDirectoryDrop(directoryItem.parentElement || container);
+                } else if (drag.type === 'request') {
+                    const requestList = directoryItem.querySelector('.request-list');
+                    if (!requestList) {
+                        return;
+                    }
+                    event.preventDefault();
+                    event.stopPropagation();
+                    completeRequestDrop(requestList);
+                }
             });
         };
 
@@ -1733,6 +1827,7 @@
                     const isActiveRequest = Number(button.dataset.requestId) === state.selectedRequestId;
                     button.classList.toggle('active', isActiveRequest);
                 });
+
                 const directoryButtons = card.querySelectorAll('.directory-button');
                 directoryButtons.forEach((button) => {
                     const dirAttr = button.dataset.directoryId;
@@ -1741,6 +1836,18 @@
                         isActiveCollection &&
                         ((dirId === null && state.selectedDirectoryId === null) || dirId === state.selectedDirectoryId);
                     button.classList.toggle('active', isActiveDirectory);
+
+                    const collectionAttr = button.dataset.collectionId;
+                    const directoryCollectionId = collectionAttr ? Number(collectionAttr) : null;
+                    if (directoryCollectionId !== null && dirId !== null) {
+                        const key = buildDirectoryMenuKey(directoryCollectionId, dirId);
+                        const directoryItem = button.closest('.directory-item');
+                        const toggle = directoryItem?.querySelector('.directory-toggle');
+                        if (directoryItem && toggle) {
+                            const collapsed = state.collapsedDirectoryKeys.has(key);
+                            applyDirectoryCollapse(directoryItem, toggle, collapsed);
+                        }
+                    }
                 });
             });
             updateCollectionActionState();
@@ -2024,19 +2131,27 @@
                 };
 
                 const buildRequestList = (requestItems, parentDirectoryId) => {
-                    if (!requestItems || !requestItems.length) {
-                        return null;
-                    }
+                    const items = Array.isArray(requestItems) ? requestItems : [];
                     const requestList = document.createElement('ul');
                     requestList.className = 'request-list';
+                    const isRootList = parentDirectoryId === null;
+                    if (!items.length) {
+                        requestList.classList.add('request-list--empty');
+                        if (!isRootList) {
+                            requestList.hidden = true;
+                        }
+                    } else if (!isRootList) {
+                        requestList.hidden = false;
+                    }
                     setupRequestContainerDrag(requestList, parentDirectoryId, collection);
 
-                    requestItems.forEach((request, index) => {
+                    items.forEach((request) => {
                         const listItem = document.createElement('li');
                         listItem.className = 'request-item';
                         listItem.dataset.requestId = request.id;
                         listItem.dataset.directoryId = request.directory_id ?? '';
                         listItem.dataset.collectionId = collection.id;
+
                         const button = document.createElement('button');
                         button.type = 'button';
                         button.className = 'request-select';
@@ -2057,11 +2172,12 @@
                             populateForm(collection, request);
                             highlightSelection();
                         });
-                        listItem.appendChild(button);
 
+                        listItem.appendChild(button);
                         setupRequestDrag(listItem, request, parentDirectoryId, collection, requestList);
                         requestList.appendChild(listItem);
                     });
+
                     return requestList;
                 };
 
@@ -2069,10 +2185,6 @@
                     const directoryRequests = requestsByDirectory.get(parentId) || [];
                     const requestList = buildRequestList(directoryRequests, parentId);
                     const children = directoryChildren.get(parentId) || [];
-
-                    if (!requestList && !children.length) {
-                        return null;
-                    }
 
                     const container = document.createElement('div');
                     container.className = parentId === null ? 'request-tree' : 'request-tree nested';
@@ -2092,9 +2204,29 @@
                             directoryItem.dataset.directoryId = directory.id;
                             directoryItem.dataset.collectionId = collection.id;
                             directoryItem.dataset.parentId = directory.parent_id ?? '';
+                            directoryItem.dataset.directoryName = directory.name;
 
                             const headerRow = document.createElement('div');
                             headerRow.className = 'directory-item__header';
+
+                            const directoryKey = buildDirectoryMenuKey(collection.id, directory.id);
+                            const isCollapsed = state.collapsedDirectoryKeys.has(directoryKey);
+
+                            const toggleButton = document.createElement('button');
+                            toggleButton.type = 'button';
+                            toggleButton.className = 'directory-toggle';
+                            toggleButton.addEventListener('click', (event) => {
+                                event.stopPropagation();
+                                const currentlyCollapsed = state.collapsedDirectoryKeys.has(directoryKey);
+                                const nextCollapsed = !currentlyCollapsed;
+                                if (nextCollapsed) {
+                                    state.collapsedDirectoryKeys.add(directoryKey);
+                                } else {
+                                    state.collapsedDirectoryKeys.delete(directoryKey);
+                                }
+                                applyDirectoryCollapse(directoryItem, toggleButton, nextCollapsed);
+                            });
+                            headerRow.appendChild(toggleButton);
 
                             const button = document.createElement('button');
                             button.type = 'button';
@@ -2125,7 +2257,7 @@
 
                             const menuWrapper = document.createElement('div');
                             menuWrapper.className = 'directory-menu-wrapper';
-                            const menuKey = buildDirectoryMenuKey(collection.id, directory.id);
+                            const menuKey = directoryKey;
                             const isMenuOpen = state.openDirectoryMenuKey === menuKey;
 
                             const menuButton = document.createElement('button');
@@ -2155,6 +2287,16 @@
                                     menuButton.setAttribute('aria-expanded', 'false');
                                     state.openDirectoryMenuKey = null;
                                 }
+                            });
+
+                            const addRequestButton = document.createElement('button');
+                            addRequestButton.type = 'button';
+                            addRequestButton.className = 'directory-menu-item';
+                            addRequestButton.textContent = 'Add Request';
+                            addRequestButton.addEventListener('click', (event) => {
+                                event.stopPropagation();
+                                closeDirectoryMenu();
+                                startNewRequestDraft(collection, directory.id);
                             });
 
                             const renameButton = document.createElement('button');
@@ -2236,6 +2378,7 @@
                                 }
                             });
 
+                            menu.appendChild(addRequestButton);
                             menu.appendChild(renameButton);
                             menu.appendChild(deleteButton);
                             menuWrapper.appendChild(menuButton);
@@ -2250,7 +2393,8 @@
                                 directoryItem.appendChild(childBranch);
                             }
 
-                            setupDirectoryDrag(directoryItem, headerRow, directory, directory.parent_id ?? null, collection, directoriesContainer);
+                            setupDirectoryDrag(directoryItem, headerRow, directory, directory.parent_id ?? null, collection, directoriesContainer, toggleButton, directoryKey);
+                            applyDirectoryCollapse(directoryItem, toggleButton, isCollapsed);
                             directoriesContainer.appendChild(directoryItem);
                         });
 
@@ -2261,9 +2405,8 @@
                 };
 
                 const tree = buildDirectoryBranch(null);
-                if (tree) {
-                    body.appendChild(tree);
-                } else {
+                body.appendChild(tree);
+                if (!requests.length && !directories.length) {
                     const empty = document.createElement('p');
                     empty.className = 'muted';
                     empty.textContent = 'Collection has no requests yet.';
@@ -2324,6 +2467,24 @@
                 });
                 state.directoryMaps.set(collection.id, directoryMap);
             });
+
+            const previousCollapsedKeys = state.collapsedDirectoryKeys;
+            const previousKnownKeys = state.knownDirectoryKeys || new Set();
+            const nextCollapsedKeys = new Set();
+            const nextKnownKeys = new Set();
+            state.collections.forEach((collection) => {
+                (collection.directories || []).forEach((directory) => {
+                    const key = buildDirectoryMenuKey(collection.id, directory.id);
+                    nextKnownKeys.add(key);
+                    const wasKnown = previousKnownKeys.has(key);
+                    const wasCollapsed = previousCollapsedKeys.has(key);
+                    if (!wasKnown || wasCollapsed) {
+                        nextCollapsedKeys.add(key);
+                    }
+                });
+            });
+            state.knownDirectoryKeys = nextKnownKeys;
+            state.collapsedDirectoryKeys = nextCollapsedKeys;
 
             const validCollapsed = new Set();
             state.collections.forEach((collection) => {
@@ -2628,6 +2789,7 @@
 
             const definition = {
                 collection: collectionId,
+                directory: state.selectedDirectoryId,
                 name: trimmedName,
                 method: elements.method.value || 'GET',
                 url: urlValue,
