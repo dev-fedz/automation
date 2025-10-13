@@ -173,11 +173,12 @@
         builder: getInitialBuilderState(),
         activeTab: 'params',
         activeScriptsTab: 'pre',
-        collapsedCollections: new Set(),
-        collapsedDirectoryKeys: new Set(),
-        knownDirectoryKeys: new Set(),
-        openCollectionMenuId: null,
-        openDirectoryMenuKey: null,
+    collapsedCollections: new Set(),
+    collapsedDirectoryKeys: new Set(),
+    knownDirectoryKeys: new Set(),
+    openCollectionMenuId: null,
+    openDirectoryMenuKey: null,
+    openRequestMenuKey: null,
         directoryMaps: new Map(),
         dragState: null,
     };
@@ -1291,6 +1292,50 @@
             }
         };
 
+        const buildRequestMenuKey = (collectionId, requestId) => `${collectionId}:${requestId}`;
+
+        const hideMenuForRequest = (collectionId, requestId) => {
+            if (!elements.collectionsList) {
+                return;
+            }
+            if (collectionId === null || collectionId === undefined) {
+                return;
+            }
+            if (requestId === null || requestId === undefined) {
+                return;
+            }
+            const card = elements.collectionsList.querySelector(`.collection-card[data-collection-id="${collectionId}"]`);
+            if (!card) {
+                return;
+            }
+            const requestNode = card.querySelector(`.request-item[data-request-id="${requestId}"]`);
+            if (!requestNode) {
+                return;
+            }
+            const menu = requestNode.querySelector('.request-menu');
+            const menuToggle = requestNode.querySelector('.request-menu-toggle');
+            if (menu) {
+                menu.hidden = true;
+            }
+            if (menuToggle) {
+                menuToggle.setAttribute('aria-expanded', 'false');
+            }
+        };
+
+        const closeRequestMenu = () => {
+            const key = state.openRequestMenuKey;
+            if (!key) {
+                return;
+            }
+            const parts = key.split(':');
+            const collectionId = Number(parts[0]);
+            const requestId = Number(parts[1]);
+            if (!Number.isNaN(collectionId) && !Number.isNaN(requestId)) {
+                hideMenuForRequest(collectionId, requestId);
+            }
+            state.openRequestMenuKey = null;
+        };
+
         const closeDirectoryMenu = () => {
             const key = state.openDirectoryMenuKey;
             if (!key) {
@@ -1311,6 +1356,8 @@
             }
             hideMenuForCollection(state.openCollectionMenuId);
             state.openCollectionMenuId = null;
+            closeDirectoryMenu();
+            closeRequestMenu();
         };
 
         const cancelDragState = () => {
@@ -1439,6 +1486,7 @@
             }
             closeCollectionMenu();
             closeDirectoryMenu();
+            closeRequestMenu();
             event.dataTransfer.effectAllowed = 'move';
             event.dataTransfer.setData('text/plain', 'request');
             const initialOrder = Array.from(container.querySelectorAll('.request-item')).map((item) => Number(item.dataset.requestId));
@@ -2163,6 +2211,7 @@
                             event.stopPropagation();
                             closeCollectionMenu();
                             closeDirectoryMenu();
+                            closeRequestMenu();
                             state.selectedCollectionId = collection.id;
                             state.selectedDirectoryId = request.directory_id ?? null;
                             state.selectedRequestId = request.id;
@@ -2174,6 +2223,120 @@
                         });
 
                         listItem.appendChild(button);
+
+                        const menuWrapper = document.createElement('div');
+                        menuWrapper.className = 'request-menu-wrapper';
+                        const menuKey = buildRequestMenuKey(collection.id, request.id);
+                        const isMenuOpen = state.openRequestMenuKey === menuKey;
+
+                        const menuButton = document.createElement('button');
+                        menuButton.type = 'button';
+                        menuButton.className = 'request-menu-toggle';
+                        menuButton.setAttribute('aria-label', `Request actions for ${request.name}`);
+                        menuButton.setAttribute('aria-expanded', String(isMenuOpen));
+                        menuButton.innerHTML = '<span aria-hidden="true">...</span>';
+
+                        const menu = document.createElement('div');
+                        menu.className = 'request-menu';
+                        menu.hidden = !isMenuOpen;
+
+                        menuButton.addEventListener('click', (event) => {
+                            event.stopPropagation();
+                            closeCollectionMenu();
+                            closeDirectoryMenu();
+                            const wasOpen = state.openRequestMenuKey === menuKey;
+                            if (state.openRequestMenuKey && state.openRequestMenuKey !== menuKey) {
+                                closeRequestMenu();
+                            }
+                            if (!wasOpen) {
+                                state.openRequestMenuKey = menuKey;
+                                menu.hidden = false;
+                                menuButton.setAttribute('aria-expanded', 'true');
+                            } else {
+                                menu.hidden = true;
+                                menuButton.setAttribute('aria-expanded', 'false');
+                                state.openRequestMenuKey = null;
+                            }
+                        });
+
+                        const renameButton = document.createElement('button');
+                        renameButton.type = 'button';
+                        renameButton.className = 'request-menu-item';
+                        renameButton.textContent = 'Rename Request';
+                        renameButton.addEventListener('click', async (event) => {
+                            event.stopPropagation();
+                            closeRequestMenu();
+                            const inputName = await promptForRequestName(request.name);
+                            if (inputName === null) {
+                                setStatus('Request rename cancelled.', 'neutral');
+                                return;
+                            }
+                            const sanitizedName = inputName.trim();
+                            if (!sanitizedName) {
+                                setStatus('Enter a request name to continue.', 'error');
+                                return;
+                            }
+                            const requestsEndpoint = getRequestsEndpointBase();
+                            if (!requestsEndpoint) {
+                                setStatus('Request endpoint unavailable.', 'error');
+                                return;
+                            }
+                            const detailUrl = `${requestsEndpoint}${request.id}/`;
+                            setStatus('Renaming request...', 'loading');
+                            try {
+                                await postJson(detailUrl, { name: sanitizedName }, 'PATCH');
+                                await refreshCollections({
+                                    preserveSelection: true,
+                                    focusCollectionId: collection.id,
+                                    focusDirectoryId: request.directory_id ?? null,
+                                    focusRequestId: request.id,
+                                });
+                                setStatus('Request renamed successfully.', 'success');
+                            } catch (error) {
+                                setStatus(error instanceof Error ? error.message : 'Failed to rename request.', 'error');
+                            }
+                        });
+
+                        const deleteButton = document.createElement('button');
+                        deleteButton.type = 'button';
+                        deleteButton.className = 'request-menu-item';
+                        deleteButton.textContent = 'Delete Request';
+                        deleteButton.addEventListener('click', async (event) => {
+                            event.stopPropagation();
+                            closeRequestMenu();
+                            const confirmed = window.confirm(`Delete request "${request.name}"?`);
+                            if (!confirmed) {
+                                setStatus('Request deletion cancelled.', 'neutral');
+                                return;
+                            }
+                            const requestsEndpoint = getRequestsEndpointBase();
+                            if (!requestsEndpoint) {
+                                setStatus('Request endpoint unavailable.', 'error');
+                                return;
+                            }
+                            const detailUrl = `${requestsEndpoint}${request.id}/`;
+                            const wasSelected = state.selectedRequestId === request.id;
+                            setStatus('Deleting request...', 'loading');
+                            try {
+                                await deleteResource(detailUrl);
+                                await refreshCollections({
+                                    preserveSelection: !wasSelected,
+                                    focusCollectionId: collection.id,
+                                    focusDirectoryId: request.directory_id ?? null,
+                                    focusRequestId: wasSelected ? null : state.selectedRequestId,
+                                });
+                                setStatus('Request deleted successfully.', 'success');
+                            } catch (error) {
+                                setStatus(error instanceof Error ? error.message : 'Failed to delete request.', 'error');
+                            }
+                        });
+
+                        menu.appendChild(renameButton);
+                        menu.appendChild(deleteButton);
+                        menuWrapper.appendChild(menuButton);
+                        menuWrapper.appendChild(menu);
+                        listItem.appendChild(menuWrapper);
+
                         setupRequestDrag(listItem, request, parentDirectoryId, collection, requestList);
                         requestList.appendChild(listItem);
                     });
@@ -2467,6 +2630,17 @@
                 });
                 state.directoryMaps.set(collection.id, directoryMap);
             });
+
+            if (state.openRequestMenuKey) {
+                const parts = state.openRequestMenuKey.split(':');
+                const collectionId = Number(parts[0]);
+                const requestId = Number(parts[1]);
+                const collection = state.collections.find((item) => item.id === collectionId);
+                const requestExists = collection?.requests?.some((item) => item.id === requestId) ?? false;
+                if (!collection || !requestExists) {
+                    state.openRequestMenuKey = null;
+                }
+            }
 
             const previousCollapsedKeys = state.collapsedDirectoryKeys;
             const previousKnownKeys = state.knownDirectoryKeys || new Set();
