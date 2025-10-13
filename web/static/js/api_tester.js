@@ -175,6 +175,7 @@
         activeScriptsTab: 'pre',
         collapsedCollections: new Set(),
         openCollectionMenuId: null,
+        openDirectoryMenuKey: null,
         directoryMaps: new Map(),
     };
 
@@ -241,6 +242,14 @@
             runTemplate: root.dataset.runUrlTemplate,
             requests: root.dataset.requestsUrl,
             directories: root.dataset.directoriesUrl,
+        };
+
+        const getDirectoriesEndpoint = () => {
+            const base = endpoints.directories;
+            if (!base) {
+                return null;
+            }
+            return base.endsWith('/') ? base : `${base}/`;
         };
 
         const tabButtons = elements.tabButtons;
@@ -376,12 +385,33 @@
             return data;
         };
 
+        const deleteResource = async (url) => {
+            const response = await fetch(url, {
+                method: 'DELETE',
+                credentials: 'include',
+                headers: {
+                    Accept: 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken') || '',
+                },
+            });
+            if (!response.ok) {
+                let message = `Request failed with status ${response.status}`;
+                try {
+                    const data = await response.json();
+                    message = data?.detail || data?.error || message;
+                } catch (error) {
+                    // ignore body parsing failure
+                }
+                throw new Error(message);
+            }
+        };
+
         const promptForCollectionName = async (defaultName) => {
             return window.prompt('Enter a name for the new collection:', defaultName);
         };
 
-        const promptForDirectoryName = async (defaultName) => {
-            return window.prompt('Enter a name for the new folder:', defaultName);
+        const promptForDirectoryName = async (defaultName, message = 'Enter a name for the new folder:') => {
+            return window.prompt(message, defaultName);
         };
 
         let saveModalResolver = null;
@@ -1160,6 +1190,50 @@
             }
         };
 
+        const buildDirectoryMenuKey = (collectionId, directoryId) => `${collectionId}:${directoryId}`;
+
+        const hideMenuForDirectory = (collectionId, directoryId) => {
+            if (!elements.collectionsList) {
+                return;
+            }
+            if (collectionId === null || collectionId === undefined) {
+                return;
+            }
+            if (directoryId === null || directoryId === undefined) {
+                return;
+            }
+            const card = elements.collectionsList.querySelector(`.collection-card[data-collection-id="${collectionId}"]`);
+            if (!card) {
+                return;
+            }
+            const directoryNode = card.querySelector(`.directory-item[data-directory-id="${directoryId}"]`);
+            if (!directoryNode) {
+                return;
+            }
+            const menu = directoryNode.querySelector('.directory-menu');
+            const menuToggle = directoryNode.querySelector('.directory-menu-toggle');
+            if (menu) {
+                menu.hidden = true;
+            }
+            if (menuToggle) {
+                menuToggle.setAttribute('aria-expanded', 'false');
+            }
+        };
+
+        const closeDirectoryMenu = () => {
+            const key = state.openDirectoryMenuKey;
+            if (!key) {
+                return;
+            }
+            const parts = key.split(':');
+            const collectionId = Number(parts[0]);
+            const directoryId = Number(parts[1]);
+            if (!Number.isNaN(collectionId) && !Number.isNaN(directoryId)) {
+                hideMenuForDirectory(collectionId, directoryId);
+            }
+            state.openDirectoryMenuKey = null;
+        };
+
         const closeCollectionMenu = () => {
             if (state.openCollectionMenuId === null) {
                 return;
@@ -1222,6 +1296,7 @@
                 return;
             }
             closeCollectionMenu();
+            closeDirectoryMenu();
             const list = elements.collectionsList;
             list.innerHTML = '';
             const normalizedFilter = filterText.trim().toLowerCase();
@@ -1271,6 +1346,8 @@
                 `;
                 toggleButton.addEventListener('click', (event) => {
                     event.stopPropagation();
+                    closeCollectionMenu();
+                    closeDirectoryMenu();
                     state.openCollectionMenuId = null;
                     const nextCollapsed = !state.collapsedCollections.has(collection.id);
                     if (nextCollapsed) {
@@ -1300,6 +1377,7 @@
 
                 menuButton.addEventListener('click', (event) => {
                     event.stopPropagation();
+                    closeDirectoryMenu();
                     const wasOpen = state.openCollectionMenuId === collection.id;
                     if (state.openCollectionMenuId !== null) {
                         hideMenuForCollection(state.openCollectionMenuId);
@@ -1321,6 +1399,7 @@
                 addFolderButton.textContent = 'Add New Folder';
                 addFolderButton.addEventListener('click', async (event) => {
                     event.stopPropagation();
+                    closeDirectoryMenu();
                     hideMenuForCollection(collection.id);
                     state.openCollectionMenuId = null;
                     const inputName = await promptForDirectoryName('New Folder');
@@ -1334,14 +1413,11 @@
                         return;
                     }
 
-                    const baseDirectoriesUrl = endpoints.directories;
-                    if (!baseDirectoriesUrl) {
+                    const directoriesEndpoint = getDirectoriesEndpoint();
+                    if (!directoriesEndpoint) {
                         setStatus('Directory endpoint unavailable.', 'error');
                         return;
                     }
-                    const directoriesEndpoint = baseDirectoriesUrl.endsWith('/')
-                        ? baseDirectoriesUrl
-                        : `${baseDirectoriesUrl}/`;
 
                     setStatus('Creating folder...', 'loading');
                     try {
@@ -1369,6 +1445,7 @@
                 addRequestButton.textContent = 'Add New Request';
                 addRequestButton.addEventListener('click', (event) => {
                     event.stopPropagation();
+                    closeDirectoryMenu();
                     hideMenuForCollection(collection.id);
                     state.openCollectionMenuId = null;
                     startNewRequestDraft(collection);
@@ -1490,6 +1567,8 @@
                         button.textContent = `${request.method} · ${request.name}`;
                         button.addEventListener('click', (event) => {
                             event.stopPropagation();
+                            closeCollectionMenu();
+                            closeDirectoryMenu();
                             state.selectedCollectionId = collection.id;
                             state.selectedDirectoryId = request.directory_id ?? null;
                             state.selectedRequestId = request.id;
@@ -1518,6 +1597,11 @@
                     children.forEach((directory) => {
                         const directoryItem = document.createElement('div');
                         directoryItem.className = 'directory-item';
+                        directoryItem.dataset.directoryId = directory.id;
+                        directoryItem.dataset.collectionId = collection.id;
+
+                        const headerRow = document.createElement('div');
+                        headerRow.className = 'directory-item__header';
 
                         const button = document.createElement('button');
                         button.type = 'button';
@@ -1527,6 +1611,8 @@
                         button.textContent = directory.name;
                         button.addEventListener('click', (event) => {
                             event.stopPropagation();
+                            closeCollectionMenu();
+                            closeDirectoryMenu();
                             state.selectedCollectionId = collection.id;
                             state.selectedDirectoryId = directory.id;
                             let nextRequest = null;
@@ -1543,7 +1629,128 @@
                             populateForm(collection, nextRequest || null);
                             highlightSelection();
                         });
-                        directoryItem.appendChild(button);
+
+                        const menuWrapper = document.createElement('div');
+                        menuWrapper.className = 'directory-menu-wrapper';
+                        const menuKey = buildDirectoryMenuKey(collection.id, directory.id);
+                        const isMenuOpen = state.openDirectoryMenuKey === menuKey;
+
+                        const menuButton = document.createElement('button');
+                        menuButton.type = 'button';
+                        menuButton.className = 'directory-menu-toggle';
+                        menuButton.setAttribute('aria-label', `Folder actions for ${directory.name}`);
+                        menuButton.setAttribute('aria-expanded', String(isMenuOpen));
+                        menuButton.innerHTML = '<span aria-hidden="true">...</span>';
+
+                        const menu = document.createElement('div');
+                        menu.className = 'directory-menu';
+                        menu.hidden = !isMenuOpen;
+
+                        menuButton.addEventListener('click', (event) => {
+                            event.stopPropagation();
+                            closeCollectionMenu();
+                            const wasOpen = state.openDirectoryMenuKey === menuKey;
+                            if (state.openDirectoryMenuKey && state.openDirectoryMenuKey !== menuKey) {
+                                closeDirectoryMenu();
+                            }
+                            if (!wasOpen) {
+                                state.openDirectoryMenuKey = menuKey;
+                                menu.hidden = false;
+                                menuButton.setAttribute('aria-expanded', 'true');
+                            } else {
+                                menu.hidden = true;
+                                menuButton.setAttribute('aria-expanded', 'false');
+                                state.openDirectoryMenuKey = null;
+                            }
+                        });
+
+                        const renameButton = document.createElement('button');
+                        renameButton.type = 'button';
+                        renameButton.className = 'directory-menu-item';
+                        renameButton.textContent = 'Rename Folder';
+                        renameButton.addEventListener('click', async (event) => {
+                            event.stopPropagation();
+                            closeDirectoryMenu();
+                            const inputName = await promptForDirectoryName(directory.name, 'Rename folder:');
+                            if (inputName === null) {
+                                setStatus('Folder rename cancelled.', 'neutral');
+                                return;
+                            }
+                            const sanitizedName = inputName.trim();
+                            if (!sanitizedName) {
+                                setStatus('Enter a folder name to continue.', 'error');
+                                return;
+                            }
+                            const directoriesEndpoint = getDirectoriesEndpoint();
+                            if (!directoriesEndpoint) {
+                                setStatus('Directory endpoint unavailable.', 'error');
+                                return;
+                            }
+                            const detailUrl = `${directoriesEndpoint}${directory.id}/`;
+                            setStatus('Renaming folder...', 'loading');
+                            try {
+                                await postJson(detailUrl, { name: sanitizedName }, 'PATCH');
+                                await refreshCollections({
+                                    preserveSelection: true,
+                                    focusCollectionId: collection.id,
+                                    focusDirectoryId: directory.id,
+                                    focusRequestId: state.selectedRequestId,
+                                });
+                                setStatus('Folder renamed successfully.', 'success');
+                            } catch (error) {
+                                setStatus(error instanceof Error ? error.message : 'Failed to rename folder.', 'error');
+                            }
+                        });
+
+                        const deleteButton = document.createElement('button');
+                        deleteButton.type = 'button';
+                        deleteButton.className = 'directory-menu-item';
+                        deleteButton.textContent = 'Delete Folder';
+                        deleteButton.addEventListener('click', async (event) => {
+                            event.stopPropagation();
+                            closeDirectoryMenu();
+                            const confirmed = window.confirm(`Delete folder "${directory.name}" and all nested items?`);
+                            if (!confirmed) {
+                                setStatus('Folder deletion cancelled.', 'neutral');
+                                return;
+                            }
+                            const directoriesEndpoint = getDirectoriesEndpoint();
+                            if (!directoriesEndpoint) {
+                                setStatus('Directory endpoint unavailable.', 'error');
+                                return;
+                            }
+                            const detailUrl = `${directoriesEndpoint}${directory.id}/`;
+                            const requestStays = state.selectedRequestId
+                                ? !isRequestInDirectorySubtree(state.selectedRequestId, directory.id)
+                                : true;
+                            const focusDirectoryId = state.selectedDirectoryId === directory.id
+                                ? directory.parent_id ?? null
+                                : state.selectedDirectoryId;
+                            const focusRequestId = requestStays ? state.selectedRequestId : null;
+
+                            setStatus('Deleting folder...', 'loading');
+                            try {
+                                await deleteResource(detailUrl);
+                                await refreshCollections({
+                                    preserveSelection: requestStays,
+                                    focusCollectionId: collection.id,
+                                    focusDirectoryId,
+                                    focusRequestId,
+                                });
+                                setStatus('Folder deleted successfully.', 'success');
+                            } catch (error) {
+                                setStatus(error instanceof Error ? error.message : 'Failed to delete folder.', 'error');
+                            }
+                        });
+
+                        menu.appendChild(renameButton);
+                        menu.appendChild(deleteButton);
+                        menuWrapper.appendChild(menuButton);
+                        menuWrapper.appendChild(menu);
+
+                        headerRow.appendChild(button);
+                        headerRow.appendChild(menuWrapper);
+                        directoryItem.appendChild(headerRow);
 
                         const childBranch = buildDirectoryBranch(directory.id);
                         if (childBranch) {
@@ -1577,6 +1784,8 @@
                 updateCardCollapseState(card, collapsed);
 
                 card.addEventListener('click', () => {
+                    closeCollectionMenu();
+                    closeDirectoryMenu();
                     state.selectedCollectionId = collection.id;
                     state.collapsedCollections.delete(collection.id);
                     state.openCollectionMenuId = null;

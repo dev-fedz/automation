@@ -352,6 +352,16 @@ body.auth-layout { background:#f5f7fb; min-height:100dvh; display:flex; justify-
 .request-tree {display:flex;flex-direction:column;gap:.35rem;margin-top:.5rem;}
 .request-tree.nested {margin-left:1rem;padding-left:.75rem;border-left:1px dashed rgba(171,141,51,.35);}
 .directory-item {display:flex;flex-direction:column;gap:.3rem;}
+.directory-item__header {display:flex;align-items:center;gap:.3rem;}
+.directory-item__header .directory-button {flex:1;}
+.directory-menu-wrapper {position:relative;display:flex;align-items:center;}
+.directory-menu-toggle {display:inline-flex;align-items:center;justify-content:center;width:1.4rem;height:1.4rem;border-radius:999px;border:1px solid #f1dba0;background:#fff9e6;color:#6b520f;font-size:.68rem;line-height:1;transition:background .15s ease,border-color .15s ease,color .15s ease;}
+.directory-menu-toggle:hover,.directory-menu-toggle[aria-expanded="true"] {background:#ffe38a;border-color:#f4b400;color:#3b2803;}
+.directory-menu-toggle span {display:block;font-weight:700;letter-spacing:.08em;}
+.directory-menu {position:absolute;top:calc(100% + .3rem);right:0;min-width:8.25rem;padding:.35rem 0;border:1px solid #ecdba0;border-radius:.5rem;background:#fffdfa;box-shadow:0 6px 14px -8px rgba(50,40,0,.25),0 3px 8px -6px rgba(50,40,0,.18);display:flex;flex-direction:column;z-index:10;}
+.directory-menu[hidden] {display:none !important;}
+.directory-menu-item {background:transparent;border:none;text-align:left;padding:.4rem .7rem;font-size:.68rem;font-weight:600;color:#5a450f;letter-spacing:.03em;transition:background .15s ease,color .15s ease;}
+.directory-menu-item:hover {background:#fff2bd;color:#40300a;}
 .directory-button {display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;border:1px solid #f1dba0;border-radius:.55rem;background:#fff9e6;color:#6b520f;padding:.35rem .6rem;font-size:.72rem;font-weight:600;letter-spacing:.03em;transition:background .15s ease,color .15s ease,border-color .15s ease,box-shadow .15s ease;}
 .directory-button:hover {background:#fff2bd;color:#503909;border-color:#f0c86e;}
 .directory-button.active {background:#ffe38a;color:#3b2803;border-color:#f4b400;box-shadow:0 3px 8px -4px rgba(90,70,0,.35);}
