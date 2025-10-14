@@ -17,6 +17,7 @@ from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.http import Http404
 from django.shortcuts import render
+from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
@@ -289,6 +290,32 @@ class ApiAdhocRequestView(APIView):
 
         variables.update(overrides)
 
+        collection = None
+        collection_id = payload.get("collection_id")
+        if collection_id not in (None, ""):
+            try:
+                collection_id = int(collection_id)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"collection": "Collection must be a valid integer."}) from exc
+            try:
+                collection = models.ApiCollection.objects.get(pk=collection_id)
+            except models.ApiCollection.DoesNotExist as exc:
+                raise ValidationError({"collection": "Collection not found."}) from exc
+
+        api_request = None
+        request_id = payload.get("request_id")
+        if request_id not in (None, ""):
+            try:
+                request_id = int(request_id)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"request": "Request must be a valid integer."}) from exc
+            api_request = models.ApiRequest.objects.select_related("collection").filter(pk=request_id).first()
+            if api_request:
+                if collection and api_request.collection_id != collection.id:
+                    api_request = None
+                elif not collection:
+                    collection = api_request.collection
+
         resolved_url = services._resolve_variables(url, variables)  # type: ignore[attr-defined]
         resolved_headers = services._resolve_variables(headers, variables)  # type: ignore[attr-defined]
         resolved_params = services._resolve_variables(params, variables)  # type: ignore[attr-defined]
@@ -380,8 +407,22 @@ class ApiAdhocRequestView(APIView):
             else:
                 resolved_body = services._resolve_variables(str(body), variables)  # type: ignore[attr-defined]
 
+        run = models.ApiRun.objects.create(
+            collection=collection,
+            environment=environment,
+            triggered_by=request.user if request.user.is_authenticated else None,
+            status=models.ApiRun.Status.RUNNING,
+            started_at=timezone.now(),
+        )
+        run_result = models.ApiRunResult.objects.create(
+            run=run,
+            request=api_request,
+            order=1,
+            status=models.ApiRunResult.Status.ERROR,
+        )
+
+        start = time.perf_counter()
         try:
-            start = time.perf_counter()
             response = requests.request(
                 method=method,
                 url=resolved_url,
@@ -392,21 +433,53 @@ class ApiAdhocRequestView(APIView):
                 files=files_payload,
                 timeout=max(1.0, float(timeout)),
             )
-            elapsed_ms = (time.perf_counter() - start) * 1000
         except requests.RequestException as exc:  # pragma: no cover - network error path
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            run_result.error = str(exc)
+            run_result.response_time_ms = elapsed_ms
+            run_result.status = models.ApiRunResult.Status.ERROR
+            run_result.save(update_fields=["error", "response_time_ms", "status", "updated_at"])
+            run.status = models.ApiRun.Status.FAILED
+            run.summary = services._summarize_run(1, 0)  # type: ignore[attr-defined]
+            run.finished_at = timezone.now()
+            run.save(update_fields=["status", "summary", "finished_at", "updated_at"])
             return Response(
                 {
                     "error": str(exc),
                     "resolved_url": resolved_url,
                     "request_headers": resolved_headers,
+                    "run_id": run.id,
                 },
                 status=status.HTTP_502_BAD_GATEWAY,
             )
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
 
         try:
             response_json = response.json()
         except ValueError:
             response_json = None
+
+        run_result.response_status = response.status_code
+        run_result.response_headers = dict(response.headers)
+        run_result.response_body = response.text[:20000]
+        run_result.response_time_ms = elapsed_ms
+        run_result.status = models.ApiRunResult.Status.PASSED if response.ok else models.ApiRunResult.Status.FAILED
+        run_result.save(
+            update_fields=[
+                "response_status",
+                "response_headers",
+                "response_body",
+                "response_time_ms",
+                "status",
+                "updated_at",
+            ]
+        )
+        passed = 1 if response.ok else 0
+        run.status = models.ApiRun.Status.PASSED if response.ok else models.ApiRun.Status.FAILED
+        run.summary = services._summarize_run(1, passed)  # type: ignore[attr-defined]
+        run.finished_at = timezone.now()
+        run.save(update_fields=["status", "summary", "finished_at", "updated_at"])
 
         return Response(
             {
@@ -427,6 +500,8 @@ class ApiAdhocRequestView(APIView):
                 },
                 "environment": environment.name if environment else None,
                 "variables": variables,
+                "run_id": run.id,
+                "run_result_id": run_result.id,
             }
         )
 

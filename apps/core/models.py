@@ -164,7 +164,13 @@ class ApiRun(TimeStampedModel):
         PASSED = "passed", "Passed"
         FAILED = "failed", "Failed"
 
-    collection = models.ForeignKey(ApiCollection, on_delete=models.CASCADE, related_name="runs")
+    collection = models.ForeignKey(
+        ApiCollection,
+        on_delete=models.CASCADE,
+        related_name="runs",
+        null=True,
+        blank=True,
+    )
     environment = models.ForeignKey(ApiEnvironment, on_delete=models.SET_NULL, null=True, blank=True, related_name="runs")
     triggered_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="api_runs")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
@@ -173,7 +179,8 @@ class ApiRun(TimeStampedModel):
     finished_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self) -> str:  # pragma: no cover
-        return f"Run {self.pk} - {self.collection.name} ({self.status})"
+        collection_name = self.collection.name if self.collection else "Adhoc"
+        return f"Run {self.pk} - {collection_name} ({self.status})"
 
 
 class ApiRunResult(TimeStampedModel):

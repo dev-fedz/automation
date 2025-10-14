@@ -4017,6 +4017,15 @@
             };
             payload.overrides = {};
 
+            if (collection?.id) {
+                payload.collection_id = collection.id;
+            } else if (state.selectedCollectionId) {
+                payload.collection_id = state.selectedCollectionId;
+            }
+            if (request?.id) {
+                payload.request_id = request.id;
+            }
+
             const authType = state.builder.auth.type;
             if (authType === 'basic') {
                 const username = state.builder.auth.username || '';

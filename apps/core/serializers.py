@@ -295,9 +295,9 @@ class ApiRunResultSerializer(serializers.ModelSerializer):
 
 
 class ApiRunSerializer(serializers.ModelSerializer):
-    collection = serializers.StringRelatedField()
-    environment = serializers.StringRelatedField()
-    triggered_by = serializers.StringRelatedField()
+    collection = serializers.StringRelatedField(allow_null=True)
+    environment = serializers.StringRelatedField(allow_null=True)
+    triggered_by = serializers.StringRelatedField(allow_null=True)
     results = ApiRunResultSerializer(many=True, read_only=True)
 
     class Meta:
