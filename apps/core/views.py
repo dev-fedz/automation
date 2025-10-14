@@ -9,9 +9,12 @@ import binascii
 import io
 import time
 
+import json
+
 import requests
 
 from django.contrib.auth.decorators import login_required
+from django.db import transaction
 from django.http import Http404
 from django.shortcuts import render
 from rest_framework import status, viewsets
@@ -69,6 +72,165 @@ class ApiCollectionViewSet(viewsets.ModelViewSet):
         )
         serializer = serializers.ApiRunSerializer(run, context=self.get_serializer_context())
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"], url_path="import-postman")
+    def import_postman(self, request):
+        file_obj = request.FILES.get("file")
+        raw_payload: Any = None
+
+        if file_obj is not None:
+            try:
+                raw_text = file_obj.read().decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValidationError({"file": "File must be UTF-8 encoded JSON."}) from exc
+            try:
+                raw_payload = json.loads(raw_text)
+            except json.JSONDecodeError as exc:
+                raise ValidationError({"file": "Invalid JSON file."}) from exc
+        else:
+            payload = request.data.get("collection")
+            if isinstance(payload, (dict, list)):
+                raw_payload = payload
+            elif isinstance(payload, str) and payload.strip():
+                try:
+                    raw_payload = json.loads(payload)
+                except json.JSONDecodeError as exc:
+                    raise ValidationError({"collection": "Invalid JSON payload."}) from exc
+
+        if raw_payload is None:
+            raise ValidationError({"collection": "Postman collection JSON is required."})
+        if not isinstance(raw_payload, dict):
+            raise ValidationError({"collection": "Collection must be a JSON object."})
+
+        try:
+            collection = services.import_postman_collection(raw_payload)
+        except ValueError as exc:
+            raise ValidationError({"collection": str(exc)}) from exc
+
+        serializer = self.get_serializer(collection)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class ApiRequestViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.ApiRequestSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = models.ApiRequest.objects.select_related("collection").prefetch_related("assertions").order_by("order", "id")
+        collection_id = self.request.query_params.get("collection")
+        if collection_id:
+            queryset = queryset.filter(collection_id=collection_id)
+        return queryset
+
+    @action(detail=False, methods=["post"], url_path="reorder")
+    def reorder(self, request):
+        collection_id = request.data.get("collection")
+        if collection_id in (None, ""):
+            raise ValidationError({"collection": "Collection is required."})
+        try:
+            collection_id = int(collection_id)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError({"collection": "Collection must be a valid integer."}) from exc
+
+        directory_id = request.data.get("directory")
+        if directory_id in (None, ""):
+            directory_id = None
+        else:
+            try:
+                directory_id = int(directory_id)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"directory": "Directory must be a valid integer or null."}) from exc
+
+        ordered_ids = request.data.get("ordered_ids") or []
+        if not isinstance(ordered_ids, list):
+            raise ValidationError({"ordered_ids": "ordered_ids must be a list."})
+        try:
+            ordered_ids = [int(item) for item in ordered_ids]
+        except (TypeError, ValueError) as exc:
+            raise ValidationError({"ordered_ids": "ordered_ids must contain only integers."}) from exc
+
+        queryset = models.ApiRequest.objects.filter(collection_id=collection_id)
+        if directory_id is None:
+            queryset = queryset.filter(directory__isnull=True)
+        else:
+            queryset = queryset.filter(directory_id=directory_id)
+
+        existing_ids = list(queryset.values_list("id", flat=True))
+        if len(existing_ids) != len(ordered_ids) or set(existing_ids) != set(ordered_ids):
+            raise ValidationError({"ordered_ids": "ordered_ids must match the existing request ids."})
+
+        with transaction.atomic():
+            for index, request_id in enumerate(ordered_ids):
+                models.ApiRequest.objects.filter(pk=request_id).update(order=index)
+
+        return Response({"status": "ok"}, status=status.HTTP_200_OK)
+
+
+class ApiCollectionDirectoryViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.ApiCollectionDirectorySerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = models.ApiCollectionDirectory.objects.select_related("collection", "parent").prefetch_related("requests").order_by("parent_id", "order", "id")
+        collection_id = self.request.query_params.get("collection")
+        if collection_id:
+            queryset = queryset.filter(collection_id=collection_id)
+        parent_id = self.request.query_params.get("parent")
+        if parent_id:
+            queryset = queryset.filter(parent_id=parent_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        collection = serializer.validated_data["collection"]
+        parent = serializer.validated_data.get("parent")
+        if "order" not in serializer.validated_data:
+            sibling_count = models.ApiCollectionDirectory.objects.filter(collection=collection, parent=parent).count()
+            serializer.save(order=sibling_count)
+            return
+        serializer.save()
+
+    @action(detail=False, methods=["post"], url_path="reorder")
+    def reorder(self, request):
+        collection_id = request.data.get("collection")
+        if collection_id in (None, ""):
+            raise ValidationError({"collection": "Collection is required."})
+        try:
+            collection_id = int(collection_id)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError({"collection": "Collection must be a valid integer."}) from exc
+
+        parent_id = request.data.get("parent")
+        if parent_id in (None, ""):
+            parent_id = None
+        else:
+            try:
+                parent_id = int(parent_id)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"parent": "Parent must be a valid integer or null."}) from exc
+
+        ordered_ids = request.data.get("ordered_ids") or []
+        if not isinstance(ordered_ids, list):
+            raise ValidationError({"ordered_ids": "ordered_ids must be a list."})
+        try:
+            ordered_ids = [int(item) for item in ordered_ids]
+        except (TypeError, ValueError) as exc:
+            raise ValidationError({"ordered_ids": "ordered_ids must contain only integers."}) from exc
+
+        queryset = models.ApiCollectionDirectory.objects.filter(collection_id=collection_id)
+        if parent_id is None:
+            queryset = queryset.filter(parent__isnull=True)
+        else:
+            queryset = queryset.filter(parent_id=parent_id)
+
+        existing_ids = list(queryset.values_list("id", flat=True))
+        if len(existing_ids) != len(ordered_ids) or set(existing_ids) != set(ordered_ids):
+            raise ValidationError({"ordered_ids": "ordered_ids must match the existing folder ids."})
+
+        with transaction.atomic():
+            for index, directory_id in enumerate(ordered_ids):
+                models.ApiCollectionDirectory.objects.filter(pk=directory_id).update(order=index)
+
+        return Response({"status": "ok"}, status=status.HTTP_200_OK)
 
 
 class ApiRunViewSet(viewsets.ReadOnlyModelViewSet):

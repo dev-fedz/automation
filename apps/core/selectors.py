@@ -12,10 +12,16 @@ def api_environment_list() -> QuerySet[models.ApiEnvironment]:
 
 
 def api_collection_base_queryset() -> QuerySet[models.ApiCollection]:
-    request_qs = models.ApiRequest.objects.order_by("order", "id").prefetch_related("assertions")
+    request_qs = (
+        models.ApiRequest.objects.select_related("directory")
+        .order_by("order", "id")
+        .prefetch_related("assertions")
+    )
+    directory_qs = models.ApiCollectionDirectory.objects.select_related("parent").order_by("parent_id", "order", "id")
     return models.ApiCollection.objects.prefetch_related(
         "environments",
         Prefetch("requests", queryset=request_qs),
+        Prefetch("directories", queryset=directory_qs),
     )
 
 

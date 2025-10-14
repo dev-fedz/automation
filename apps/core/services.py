@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 import time
 from copy import deepcopy
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
+
+import json
 
 import requests
 from django.db import transaction
@@ -188,6 +190,182 @@ def _summarize_run(total: int, passed: int) -> Dict[str, Any]:
     }
 
 
+def _extract_postman_scripts(events: Iterable[dict[str, Any]] | None) -> Tuple[str, str]:
+    pre_script_lines: List[str] = []
+    test_script_lines: List[str] = []
+    if not events:
+        return "", ""
+    for event in events:
+        listen = (event or {}).get("listen")
+        script = (event or {}).get("script") or {}
+        exec_lines = script.get("exec") or []
+        if not isinstance(exec_lines, list):
+            continue
+        text = "\n".join(line for line in exec_lines if isinstance(line, str)).strip()
+        if not text:
+            continue
+        if listen == "prerequest":
+            pre_script_lines.append(text)
+        elif listen == "test":
+            test_script_lines.append(text)
+    return "\n\n".join(pre_script_lines), "\n\n".join(test_script_lines)
+
+
+def _coerce_postman_url(url_payload: Any) -> Tuple[str, Dict[str, Any]]:
+    if isinstance(url_payload, str):
+        return url_payload, {}
+    if not isinstance(url_payload, dict):
+        return "", {}
+    raw = url_payload.get("raw") or ""
+    if not raw:
+        host = url_payload.get("host") or []
+        path = url_payload.get("path") or []
+        if isinstance(host, list) and isinstance(path, list):
+            raw = "https://" + ".".join(filter(None, host)) + "/" + "/".join(filter(None, path))
+    query_params: Dict[str, Any] = {}
+    for entry in url_payload.get("query") or []:
+        if not isinstance(entry, dict):
+            continue
+        key = (entry.get("key") or "").strip()
+        if not key:
+            continue
+        if entry.get("disabled"):
+            continue
+        query_params[key] = entry.get("value", "")
+    return raw, query_params
+
+
+def _coerce_postman_headers(headers_payload: Any) -> Dict[str, Any]:
+    headers: Dict[str, Any] = {}
+    for header in headers_payload or []:
+        if not isinstance(header, dict):
+            continue
+        key = (header.get("key") or "").strip()
+        if not key or header.get("disabled"):
+            continue
+        headers[key] = header.get("value", "")
+    return headers
+
+
+def _extract_postman_body(body_payload: Any) -> Tuple[str, Dict[str, Any], Dict[str, Any], str]:
+    body_type = models.ApiRequest.BodyTypes.NONE
+    body_json: Dict[str, Any] = {}
+    body_form: Dict[str, Any] = {}
+    body_raw = ""
+
+    if not isinstance(body_payload, dict):
+        return body_type, body_json, body_form, body_raw
+
+    mode = body_payload.get("mode")
+    if mode == "raw":
+        raw_value = body_payload.get("raw") or ""
+        language = ((body_payload.get("options") or {}).get("raw") or {}).get("language")
+        if language == "json":
+            try:
+                body_json = json.loads(raw_value) if raw_value else {}
+                body_type = models.ApiRequest.BodyTypes.JSON
+            except ValueError:
+                body_raw = raw_value
+                body_type = models.ApiRequest.BodyTypes.RAW
+        else:
+            body_raw = raw_value
+            body_type = models.ApiRequest.BodyTypes.RAW
+    elif mode in {"urlencoded", "formdata"}:
+        entries = body_payload.get(mode) or []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("type") == "file":
+                # Binary form-data entries are not supported yet; skip them.
+                continue
+            key = (entry.get("key") or "").strip()
+            if not key or entry.get("disabled"):
+                continue
+            body_form[key] = entry.get("value", "")
+        if body_form:
+            body_type = models.ApiRequest.BodyTypes.FORM
+    elif mode == "file":
+        body_type = models.ApiRequest.BodyTypes.RAW
+        body_raw = ""
+
+    return body_type, body_json, body_form, body_raw
+
+
+def _extract_postman_auth(auth_payload: Any) -> Tuple[str, Dict[str, Any], str]:
+    if not isinstance(auth_payload, dict):
+        return models.ApiRequest.AuthTypes.NONE, {}, ""
+    auth_type = (auth_payload.get("type") or "none").lower()
+    if auth_type == "basic":
+        username = ""
+        password = ""
+        for entry in auth_payload.get("basic") or []:
+            if not isinstance(entry, dict):
+                continue
+            key = entry.get("key")
+            if key == "username":
+                username = entry.get("value", "")
+            elif key == "password":
+                password = entry.get("value", "")
+        return models.ApiRequest.AuthTypes.BASIC, {"username": username, "password": password}, ""
+    if auth_type == "bearer":
+        token = ""
+        for entry in auth_payload.get("bearer") or []:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("key") == "token":
+                token = entry.get("value", "")
+                break
+        return models.ApiRequest.AuthTypes.BEARER, {}, token
+    return models.ApiRequest.AuthTypes.NONE, {}, ""
+
+
+def _flatten_postman_items(items: Iterable[dict[str, Any]] | None, parents: Iterable[str] | None = None) -> List[dict[str, Any]]:
+    if not items:
+        return []
+    parents_list = list(parents or [])
+    requests: List[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = (item.get("name") or "Untitled").strip() or "Untitled"
+        if "item" in item:
+            requests.extend(_flatten_postman_items(item.get("item"), parents_list + [name]))
+            continue
+        request_payload = item.get("request")
+        if not isinstance(request_payload, dict):
+            continue
+        url_value, query_params = _coerce_postman_url(request_payload.get("url"))
+        if not url_value:
+            continue
+        headers = _coerce_postman_headers(request_payload.get("header"))
+        body_type, body_json, body_form, body_raw = _extract_postman_body(request_payload.get("body"))
+        auth_type, auth_basic, auth_bearer = _extract_postman_auth(request_payload.get("auth"))
+        pre_script, test_script = _extract_postman_scripts(item.get("event"))
+        display_name = name or url_value
+        requests.append(
+            {
+                "name": display_name,
+                "method": (request_payload.get("method") or "GET").upper(),
+                "url": url_value,
+                "description": item.get("description", ""),
+                "headers": headers,
+                "query_params": query_params,
+                "body_type": body_type,
+                "body_json": body_json,
+                "body_form": body_form,
+                "body_raw": body_raw,
+                "auth_type": auth_type,
+                "auth_basic": auth_basic,
+                "auth_bearer": auth_bearer,
+                "pre_request_script": pre_script,
+                "tests_script": test_script,
+                "timeout_ms": 30000,
+                "directory_path": list(parents_list),
+            }
+        )
+    return requests
+
+
 @transaction.atomic
 def run_collection(
     *,
@@ -257,3 +435,64 @@ def run_collection(
     run.status = models.ApiRun.Status.PASSED if passed_requests == total_requests else models.ApiRun.Status.FAILED
     run.save(update_fields=["finished_at", "summary", "status", "updated_at"])
     return run
+
+
+@transaction.atomic
+def import_postman_collection(collection_payload: Dict[str, Any]) -> models.ApiCollection:
+    if not isinstance(collection_payload, dict):
+        raise ValueError("Collection payload must be a JSON object.")
+
+    items = collection_payload.get("item")
+    if not isinstance(items, list):
+        raise ValueError("Collection payload is missing request items.")
+
+    info = collection_payload.get("info") or {}
+    name = info.get("name") or "Imported Collection"
+    description = info.get("description", "")
+
+    collection = models.ApiCollection.objects.create(name=name, description=description)
+
+    requests_payload = _flatten_postman_items(items)
+    if not requests_payload:
+        return collection
+
+    directory_cache: Dict[tuple[str, ...], models.ApiCollectionDirectory] = {}
+    directory_order: Dict[int | None, int] = {}
+    request_order: Dict[int | None, int] = {}
+
+    for request_payload in requests_payload:
+        directory_path = request_payload.pop("directory_path", []) or []
+        directory_instance: models.ApiCollectionDirectory | None = None
+        if directory_path:
+            current_parent: models.ApiCollectionDirectory | None = None
+            path_so_far: list[str] = []
+            for segment in directory_path:
+                normalized = (segment or "Untitled").strip() or "Untitled"
+                path_so_far.append(normalized)
+                path_key = tuple(path_so_far)
+                if path_key in directory_cache:
+                    current_parent = directory_cache[path_key]
+                    continue
+                parent_id = current_parent.id if current_parent else None
+                next_order = directory_order.get(parent_id, 0)
+                current_parent = models.ApiCollectionDirectory.objects.create(
+                    collection=collection,
+                    parent=current_parent,
+                    name=normalized,
+                    order=next_order,
+                )
+                directory_cache[path_key] = current_parent
+                directory_order[parent_id] = next_order + 1
+            directory_instance = current_parent
+
+        parent_id = directory_instance.id if directory_instance else None
+        next_request_order = request_order.get(parent_id, 0)
+        request_payload.setdefault("order", next_request_order)
+        models.ApiRequest.objects.create(
+            collection=collection,
+            directory=directory_instance,
+            **request_payload,
+        )
+        request_order[parent_id] = next_request_order + 1
+
+    return collection

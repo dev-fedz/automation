@@ -46,6 +46,34 @@ class ApiCollection(TimeStampedModel):
         return self.name
 
 
+class ApiCollectionDirectory(TimeStampedModel):
+    """Folders inside a collection used to organize requests."""
+
+    collection = models.ForeignKey("ApiCollection", on_delete=models.CASCADE, related_name="directories")
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="children",
+    )
+    name = models.CharField(max_length=150)
+    description = models.TextField(blank=True)
+    order = models.PositiveIntegerField(default=0, db_index=True)
+
+    class Meta:
+        ordering = ["collection", "parent_id", "order", "id"]
+        unique_together = ("collection", "parent", "name")
+
+    def __str__(self) -> str:  # pragma: no cover
+        path = [self.name]
+        parent = self.parent
+        while parent:
+            path.append(parent.name)
+            parent = parent.parent
+        return " / ".join(reversed(path))
+
+
 class ApiRequest(TimeStampedModel):
     """Defines a single HTTP request configuration."""
 
@@ -71,6 +99,13 @@ class ApiRequest(TimeStampedModel):
     ]
 
     collection = models.ForeignKey(ApiCollection, on_delete=models.CASCADE, related_name="requests")
+    directory = models.ForeignKey(
+        ApiCollectionDirectory,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="requests",
+    )
     name = models.CharField(max_length=150)
     method = models.CharField(max_length=10, choices=HTTP_METHOD_CHOICES, default="GET")
     url = models.CharField(max_length=500)

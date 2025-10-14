@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from django.db import transaction
+from django.db.models import Max
 from rest_framework import serializers
+from rest_framework.exceptions import ValidationError
 
 from . import models
 
@@ -41,13 +43,55 @@ class ApiAssertionSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "updated_at"]
 
 
+class ApiCollectionDirectorySerializer(serializers.ModelSerializer):
+    collection_id = serializers.IntegerField(source="collection.id", read_only=True)
+    parent_id = serializers.IntegerField(source="parent.id", read_only=True)
+
+    class Meta:
+        model = models.ApiCollectionDirectory
+        fields = [
+            "id",
+            "collection",
+            "collection_id",
+            "parent",
+            "parent_id",
+            "name",
+            "description",
+            "order",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "collection_id", "parent_id", "created_at", "updated_at"]
+        extra_kwargs = {
+            "collection": {"write_only": True},
+            "parent": {"write_only": True},
+        }
+
+
 class ApiRequestSerializer(serializers.ModelSerializer):
     assertions = ApiAssertionSerializer(many=True, required=False)
+    collection = serializers.PrimaryKeyRelatedField(
+        queryset=models.ApiCollection.objects.all(),
+        write_only=True,
+        required=False,
+    )
+    collection_id = serializers.IntegerField(source="collection.id", read_only=True)
+    directory = serializers.PrimaryKeyRelatedField(
+        queryset=models.ApiCollectionDirectory.objects.all(),
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
+    directory_id = serializers.IntegerField(source="directory.id", read_only=True)
 
     class Meta:
         model = models.ApiRequest
         fields = [
             "id",
+            "collection",
+            "collection_id",
+            "directory",
+            "directory_id",
             "name",
             "method",
             "url",
@@ -69,16 +113,34 @@ class ApiRequestSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "collection_id", "directory_id", "created_at", "updated_at"]
 
     def create(self, validated_data: dict[str, Any]) -> models.ApiRequest:
         assertions_data = validated_data.pop("assertions", [])
-        api_request = models.ApiRequest.objects.create(**validated_data)
+        collection = validated_data.pop("collection", None)
+        directory = validated_data.pop("directory", None)
+        if collection is None:
+            raise ValidationError({"collection": "Collection is required."})
+        if directory and directory.collection_id != collection.id:
+            raise ValidationError({"directory": "Directory must belong to the same collection."})
+        if "order" not in validated_data:
+            scope = collection.requests
+            if directory:
+                scope = scope.filter(directory=directory)
+            next_order = scope.aggregate(Max("order"))
+            validated_data["order"] = (next_order.get("order__max") or -1) + 1
+        api_request = models.ApiRequest.objects.create(collection=collection, directory=directory, **validated_data)
         self._sync_assertions(api_request, assertions_data)
         return api_request
 
     def update(self, instance: models.ApiRequest, validated_data: dict[str, Any]) -> models.ApiRequest:
         assertions_data = validated_data.pop("assertions", None)
+        validated_data.pop("collection", None)
+        directory = validated_data.pop("directory", serializers.empty)
+        if directory is not serializers.empty:
+            if directory and directory.collection_id != instance.collection_id:
+                raise ValidationError({"directory": "Directory must belong to the same collection."})
+            instance.directory = directory if directory is not None else None
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
@@ -107,6 +169,7 @@ class ApiRequestSerializer(serializers.ModelSerializer):
 class ApiCollectionSerializer(serializers.ModelSerializer):
     requests = ApiRequestSerializer(many=True)
     environments = ApiEnvironmentSerializer(many=True, read_only=True)
+    directories = ApiCollectionDirectorySerializer(many=True, read_only=True)
     environment_ids = serializers.PrimaryKeyRelatedField(
         source="environments",
         queryset=models.ApiEnvironment.objects.all(),
@@ -124,11 +187,12 @@ class ApiCollectionSerializer(serializers.ModelSerializer):
             "slug",
             "environment_ids",
             "environments",
+            "directories",
             "requests",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "slug", "created_at", "updated_at", "environments"]
+        read_only_fields = ["id", "slug", "created_at", "updated_at", "environments", "directories"]
 
     @transaction.atomic
     def create(self, validated_data: dict[str, Any]) -> models.ApiCollection:
@@ -162,20 +226,29 @@ class ApiCollectionSerializer(serializers.ModelSerializer):
         for index, request_data in enumerate(requests_data):
             request_id = request_data.get("id")
             assertions_data = request_data.pop("assertions", [])
+            directory = request_data.pop("directory", None)
             request_data.setdefault("order", index)
-            request_payload = {k: v for k, v in request_data.items() if k != "id"}
+
+            if directory and directory.collection_id != collection.id:
+                raise ValidationError({"directory": "Directory must belong to the same collection."})
 
             if request_id:
                 api_request = collection.requests.filter(id=request_id).first()
                 if api_request:
-                    for attr, value in request_payload.items():
+                    if directory is not None:
+                        api_request.directory = directory
+                    for attr, value in request_data.items():
                         setattr(api_request, attr, value)
                     api_request.save()
                     ApiRequestSerializer()._sync_assertions(api_request, assertions_data)
                     keep_ids.append(api_request.id)
                     continue
 
-            api_request = models.ApiRequest.objects.create(collection=collection, **request_payload)
+            api_request = models.ApiRequest.objects.create(
+                collection=collection,
+                directory=directory,
+                **request_data,
+            )
             ApiRequestSerializer()._sync_assertions(api_request, assertions_data)
             keep_ids.append(api_request.id)
 
