@@ -42,6 +42,19 @@
         </header>
         <div class="api-tester__collections-list" aria-live="polite"></div>
     </section>
+    <section class="api-tester__panel api-tester__environments">
+        <header>
+            <div class="api-tester__environments-title">
+                <h2>Environments</h2>
+                <button type="button" id="environment-create" class="btn btn-secondary">New Environment</button>
+            </div>
+            <p class="environment-hint">Define reusable variables and headers. Insert them into the builder as <code>{% templatetag openvariable %}variable{% templatetag closevariable %}</code>.</p>
+        </header>
+        <div class="environment-layout">
+            <div id="environment-list" class="environment-list" aria-live="polite"></div>
+            <div id="environment-editor" class="environment-editor" aria-live="polite"></div>
+        </div>
+    </section>
     <section class="api-tester__panel api-tester__builder">
         <header class="api-tester__builder-head">
             <div class="api-tester__builder-title-row">
@@ -66,7 +79,13 @@
                 </div>
                 <div class="form-field form-field--wide">
                     <label for="request-url">URL</label>
-                    <input type="url" id="request-url" name="url" placeholder="https://api.example.com/path" required />
+                    <input type="text"
+                           id="request-url"
+                           name="url"
+                           placeholder="https://api.example.com/path"
+                           required
+                           inputmode="url"
+                           spellcheck="false" />
                 </div>
                 <div class="form-field form-field--actions">
                     <div class="form-actions">

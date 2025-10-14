@@ -173,6 +173,7 @@
         builder: getInitialBuilderState(),
         activeTab: 'params',
         activeScriptsTab: 'pre',
+        activeEnvironmentId: null,
         collapsedCollections: new Set(),
         collapsedDirectoryKeys: new Set(),
         knownDirectoryKeys: new Set(),
@@ -184,6 +185,16 @@
         isInitialized: false,
         directoryMaps: new Map(),
         dragState: null,
+        environmentEditor: null,
+        activeInputTarget: null,
+        variableSuggest: {
+            isOpen: false,
+            target: null,
+            items: [],
+            activeIndex: 0,
+            triggerStart: null,
+            query: '',
+        },
     };
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -198,6 +209,9 @@
             method: document.getElementById('request-method'),
             url: document.getElementById('request-url'),
             environmentSelect: document.getElementById('environment-select'),
+            environmentList: document.getElementById('environment-list'),
+            environmentEditor: document.getElementById('environment-editor'),
+            environmentCreateButton: document.getElementById('environment-create'),
             runButton: document.getElementById('run-request'),
             runCollectionButton: document.getElementById('run-collection'),
             saveRequestButton: document.getElementById('save-request'),
@@ -212,6 +226,7 @@
             responseAssertions: document.getElementById('response-assertions'),
             builderMeta: document.getElementById('builder-meta'),
             form: document.getElementById('api-request-form'),
+            variableSuggest: null,
             tabButtons: Array.from(root.querySelectorAll('[data-tab]')),
             tabPanels: Array.from(root.querySelectorAll('[data-tab-panel]')),
             paramsBody: document.getElementById('params-rows'),
@@ -729,6 +744,16 @@
                         togglePlaceholder();
                     });
 
+                    editor.onDidFocusEditorText(() => {
+                        state.activeInputTarget = { type: 'monaco', editor };
+                    });
+
+                    editor.onDidBlurEditorText(() => {
+                        if (state.activeInputTarget?.type === 'monaco' && state.activeInputTarget.editor === editor) {
+                            state.activeInputTarget = null;
+                        }
+                    });
+
                     editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF, () => {
                         const formatAction = editor.getAction('editor.action.formatDocument');
                         if (formatAction && typeof formatAction.run === 'function') {
@@ -756,6 +781,14 @@
                         const nextValue = event.target.value;
                         state.builder.scripts[key] = nextValue;
                         updateScriptEmptyState(key, nextValue);
+                    });
+                    textarea.addEventListener('focus', () => {
+                        state.activeInputTarget = { type: 'dom', element: textarea };
+                    });
+                    textarea.addEventListener('blur', () => {
+                        if (state.activeInputTarget?.type === 'dom' && state.activeInputTarget.element === textarea) {
+                            state.activeInputTarget = null;
+                        }
                     });
                     container.appendChild(textarea);
                     scriptFallbacks[key] = textarea;
@@ -984,9 +1017,19 @@
                         togglePlaceholder();
                     });
 
+                    rawEditor.onDidFocusEditorText(() => {
+                        state.activeInputTarget = { type: 'monaco', editor: rawEditor };
+                    });
+
                     rawEditor.onDidBlurEditorWidget(() => {
                         if (state.builder.bodyRawType === 'json') {
                             formatRawTextForType('json');
+                        }
+                    });
+
+                    rawEditor.onDidBlurEditorText(() => {
+                        if (state.activeInputTarget?.type === 'monaco' && state.activeInputTarget.editor === rawEditor) {
+                            state.activeInputTarget = null;
                         }
                     });
 
@@ -1010,6 +1053,14 @@
                     if (fallback) {
                         fallback.value = state.builder.bodyRawText || '';
                         state.builder.bodyRawText = fallback.value;
+                        fallback.addEventListener('focus', () => {
+                            state.activeInputTarget = { type: 'dom', element: fallback };
+                        });
+                        fallback.addEventListener('blur', () => {
+                            if (state.activeInputTarget?.type === 'dom' && state.activeInputTarget.element === fallback) {
+                                state.activeInputTarget = null;
+                            }
+                        });
                     }
                     applyRawTypeSettings(state.builder.bodyRawType);
                 });
@@ -1276,6 +1327,46 @@
                 }
             });
             state.collapsedCollections = nextCollapsed;
+        };
+
+        const normalizeEnvironmentId = (value) => {
+            if (value === null || value === undefined || value === '') {
+                return null;
+            }
+            const numeric = Number(value);
+            return Number.isFinite(numeric) ? numeric : null;
+        };
+
+        const ensureRowPresence = (rows) => {
+            if (Array.isArray(rows) && rows.length) {
+                return rows;
+            }
+            return [{ key: '', value: '' }];
+        };
+
+        const cloneKeyValueRows = (rows) => {
+            if (!Array.isArray(rows)) {
+                return [{ key: '', value: '' }];
+            }
+            return rows.map((row) => ({
+                key: row?.key ? String(row.key) : '',
+                value: row?.value === undefined || row?.value === null ? '' : String(row.value),
+            }));
+        };
+
+        const rowsToObjectTrimmed = (rows) => {
+            const payload = {};
+            if (!Array.isArray(rows)) {
+                return payload;
+            }
+            rows.forEach((row) => {
+                const key = (row?.key || '').trim();
+                if (!key) {
+                    return;
+                }
+                payload[key] = row?.value === undefined || row?.value === null ? '' : String(row.value);
+            });
+            return payload;
         };
 
         const activateCollection = (collection, { request = null, preserveExistingRequest = true } = {}) => {
@@ -1983,18 +2074,1070 @@
                 return;
             }
             const options = ['<option value="">No environment</option>'];
+            const environmentIds = new Set(state.environments.map((env) => env.id));
             state.environments.forEach((env) => {
-                const isLinked = collection?.environments?.some((item) => item.id === env.id);
+                const isLinked = collection?.environments?.some((item) => item.id === env.id) || false;
                 const suffix = isLinked ? ' (linked)' : '';
                 options.push(`<option value="${env.id}" data-linked="${isLinked}">${escapeHtml(env.name)}${suffix}</option>`);
             });
+
             elements.environmentSelect.innerHTML = options.join('');
-            if (collection?.environments?.length) {
-                elements.environmentSelect.value = collection.environments[0].id;
+
+            let selectedValue = '';
+            if (state.activeEnvironmentId !== null && environmentIds.has(state.activeEnvironmentId)) {
+                selectedValue = String(state.activeEnvironmentId);
+            } else if (collection?.environments?.length) {
+                const linked = collection.environments.find((item) => environmentIds.has(item.id));
+                selectedValue = linked ? String(linked.id) : '';
+            }
+
+            if (selectedValue && elements.environmentSelect.querySelector(`option[value="${selectedValue}"]`)) {
+                elements.environmentSelect.value = selectedValue;
             } else {
                 elements.environmentSelect.value = '';
+                selectedValue = '';
+            }
+
+            setActiveEnvironmentId(selectedValue ? Number(selectedValue) : null);
+        };
+
+        const syncEnvironmentListAppliedState = () => {
+            if (!elements.environmentList) {
+                return;
+            }
+            const items = elements.environmentList.querySelectorAll('.environment-list-item');
+            items.forEach((item) => {
+                const envId = normalizeEnvironmentId(item.dataset.environmentId);
+                const isApplied = state.activeEnvironmentId !== null && envId === state.activeEnvironmentId;
+                item.classList.toggle('is-applied', isApplied);
+                const useButton = item.querySelector('.environment-list-use');
+                if (useButton) {
+                    useButton.disabled = Boolean(isApplied);
+                    useButton.textContent = isApplied ? 'In Use' : 'Use';
+                }
+            });
+        };
+
+        const updateEnvironmentEditorActionState = () => {
+            if (!elements.environmentEditor) {
+                return;
+            }
+            const editorState = state.environmentEditor;
+            if (!editorState) {
+                return;
+            }
+            const { form, isSaving, environmentId } = editorState;
+            const hasName = Boolean((form.name || '').trim());
+
+            const saveButton = elements.environmentEditor.querySelector('[data-role="environment-save"]');
+            if (saveButton) {
+                saveButton.disabled = isSaving || !hasName || !form.isDirty;
+            }
+
+            const resetButton = elements.environmentEditor.querySelector('[data-role="environment-reset"]');
+            if (resetButton) {
+                resetButton.disabled = isSaving || !form.isDirty;
+            }
+
+            const deleteButton = elements.environmentEditor.querySelector('[data-role="environment-delete"]');
+            if (deleteButton) {
+                deleteButton.disabled = isSaving;
+            }
+
+            const cancelButton = elements.environmentEditor.querySelector('[data-role="environment-cancel"]');
+            if (cancelButton) {
+                cancelButton.disabled = isSaving;
+            }
+
+            const applyButton = elements.environmentEditor.querySelector('[data-role="environment-apply"]');
+            if (applyButton) {
+                const isApplied = state.activeEnvironmentId !== null && environmentId === state.activeEnvironmentId;
+                applyButton.disabled = isSaving || isApplied;
+                applyButton.textContent = isApplied ? 'In Use' : 'Use In Builder';
+            }
+
+            const addVariableButton = elements.environmentEditor.querySelector('[data-role="environment-add-variable"]');
+            if (addVariableButton) {
+                addVariableButton.disabled = isSaving;
+            }
+
+            const addHeaderButton = elements.environmentEditor.querySelector('[data-role="environment-add-header"]');
+            if (addHeaderButton) {
+                addHeaderButton.disabled = isSaving;
+            }
+
+            const kvButtons = elements.environmentEditor.querySelectorAll('.env-kv-button');
+            kvButtons.forEach((button) => {
+                if (isSaving) {
+                    button.disabled = true;
+                    return;
+                }
+                const action = button.dataset.action;
+                if (action === 'insert-variable') {
+                    const index = Number(button.dataset.index);
+                    const row = form.variables[index];
+                    button.disabled = !(row && row.key && row.key.trim());
+                    return;
+                }
+                if (action === 'remove-row') {
+                    const group = button.dataset.group;
+                    const bucket = form[group];
+                    button.disabled = !Array.isArray(bucket) || bucket.length <= 1;
+                    return;
+                }
+                button.disabled = false;
+            });
+        };
+
+        const applyEnvironmentEditorPendingFocus = () => {
+            if (!state.environmentEditor || !elements.environmentEditor) {
+                return;
+            }
+            const pending = state.environmentEditor.pendingFocus;
+            if (!pending) {
+                return;
+            }
+            let focusTarget = null;
+            if (pending.selector) {
+                focusTarget = elements.environmentEditor.querySelector(pending.selector);
+            } else if (pending.group) {
+                const selector = `[data-group="${pending.group}"][data-index="${pending.index}"][data-field="${pending.field || 'key'}"]`;
+                focusTarget = elements.environmentEditor.querySelector(selector);
+            } else if (pending.field) {
+                focusTarget = elements.environmentEditor.querySelector(`[data-editor-field="${pending.field}"]`);
+            }
+            if (focusTarget && typeof focusTarget.focus === 'function') {
+                focusTarget.focus();
+            }
+            state.environmentEditor.pendingFocus = null;
+        };
+
+        const VARIABLE_SUGGEST_MAX_RESULTS = 8;
+        const VARIABLE_TRIGGER_PATTERN = /{{\s*([\w.-]*)$/;
+
+        const closeVariableSuggest = () => {
+            state.variableSuggest.isOpen = false;
+            state.variableSuggest.target = null;
+            state.variableSuggest.items = [];
+            state.variableSuggest.activeIndex = 0;
+            state.variableSuggest.triggerStart = null;
+            state.variableSuggest.query = '';
+            if (elements.variableSuggest) {
+                elements.variableSuggest.hidden = true;
+                elements.variableSuggest.innerHTML = '';
             }
         };
+
+        const applyVariableSuggestion = (name) => {
+            if (!state.variableSuggest.isOpen) {
+                return;
+            }
+            const target = state.variableSuggest.target;
+            if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+                return;
+            }
+            if (!document.body.contains(target)) {
+                closeVariableSuggest();
+                return;
+            }
+            const triggerStart = state.variableSuggest.triggerStart ?? 0;
+            const value = target.value || '';
+            const selectionStart = target.selectionStart ?? value.length;
+            const selectionEnd = target.selectionEnd ?? value.length;
+            let replaceEnd = selectionEnd;
+            const remainder = value.slice(selectionEnd);
+            if (remainder.startsWith('}}')) {
+                replaceEnd = selectionEnd + 2;
+            }
+            const before = value.slice(0, triggerStart);
+            const after = value.slice(replaceEnd);
+            const replacement = `{{ ${name} }}`;
+            target.value = `${before}${replacement}${after}`;
+            const nextCaret = before.length + replacement.length;
+            target.setSelectionRange(nextCaret, nextCaret);
+            closeVariableSuggest();
+            target.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+
+        const selectVariableSuggestion = (index) => {
+            if (!state.variableSuggest.items.length) {
+                return;
+            }
+            const bounded = Math.max(0, Math.min(index, state.variableSuggest.items.length - 1));
+            state.variableSuggest.activeIndex = bounded;
+            renderVariableSuggest();
+            applyVariableSuggestion(state.variableSuggest.items[bounded]);
+        };
+
+        const ensureVariableSuggestContainer = () => {
+            if (elements.variableSuggest) {
+                return elements.variableSuggest;
+            }
+            const container = document.createElement('div');
+            container.className = 'variable-suggest';
+            container.hidden = true;
+            container.setAttribute('role', 'listbox');
+            container.addEventListener('mousedown', (event) => {
+                const item = event.target.closest('[data-variable-index]');
+                if (!item) {
+                    return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                const index = Number(item.dataset.variableIndex);
+                if (!Number.isFinite(index)) {
+                    return;
+                }
+                selectVariableSuggestion(index);
+            });
+            document.body.appendChild(container);
+            elements.variableSuggest = container;
+            return container;
+        };
+
+        const updateVariableSuggestPosition = () => {
+            if (!state.variableSuggest.isOpen) {
+                return;
+            }
+            const target = state.variableSuggest.target;
+            if (!(target instanceof HTMLElement) || !document.body.contains(target)) {
+                closeVariableSuggest();
+                return;
+            }
+            const container = ensureVariableSuggestContainer();
+            const rect = target.getBoundingClientRect();
+            const left = rect.left + window.pageXOffset;
+            const top = rect.bottom + window.pageYOffset + 4;
+            container.style.left = `${left}px`;
+            container.style.top = `${top}px`;
+            container.style.minWidth = `${rect.width}px`;
+            container.style.maxWidth = `${Math.max(rect.width, 260)}px`;
+        };
+
+        const renderVariableSuggest = () => {
+            if (!state.variableSuggest.isOpen || !state.variableSuggest.items.length) {
+                closeVariableSuggest();
+                return;
+            }
+            const container = ensureVariableSuggestContainer();
+            const items = state.variableSuggest.items;
+            const activeIndex = state.variableSuggest.activeIndex;
+            container.innerHTML = items
+                .map((name, index) => {
+                    const isActive = index === activeIndex;
+                    const activeClass = isActive ? ' is-active' : '';
+                    return `<button type="button" class="variable-suggest__item${activeClass}" data-variable-index="${index}" role="option" aria-selected="${isActive}">${escapeHtml(name)}</button>`;
+                })
+                .join('');
+            container.hidden = false;
+            updateVariableSuggestPosition();
+        };
+
+        const moveVariableSuggestHighlight = (delta) => {
+            if (!state.variableSuggest.isOpen || !state.variableSuggest.items.length) {
+                return;
+            }
+            const length = state.variableSuggest.items.length;
+            const nextIndex = (state.variableSuggest.activeIndex + delta + length) % length;
+            state.variableSuggest.activeIndex = nextIndex;
+            renderVariableSuggest();
+        };
+
+        const isEligibleVariableSuggestTarget = (element) => {
+            if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
+                return false;
+            }
+            if (element.disabled || element.readOnly) {
+                return false;
+            }
+            if (element.type && ['button', 'submit', 'reset', 'checkbox', 'radio', 'hidden', 'file'].includes(element.type)) {
+                return false;
+            }
+            return true;
+        };
+
+        const findVariableTrigger = (element) => {
+            if (!isEligibleVariableSuggestTarget(element)) {
+                return null;
+            }
+            const value = element.value ?? '';
+            const selectionStart = element.selectionStart;
+            const selectionEnd = element.selectionEnd;
+            if (selectionStart === null || selectionEnd === null || selectionStart !== selectionEnd) {
+                return null;
+            }
+            const textBeforeCaret = value.slice(0, selectionStart);
+            const match = textBeforeCaret.match(VARIABLE_TRIGGER_PATTERN);
+            if (!match) {
+                return null;
+            }
+            const triggerStart = selectionStart - match[0].length;
+            return {
+                start: triggerStart,
+                query: match[1] || '',
+            };
+        };
+
+        const collectEditorVariableNames = (editorState) => {
+            if (!editorState || !editorState.form || !Array.isArray(editorState.form.variables)) {
+                return [];
+            }
+            return editorState.form.variables
+                .map((row) => (row?.key || '').trim())
+                .filter(Boolean);
+        };
+
+        const getAvailableEnvironmentVariableNames = () => {
+            const seen = new Set();
+            const results = [];
+            const addMany = (list) => {
+                list.forEach((name) => {
+                    const normalized = (name || '').trim();
+                    if (!normalized || seen.has(normalized)) {
+                        return;
+                    }
+                    seen.add(normalized);
+                    results.push(normalized);
+                });
+            };
+
+            if (state.environmentEditor) {
+                if (state.environmentEditor.isNew) {
+                    addMany(collectEditorVariableNames(state.environmentEditor));
+                } else if (state.environmentEditor.environmentId === state.activeEnvironmentId) {
+                    addMany(collectEditorVariableNames(state.environmentEditor));
+                }
+            }
+
+            if (state.environments.length) {
+                if (state.activeEnvironmentId !== null) {
+                    const active = state.environments.find((env) => env.id === state.activeEnvironmentId);
+                    if (active) {
+                        addMany(Object.keys(active.variables || {}));
+                    }
+                }
+                state.environments.forEach((env) => {
+                    if (env.id === state.activeEnvironmentId) {
+                        return;
+                    }
+                    addMany(Object.keys(env.variables || {}));
+                });
+            }
+
+            return results;
+        };
+
+        const openVariableSuggest = ({ target, triggerStart, query, items }) => {
+            if (!items.length) {
+                closeVariableSuggest();
+                return;
+            }
+            state.variableSuggest.isOpen = true;
+            state.variableSuggest.target = target;
+            state.variableSuggest.items = items.slice(0, VARIABLE_SUGGEST_MAX_RESULTS);
+            state.variableSuggest.activeIndex = 0;
+            state.variableSuggest.triggerStart = triggerStart;
+            state.variableSuggest.query = query || '';
+            renderVariableSuggest();
+        };
+
+        const evaluateVariableSuggestForInput = (element) => {
+            if (!isEligibleVariableSuggestTarget(element)) {
+                if (state.variableSuggest.target === element) {
+                    closeVariableSuggest();
+                }
+                return;
+            }
+            const trigger = findVariableTrigger(element);
+            if (!trigger) {
+                if (state.variableSuggest.target === element) {
+                    closeVariableSuggest();
+                }
+                return;
+            }
+            const variables = getAvailableEnvironmentVariableNames();
+            if (!variables.length) {
+                closeVariableSuggest();
+                return;
+            }
+            const queryText = (trigger.query || '').toLowerCase();
+            const filtered = variables.filter((name) => name.toLowerCase().includes(queryText));
+            const list = filtered.length ? filtered : variables;
+            openVariableSuggest({ target: element, triggerStart: trigger.start, query: trigger.query, items: list });
+        };
+
+        const handleVariableSuggestInput = (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+                return;
+            }
+            evaluateVariableSuggestForInput(target);
+        };
+
+        const handleVariableSuggestKeydown = (event) => {
+            if (!state.variableSuggest.isOpen) {
+                return;
+            }
+            if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                moveVariableSuggestHighlight(1);
+                return;
+            }
+            if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                moveVariableSuggestHighlight(-1);
+                return;
+            }
+            if (event.key === 'Enter' || event.key === 'Tab') {
+                if (state.variableSuggest.items.length) {
+                    event.preventDefault();
+                    const index = state.variableSuggest.activeIndex;
+                    applyVariableSuggestion(state.variableSuggest.items[index]);
+                }
+                return;
+            }
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                closeVariableSuggest();
+            }
+        };
+
+        const handleVariableSuggestExternalClick = (event) => {
+            if (!state.variableSuggest.isOpen) {
+                return;
+            }
+            const container = elements.variableSuggest;
+            if (container && container.contains(event.target)) {
+                return;
+            }
+            const target = state.variableSuggest.target;
+            if (target && target.contains && target.contains(event.target)) {
+                return;
+            }
+            closeVariableSuggest();
+        };
+
+        const handleVariableSuggestViewportChange = () => {
+            if (state.variableSuggest.isOpen) {
+                updateVariableSuggestPosition();
+            }
+        };
+
+        const setActiveEnvironmentId = (value) => {
+            state.activeEnvironmentId = normalizeEnvironmentId(value);
+            closeVariableSuggest();
+            syncEnvironmentListAppliedState();
+            updateEnvironmentEditorActionState();
+        };
+
+        const getEnvironmentById = (environmentId) => {
+            const normalized = normalizeEnvironmentId(environmentId);
+            if (normalized === null) {
+                return null;
+            }
+            return state.environments.find((env) => env.id === normalized) || null;
+        };
+
+        const createEnvironmentEditorState = (environment, { isNew = false } = {}) => {
+            const variablesBase = cloneKeyValueRows(ensureRowPresence(objectToRows(environment?.variables || {})));
+            const headersBase = cloneKeyValueRows(ensureRowPresence(objectToRows(environment?.default_headers || {})));
+            return {
+                environmentId: environment?.id ?? null,
+                isNew,
+                isSaving: false,
+                form: {
+                    name: environment?.name || '',
+                    description: environment?.description || '',
+                    variables: cloneKeyValueRows(variablesBase),
+                    headers: cloneKeyValueRows(headersBase),
+                    initial: {
+                        name: environment?.name || '',
+                        description: environment?.description || '',
+                        variables: cloneKeyValueRows(variablesBase),
+                        headers: cloneKeyValueRows(headersBase),
+                    },
+                    isDirty: false,
+                },
+                pendingFocus: null,
+            };
+        };
+
+        const renderEnvironmentList = () => {
+            if (!elements.environmentList) {
+                return;
+            }
+            if (!state.environments.length) {
+                elements.environmentList.innerHTML = '<p class="environment-list-empty">No environments yet. Create one to get started.</p>';
+                return;
+            }
+            const activeEditorId = state.environmentEditor && !state.environmentEditor.isNew
+                ? state.environmentEditor.environmentId
+                : null;
+            const markup = state.environments
+                .map((env) => {
+                    const isActive = activeEditorId === env.id;
+                    const isApplied = state.activeEnvironmentId === env.id;
+                    const isEditingCurrent = Boolean(
+                        state.environmentEditor &&
+                            !state.environmentEditor.isNew &&
+                            state.environmentEditor.environmentId === env.id,
+                    );
+                    const nameSource = isEditingCurrent ? state.environmentEditor.form.name : env.name;
+                    const rawName = typeof nameSource === 'string' ? nameSource : '';
+                    const safeName = rawName.trim() || 'Untitled environment';
+                    const variablesCount = isEditingCurrent
+                        ? state.environmentEditor.form.variables.filter((row) => (row?.key || '').trim()).length
+                        : Object.keys(env.variables || {}).length;
+                    const headersCount = isEditingCurrent
+                        ? state.environmentEditor.form.headers.filter((row) => (row?.key || '').trim()).length
+                        : Object.keys(env.default_headers || {}).length;
+                    const metaParts = [];
+                    if (variablesCount) {
+                        metaParts.push(`${variablesCount} ${variablesCount === 1 ? 'variable' : 'variables'}`);
+                    }
+                    if (headersCount) {
+                        metaParts.push(`${headersCount} header${headersCount === 1 ? '' : 's'}`);
+                    }
+                    const metaText = metaParts.length ? metaParts.join(' · ') : 'Empty';
+                    return `<div class="environment-list-item${isActive ? ' is-active' : ''}${isApplied ? ' is-applied' : ''}" data-environment-id="${env.id}">
+                        <button type="button" class="environment-list-button" data-action="select-environment" data-environment-id="${env.id}">
+                            <span class="environment-list-name">${escapeHtml(safeName)}</span>
+                            <span class="environment-list-meta">${escapeHtml(metaText)}</span>
+                        </button>
+                        <button type="button" class="environment-list-use" data-action="apply-environment" data-environment-id="${env.id}"${isApplied ? ' disabled' : ''}>${isApplied ? 'In Use' : 'Use'}</button>
+                    </div>`;
+                })
+                .join('');
+            elements.environmentList.innerHTML = markup;
+        };
+
+        const renderEnvironmentEditor = () => {
+            if (!elements.environmentEditor) {
+                return;
+            }
+            const editorState = state.environmentEditor;
+            if (!editorState) {
+                elements.environmentEditor.innerHTML = '<p class="environment-editor-empty">Select an environment to edit, or create a new one.</p>';
+                return;
+            }
+            const { form, isNew, isSaving } = editorState;
+
+            const variableRows = form.variables
+                .map((row, index) => {
+                    const keyValue = escapeHtml(row.key || '');
+                    const valueValue = escapeHtml(row.value || '');
+                    const rowMarkup = `
+                        <div class="env-kv-row" data-group="variables" data-index="${index}">
+                            <input type="text" data-group="variables" data-field="key" data-index="${index}" placeholder="Variable name" value="${keyValue}"${isSaving ? ' disabled' : ''} />
+                            <input type="text" data-group="variables" data-field="value" data-index="${index}" placeholder="Value" value="${valueValue}"${isSaving ? ' disabled' : ''} />
+                            <div class="env-kv-actions">
+                                <button type="button" class="env-kv-button" data-action="insert-variable" data-index="${index}">Insert</button>
+                                <button type="button" class="env-kv-button env-kv-button--danger" data-action="remove-row" data-group="variables" data-index="${index}">Remove</button>
+                            </div>
+                        </div>`;
+                    return rowMarkup;
+                })
+                .join('');
+
+            const headerRows = form.headers
+                .map((row, index) => {
+                    const keyValue = escapeHtml(row.key || '');
+                    const valueValue = escapeHtml(row.value || '');
+                    return `
+                        <div class="env-kv-row env-kv-row--headers" data-group="headers" data-index="${index}">
+                            <input type="text" data-group="headers" data-field="key" data-index="${index}" placeholder="Header name" value="${keyValue}"${isSaving ? ' disabled' : ''} />
+                            <input type="text" data-group="headers" data-field="value" data-index="${index}" placeholder="Value" value="${valueValue}"${isSaving ? ' disabled' : ''} />
+                            <div class="env-kv-actions">
+                                <button type="button" class="env-kv-button env-kv-button--danger" data-action="remove-row" data-group="headers" data-index="${index}">Remove</button>
+                            </div>
+                        </div>`;
+                })
+                .join('');
+
+            const actionsMarkup = isNew
+                ? `<button type="button" class="env-action env-action--primary" data-role="environment-save" data-action="save-environment">Save</button>
+                    <button type="button" class="env-action env-action--secondary" data-role="environment-reset" data-action="reset-environment">Reset</button>
+                    <button type="button" class="env-action env-action--ghost" data-role="environment-cancel" data-action="cancel-environment">Cancel</button>`
+                : `<button type="button" class="env-action env-action--primary" data-role="environment-save" data-action="save-environment">Save</button>
+                    <button type="button" class="env-action env-action--secondary" data-role="environment-reset" data-action="reset-environment">Reset</button>
+                    <button type="button" class="env-action env-action--ghost" data-role="environment-apply" data-action="apply-environment">Use In Builder</button>
+                    <button type="button" class="env-action env-action--danger" data-role="environment-delete" data-action="delete-environment">Delete</button>`;
+
+            elements.environmentEditor.innerHTML = `
+                <div class="environment-editor-form" autocomplete="off">
+                    <div class="environment-editor-group">
+                        <label for="environment-name">Name</label>
+                        <input id="environment-name" type="text" data-editor-field="name" value="${escapeHtml(form.name || '')}"${isSaving ? ' disabled' : ''} />
+                    </div>
+                    <div class="environment-editor-group">
+                        <label for="environment-description">Description</label>
+                        <textarea id="environment-description" data-editor-field="description"${isSaving ? ' disabled' : ''}>${escapeHtml(form.description || '')}</textarea>
+                    </div>
+                    <div class="environment-editor-group">
+                        <div class="environment-subheading">Variables</div>
+                        <p class="environment-editor-note">Focus any builder field, then use Insert to drop the <code>{{variable}}</code> placeholder.</p>
+                        <div class="env-kv-grid" data-group="variables">
+                            ${variableRows}
+                        </div>
+                        <button type="button" class="env-action env-action--ghost" data-role="environment-add-variable" data-action="add-variable"${isSaving ? ' disabled' : ''}>Add Variable</button>
+                    </div>
+                    <div class="environment-editor-group">
+                        <div class="environment-subheading">Default Headers</div>
+                        <p class="environment-editor-note">Merged with request headers whenever this environment is selected.</p>
+                        <div class="env-kv-grid" data-group="headers">
+                            ${headerRows}
+                        </div>
+                        <button type="button" class="env-action env-action--ghost" data-role="environment-add-header" data-action="add-header"${isSaving ? ' disabled' : ''}>Add Header</button>
+                    </div>
+                    <div class="environment-editor-actions">
+                        ${actionsMarkup}
+                    </div>
+                </div>`;
+
+            applyEnvironmentEditorPendingFocus();
+            updateEnvironmentEditorActionState();
+        };
+
+        const renderEnvironmentPanel = () => {
+            renderEnvironmentList();
+            renderEnvironmentEditor();
+            syncEnvironmentListAppliedState();
+        };
+
+        const markEnvironmentEditorDirty = () => {
+            if (!state.environmentEditor || state.environmentEditor.isSaving) {
+                return;
+            }
+            state.environmentEditor.form.isDirty = true;
+            updateEnvironmentEditorActionState();
+        };
+
+        const startEnvironmentCreation = () => {
+            state.environmentEditor = createEnvironmentEditorState(null, { isNew: true });
+            if (state.environmentEditor) {
+                state.environmentEditor.pendingFocus = { field: 'name' };
+            }
+            renderEnvironmentPanel();
+        };
+
+        const openEnvironmentEditor = (environmentId) => {
+            const environment = getEnvironmentById(environmentId);
+            if (!environment) {
+                state.environmentEditor = null;
+            } else {
+                state.environmentEditor = createEnvironmentEditorState(environment, { isNew: false });
+            }
+            renderEnvironmentPanel();
+        };
+
+        const cancelEnvironmentEditor = () => {
+            if (!state.environmentEditor) {
+                return;
+            }
+            if (state.environmentEditor.isNew) {
+                state.environmentEditor = null;
+            } else {
+                const environment = getEnvironmentById(state.environmentEditor.environmentId);
+                state.environmentEditor = environment ? createEnvironmentEditorState(environment) : null;
+            }
+            renderEnvironmentPanel();
+        };
+
+        const handleEnvironmentEditorInput = (event) => {
+            if (!state.environmentEditor || state.environmentEditor.isSaving) {
+                return;
+            }
+            const target = event.target;
+            if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+                return;
+            }
+            if (target.dataset.editorField === 'name') {
+                state.environmentEditor.form.name = target.value;
+                markEnvironmentEditorDirty();
+                renderEnvironmentList();
+                syncEnvironmentListAppliedState();
+                return;
+            }
+            if (target.dataset.editorField === 'description') {
+                state.environmentEditor.form.description = target.value;
+                markEnvironmentEditorDirty();
+                return;
+            }
+            const group = target.dataset.group;
+            const field = target.dataset.field;
+            if (!group || !field) {
+                return;
+            }
+            const index = Number(target.dataset.index);
+            const bucket = state.environmentEditor.form[group];
+            if (!Array.isArray(bucket) || !Number.isFinite(index) || !bucket[index]) {
+                return;
+            }
+            bucket[index][field] = target.value;
+            markEnvironmentEditorDirty();
+            if (field === 'key') {
+                renderEnvironmentList();
+                syncEnvironmentListAppliedState();
+            }
+        };
+
+        const insertEnvironmentVariable = (variableName) => {
+            const trimmed = (variableName || '').trim();
+            if (!trimmed) {
+                setStatus('Add a variable name before inserting.', 'error');
+                return;
+            }
+            const placeholder = `{{ ${trimmed} }}`;
+            const target = state.activeInputTarget;
+            if (!target) {
+                setStatus('Select a field in the builder to insert the variable.', 'error');
+                return;
+            }
+            if (target.type === 'monaco' && target.editor && window.monaco && window.monaco.Range && window.monaco.Selection) {
+                const editor = target.editor;
+                const selection = editor.getSelection();
+                const position = editor.getPosition();
+                const startLine = selection && !selection.isEmpty() ? selection.startLineNumber : position.lineNumber;
+                const startColumn = selection && !selection.isEmpty() ? selection.startColumn : position.column;
+                const endLine = selection && !selection.isEmpty() ? selection.endLineNumber : position.lineNumber;
+                const endColumn = selection && !selection.isEmpty() ? selection.endColumn : position.column;
+                const range = new window.monaco.Range(startLine, startColumn, endLine, endColumn);
+                editor.executeEdits('insert-env-variable', [{ range, text: placeholder, forceMoveMarkers: true }]);
+                const newColumn = startColumn + placeholder.length;
+                const selectionRange = new window.monaco.Selection(startLine, newColumn, startLine, newColumn);
+                editor.setSelection(selectionRange);
+                editor.focus();
+                setStatus(`Inserted {{ ${trimmed} }}.`, 'success');
+                return;
+            }
+            if (target.type === 'dom' && target.element && typeof target.element.value === 'string') {
+                const element = target.element;
+                const value = element.value || '';
+                const start = typeof element.selectionStart === 'number' ? element.selectionStart : value.length;
+                const end = typeof element.selectionEnd === 'number' ? element.selectionEnd : start;
+                element.value = `${value.slice(0, start)}${placeholder}${value.slice(end)}`;
+                const newCursor = start + placeholder.length;
+                if (typeof element.setSelectionRange === 'function') {
+                    element.setSelectionRange(newCursor, newCursor);
+                }
+                element.dispatchEvent(new Event('input', { bubbles: true }));
+                element.focus();
+                setStatus(`Inserted {{ ${trimmed} }}.`, 'success');
+                return;
+            }
+            setStatus('Unable to insert variable in the current field.', 'error');
+        };
+
+        const handleEnvironmentEditorClick = (event) => {
+            if (!elements.environmentEditor) {
+                return;
+            }
+            const trigger = event.target.closest('[data-action]');
+            if (!trigger || !elements.environmentEditor.contains(trigger)) {
+                return;
+            }
+            event.preventDefault();
+            const action = trigger.dataset.action;
+            if (!action || !state.environmentEditor) {
+                return;
+            }
+            const editorState = state.environmentEditor;
+            if (editorState.isSaving && action !== 'cancel-environment') {
+                return;
+            }
+            const { form } = editorState;
+            if (action === 'add-variable') {
+                form.variables.push({ key: '', value: '' });
+                form.isDirty = true;
+                editorState.pendingFocus = { group: 'variables', index: form.variables.length - 1, field: 'key' };
+                renderEnvironmentEditor();
+                renderEnvironmentList();
+                syncEnvironmentListAppliedState();
+                return;
+            }
+            if (action === 'add-header') {
+                form.headers.push({ key: '', value: '' });
+                form.isDirty = true;
+                editorState.pendingFocus = { group: 'headers', index: form.headers.length - 1, field: 'key' };
+                renderEnvironmentEditor();
+                renderEnvironmentList();
+                syncEnvironmentListAppliedState();
+                return;
+            }
+            if (action === 'remove-row') {
+                const group = trigger.dataset.group;
+                const index = Number(trigger.dataset.index);
+                const bucket = form[group];
+                if (!Array.isArray(bucket) || !Number.isFinite(index) || !bucket[index]) {
+                    return;
+                }
+                if (bucket.length <= 1) {
+                    bucket[0] = { key: '', value: '' };
+                } else {
+                    bucket.splice(index, 1);
+                }
+                form.isDirty = true;
+                editorState.pendingFocus = { group, index: Math.max(0, index - 1), field: 'key' };
+                renderEnvironmentEditor();
+                renderEnvironmentList();
+                syncEnvironmentListAppliedState();
+                return;
+            }
+            if (action === 'insert-variable') {
+                const index = Number(trigger.dataset.index);
+                const row = form.variables[index];
+                if (!row || !row.key || !row.key.trim()) {
+                    setStatus('Add a variable name before inserting.', 'error');
+                    return;
+                }
+                insertEnvironmentVariable(row.key);
+                return;
+            }
+            if (action === 'save-environment') {
+                saveEnvironmentEditor();
+                return;
+            }
+            if (action === 'reset-environment') {
+                resetEnvironmentEditor();
+                return;
+            }
+            if (action === 'delete-environment') {
+                deleteEnvironmentEditor();
+                return;
+            }
+            if (action === 'cancel-environment') {
+                cancelEnvironmentEditor();
+                return;
+            }
+            if (action === 'apply-environment') {
+                applyEnvironmentSelection(editorState.environmentId);
+                updateEnvironmentEditorActionState();
+                setStatus('Environment applied to builder.', 'success');
+            }
+        };
+
+        const handleEnvironmentListClick = (event) => {
+            if (!elements.environmentList) {
+                return;
+            }
+            const trigger = event.target.closest('[data-action]');
+            if (!trigger || !elements.environmentList.contains(trigger)) {
+                return;
+            }
+            event.preventDefault();
+            const action = trigger.dataset.action;
+            const environmentId = normalizeEnvironmentId(trigger.dataset.environmentId);
+            if (action === 'select-environment' && environmentId !== null) {
+                openEnvironmentEditor(environmentId);
+                return;
+            }
+            if (action === 'apply-environment') {
+                applyEnvironmentSelection(environmentId);
+                setStatus('Environment applied to builder.', 'success');
+            }
+        };
+
+        const resetEnvironmentEditor = () => {
+            if (!state.environmentEditor || state.environmentEditor.isSaving) {
+                return;
+            }
+            const { form } = state.environmentEditor;
+            form.name = form.initial.name;
+            form.description = form.initial.description;
+            form.variables = cloneKeyValueRows(form.initial.variables);
+            form.headers = cloneKeyValueRows(form.initial.headers);
+            form.isDirty = false;
+            state.environmentEditor.pendingFocus = null;
+            renderEnvironmentEditor();
+            renderEnvironmentList();
+            syncEnvironmentListAppliedState();
+        };
+
+        const deleteEnvironmentEditor = async () => {
+            if (!state.environmentEditor || state.environmentEditor.isSaving) {
+                return;
+            }
+            if (state.environmentEditor.environmentId === null) {
+                cancelEnvironmentEditor();
+                return;
+            }
+            const confirmed = window.confirm('Delete this environment? This action cannot be undone.');
+            if (!confirmed) {
+                return;
+            }
+            const base = ensureTrailingSlash(endpoints.environments);
+            if (!base) {
+                setStatus('Environment endpoint unavailable.', 'error');
+                return;
+            }
+            const detailUrl = `${base}${state.environmentEditor.environmentId}/`;
+            state.environmentEditor.isSaving = true;
+            updateEnvironmentEditorActionState();
+            try {
+                await deleteResource(detailUrl);
+                const deletedId = state.environmentEditor.environmentId;
+                state.environmentEditor = null;
+                if (state.activeEnvironmentId === deletedId) {
+                    applyEnvironmentSelection(null);
+                }
+                setStatus('Environment deleted.', 'success');
+                await refreshEnvironments({ preserveSelection: true, autoSelectFirst: true });
+            } catch (error) {
+                setStatus(error instanceof Error ? error.message : 'Failed to delete environment.', 'error');
+                if (state.environmentEditor) {
+                    state.environmentEditor.isSaving = false;
+                    renderEnvironmentEditor();
+                }
+            }
+        };
+
+        const saveEnvironmentEditor = async () => {
+            if (!state.environmentEditor || state.environmentEditor.isSaving) {
+                return;
+            }
+            const base = ensureTrailingSlash(endpoints.environments);
+            if (!base) {
+                setStatus('Environment endpoint unavailable.', 'error');
+                return;
+            }
+            const { form, isNew, environmentId } = state.environmentEditor;
+            const name = (form.name || '').trim();
+            if (!name) {
+                setStatus('Environment name is required.', 'error');
+                return;
+            }
+            const payload = {
+                name,
+                description: (form.description || '').trim(),
+                variables: rowsToObjectTrimmed(form.variables),
+                default_headers: rowsToObjectTrimmed(form.headers),
+            };
+            state.environmentEditor.isSaving = true;
+            updateEnvironmentEditorActionState();
+            try {
+                if (isNew) {
+                    const response = await postJson(base, payload, 'POST');
+                    const newId = normalizeEnvironmentId(response?.id ?? null);
+                    setStatus('Environment created successfully.', 'success');
+                    await refreshEnvironments({
+                        preserveSelection: true,
+                        focusEnvironmentId: newId,
+                        autoSelectFirst: false,
+                    });
+                    applyEnvironmentSelection(newId);
+                } else if (environmentId !== null) {
+                    const detailUrl = `${base}${environmentId}/`;
+                    const response = await postJson(detailUrl, payload, 'PATCH');
+                    const updatedId = normalizeEnvironmentId(response?.id ?? environmentId);
+                    setStatus('Environment updated successfully.', 'success');
+                    await refreshEnvironments({
+                        preserveSelection: true,
+                        focusEnvironmentId: updatedId,
+                        autoSelectFirst: false,
+                    });
+                }
+            } catch (error) {
+                setStatus(error instanceof Error ? error.message : 'Failed to save environment.', 'error');
+                if (state.environmentEditor) {
+                    state.environmentEditor.isSaving = false;
+                    renderEnvironmentEditor();
+                }
+            }
+        };
+
+        const refreshEnvironments = async ({
+            preserveSelection = true,
+            focusEnvironmentId = null,
+            autoSelectFirst = false,
+        } = {}) => {
+            if (!endpoints.environments) {
+                state.environments = [];
+                state.environmentEditor = null;
+                setActiveEnvironmentId(null);
+                renderEnvironmentPanel();
+                const activeCollection = state.collections.find((item) => item.id === state.selectedCollectionId) || null;
+                renderEnvironmentOptions(activeCollection);
+                return;
+            }
+            const previousActiveId = preserveSelection ? state.activeEnvironmentId : null;
+            const previousEditorId = state.environmentEditor && !state.environmentEditor.isNew
+                ? state.environmentEditor.environmentId
+                : null;
+            const wasNewEditor = Boolean(state.environmentEditor && state.environmentEditor.isNew);
+            const draftEditor = wasNewEditor ? state.environmentEditor : null;
+
+            const environments = await fetchJson(endpoints.environments);
+            state.environments = normalizeList(environments).slice().sort((a, b) => a.name.localeCompare(b.name));
+
+            let nextActiveId = focusEnvironmentId;
+            if (nextActiveId === null && preserveSelection) {
+                nextActiveId = previousActiveId;
+            }
+            if (nextActiveId === null && autoSelectFirst && state.environments.length) {
+                nextActiveId = state.environments[0].id;
+            }
+            if (nextActiveId !== null && !state.environments.some((env) => env.id === nextActiveId)) {
+                nextActiveId = null;
+            }
+            setActiveEnvironmentId(nextActiveId);
+
+            if (focusEnvironmentId !== null) {
+                const focused = getEnvironmentById(focusEnvironmentId);
+                state.environmentEditor = focused ? createEnvironmentEditorState(focused) : null;
+            } else if (draftEditor) {
+                state.environmentEditor = draftEditor;
+                state.environmentEditor.isSaving = false;
+            } else if (previousEditorId !== null) {
+                const matching = getEnvironmentById(previousEditorId);
+                state.environmentEditor = matching ? createEnvironmentEditorState(matching) : null;
+            } else {
+                state.environmentEditor = null;
+            }
+
+            renderEnvironmentPanel();
+
+            const activeCollection = state.collections.find((item) => item.id === state.selectedCollectionId) || null;
+            renderEnvironmentOptions(activeCollection);
+            if (state.variableSuggest.isOpen && state.variableSuggest.target) {
+                evaluateVariableSuggestForInput(state.variableSuggest.target);
+            }
+        };
+
+        const applyEnvironmentSelection = (environmentId) => {
+            const normalized = normalizeEnvironmentId(environmentId);
+            if (normalized !== null && !state.environments.some((env) => env.id === normalized)) {
+                return;
+            }
+            const value = normalized !== null ? String(normalized) : '';
+            if (elements.environmentSelect && elements.environmentSelect.value !== value) {
+                elements.environmentSelect.value = value;
+            }
+            setActiveEnvironmentId(normalized);
+            syncEnvironmentListAppliedState();
+            updateEnvironmentEditorActionState();
+        };
+
+        const handleBuilderFocusIn = (event) => {
+            const target = event.target;
+            if (!target) {
+                return;
+            }
+            if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+                state.activeInputTarget = { type: 'dom', element: target };
+                evaluateVariableSuggestForInput(target);
+            }
+        };
+
+        const handleBuilderFocusOut = (event) => {
+            if (!state.activeInputTarget || state.activeInputTarget.type !== 'dom') {
+                return;
+            }
+            if (state.activeInputTarget.element === event.target) {
+                state.activeInputTarget = null;
+                closeVariableSuggest();
+            }
+        };
+
 
         const renderCollections = (filterText = '') => {
             if (!elements.collectionsList) {
@@ -3106,23 +4249,67 @@
         };
 
         const bootstrap = async () => {
+            let environmentsLoaded = true;
             try {
-                const environments = await fetchJson(endpoints.environments);
-                state.environments = normalizeList(environments);
+                await refreshEnvironments({ preserveSelection: false, autoSelectFirst: true });
+            } catch (error) {
+                environmentsLoaded = false;
+                state.environments = [];
+                state.environmentEditor = null;
+                renderEnvironmentPanel();
+                renderEnvironmentOptions(null);
+                const message = error instanceof Error ? error.message : 'Unable to load environments.';
+                setStatus(message, 'error');
+            }
+
+            try {
                 await refreshCollections({ preserveSelection: false });
-                if (state.selectedCollectionId && state.selectedRequestId) {
-                    setStatus('Ready to send the selected request.', 'neutral');
-                }
                 if (elements.runCollectionButton) {
                     elements.runCollectionButton.disabled = state.collections.length === 0;
                 }
+                if (environmentsLoaded && state.selectedCollectionId && state.selectedRequestId) {
+                    setStatus('Ready to send the selected request.', 'neutral');
+                }
             } catch (error) {
-                const message = error instanceof Error ? error.message : 'Unable to load initial data.';
+                const message = error instanceof Error ? error.message : 'Unable to load collections.';
                 setStatus(message, 'error');
             }
         };
 
+        elements.form.addEventListener('focusin', handleBuilderFocusIn);
+        elements.form.addEventListener('focusout', handleBuilderFocusOut);
+        elements.form.addEventListener('input', handleVariableSuggestInput);
+        elements.form.addEventListener('keydown', handleVariableSuggestKeydown);
         elements.form.addEventListener('submit', submitForm);
+        document.addEventListener('mousedown', handleVariableSuggestExternalClick);
+        window.addEventListener('resize', handleVariableSuggestViewportChange);
+        window.addEventListener('scroll', handleVariableSuggestViewportChange, true);
+
+        if (elements.environmentCreateButton) {
+            elements.environmentCreateButton.addEventListener('click', (event) => {
+                event.preventDefault();
+                closeCollectionMenu();
+                closeDirectoryMenu();
+                closeRequestMenu();
+                startEnvironmentCreation();
+            });
+        }
+
+        if (elements.environmentList) {
+            elements.environmentList.addEventListener('click', handleEnvironmentListClick);
+        }
+
+        if (elements.environmentEditor) {
+            elements.environmentEditor.addEventListener('input', handleEnvironmentEditorInput);
+            elements.environmentEditor.addEventListener('click', handleEnvironmentEditorClick);
+        }
+
+        if (elements.environmentSelect) {
+            elements.environmentSelect.addEventListener('change', (event) => {
+                const selected = normalizeEnvironmentId(event.target.value);
+                applyEnvironmentSelection(selected);
+            });
+        }
 
         if (elements.runCollectionButton) {
             elements.runCollectionButton.addEventListener('click', async () => {
