@@ -393,6 +393,15 @@
     min-height: 90px;
 }
 
+.form-row select {
+    width: 100%;
+    border-radius: 8px;
+    border: 1px solid rgba(205, 174, 88, 0.55);
+    padding: 0.6rem 0.7rem;
+    background: #fffef9;
+    font-size: 0.85rem;
+}
+
 .scope-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -668,6 +677,79 @@ body.automation-modal-open {
     border: 0;
 }
 
+.data-management-grid {
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.automation-panel.data-card {
+    gap: 1rem;
+}
+
+.automation-panel.data-card .panel-header {
+    align-items: flex-start;
+}
+
+.automation-panel.data-card.is-highlighted {
+    border-color: rgba(244, 180, 0, 0.65);
+    box-shadow: 0 18px 36px -20px rgba(210, 150, 0, 0.55);
+}
+
+.automation-panel.data-card .panel-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.automation-search {
+    min-width: 180px;
+    border-radius: 999px;
+    border: 1px solid rgba(205, 174, 88, 0.55);
+    padding: 0.45rem 0.75rem;
+    background: #fff;
+    font-size: 0.75rem;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.automation-search:focus {
+    outline: none;
+    border-color: rgba(244, 180, 0, 0.55);
+    box-shadow: 0 0 0 3px rgba(244, 180, 0, 0.15);
+}
+
+.table-action-group {
+    display: inline-flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+.action-button {
+    border: 1px solid rgba(209, 144, 0, 0.4);
+    background: rgba(255, 249, 221, 0.65);
+    color: #2f1e00;
+    border-radius: 999px;
+    padding: 0.25rem 0.65rem;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.action-button:hover {
+    background: rgba(244, 180, 0, 0.18);
+    border-color: rgba(209, 144, 0, 0.6);
+}
+
+.action-button[data-variant="danger"] {
+    border-color: rgba(220, 38, 38, 0.3);
+    background: rgba(220, 38, 38, 0.08);
+    color: #7f1d1d;
+}
+
+.action-button[data-variant="danger"]:hover {
+    background: rgba(220, 38, 38, 0.16);
+    border-color: rgba(220, 38, 38, 0.45);
+}
+
 @media (max-width: 960px) {
     .automation-header {
         flex-direction: column;
@@ -687,5 +769,14 @@ body.automation-modal-open {
 
     .form-row.inline {
         grid-template-columns: 1fr;
+    }
+
+    .automation-panel.data-card .panel-actions {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .automation-panel.data-card .panel-actions .automation-search {
+        width: 100%;
     }
 }

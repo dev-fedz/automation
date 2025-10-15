@@ -84,3 +84,22 @@ class TestCaseAdmin(admin.ModelAdmin):
     list_display = ("title", "scenario", "priority", "owner")
     search_fields = ("title", "description", "scenario__title")
     list_filter = ("scenario__plan", "priority")
+
+
+@admin.register(models.Risk)
+class RiskAdmin(admin.ModelAdmin):
+    list_display = ("title", "created_at", "updated_at")
+    search_fields = ("title", "description")
+
+
+@admin.register(models.MitigationPlan)
+class MitigationPlanAdmin(admin.ModelAdmin):
+    list_display = ("title", "created_at", "updated_at")
+    search_fields = ("title", "description")
+
+
+@admin.register(models.RiskAndMitigationPlan)
+class RiskAndMitigationPlanAdmin(admin.ModelAdmin):
+    list_display = ("risk", "mitigation_plan", "impact", "created_at")
+    search_fields = ("risk__title", "mitigation_plan__title", "impact")
+    list_filter = ("risk", "mitigation_plan")

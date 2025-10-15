@@ -18,6 +18,13 @@
             <li class="menu-item" data-menu="automation-test-plan-maintenance"><a href="{% url 'automation-test-plan-maintenance' %}" data-testid="menu-automation-maintenance">Test Plan Maintenance</a></li>
         </ul>
     </li>
+    <li class="has-submenu" data-menu="data-management">
+        <a href="#" data-testid="menu-data-management">Data Management</a>
+        <ul class="submenu">
+            <li class="menu-item" data-menu="data-management-risks"><a href="{% url 'data-management-risks' %}" data-testid="menu-data-risks">Risk Register</a></li>
+            <li class="menu-item" data-menu="data-management-mitigation"><a href="{% url 'data-management-mitigation' %}" data-testid="menu-data-mitigation">Mitigation Plans</a></li>
+        </ul>
+    </li>
 
 </ul>
 <script>
@@ -25,7 +32,10 @@ document.addEventListener('DOMContentLoaded', function(){
         // submenu toggle
         document.querySelectorAll('.sidebar-menu .has-submenu > a').forEach(function(a){
             a.addEventListener('click', function(e){
-                e.preventDefault();
+                const href = this.getAttribute('href');
+                if(!href || href === '#'){
+                    e.preventDefault();
+                }
                 const li = this.parentElement;
                 li.classList.toggle('open');
             });

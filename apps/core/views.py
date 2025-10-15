@@ -15,6 +15,7 @@ import requests
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
+from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import render
 from django.urls import reverse
@@ -331,9 +332,69 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         return queryset
 
 
+class RiskViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.RiskSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = selectors.risk_list()
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(Q(title__icontains=search) | Q(description__icontains=search))
+        return queryset
+
+
+class MitigationPlanViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.MitigationPlanSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = selectors.mitigation_plan_list()
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(Q(title__icontains=search) | Q(description__icontains=search))
+        return queryset
+
+
+class RiskAndMitigationPlanViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.RiskAndMitigationPlanSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = selectors.risk_and_mitigation_list()
+        risk_id = self.request.query_params.get("risk")
+        if risk_id not in (None, ""):
+            try:
+                queryset = queryset.filter(risk_id=int(risk_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"risk": "Risk must be an integer."}) from exc
+        mitigation_plan_id = self.request.query_params.get("mitigation_plan")
+        if mitigation_plan_id not in (None, ""):
+            try:
+                queryset = queryset.filter(mitigation_plan_id=int(mitigation_plan_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"mitigation_plan": "Mitigation plan must be an integer."}) from exc
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(risk__title__icontains=search)
+                | Q(risk__description__icontains=search)
+                | Q(mitigation_plan__title__icontains=search)
+                | Q(mitigation_plan__description__icontains=search)
+                | Q(impact__icontains=search)
+            )
+        return queryset
+
+
 def _prepare_automation_data() -> dict[str, Any]:
     plans_qs = selectors.test_plan_list()
     plans_payload = serializers.TestPlanSerializer(plans_qs, many=True).data
+    risks_qs = selectors.risk_list()
+    risks_payload = serializers.RiskSerializer(risks_qs, many=True).data
+    mitigation_plans_qs = selectors.mitigation_plan_list()
+    mitigation_plans_payload = serializers.MitigationPlanSerializer(mitigation_plans_qs, many=True).data
+    risk_mitigations_qs = selectors.risk_and_mitigation_list()
+    risk_mitigations_payload = serializers.RiskAndMitigationPlanSerializer(risk_mitigations_qs, many=True).data
 
     scenario_count = sum(len(plan.get("scenarios", [])) for plan in plans_payload)
     case_count = sum(
@@ -349,6 +410,9 @@ def _prepare_automation_data() -> dict[str, Any]:
         "collections": models.ApiCollection.objects.count(),
         "runs": models.ApiRun.objects.count(),
         "environments": models.ApiEnvironment.objects.count(),
+        "risks": len(risks_payload),
+        "mitigation_plans": len(mitigation_plans_payload),
+        "risk_mitigations": len(risk_mitigations_payload),
     }
 
     recent_runs = (
@@ -366,6 +430,9 @@ def _prepare_automation_data() -> dict[str, Any]:
         "collections": reverse("core:core-collections-list"),
         "environments": reverse("core:core-environments-list"),
         "runs": reverse("core:core-runs-list"),
+        "risks": reverse("core:core-risks-list"),
+        "mitigation_plans": reverse("core:core-mitigation-plans-list"),
+        "risk_mitigations": reverse("core:core-risk-mitigation-plans-list"),
     }
 
     selected_plan = plans_payload[0] if plans_payload else None
@@ -383,6 +450,9 @@ def _prepare_automation_data() -> dict[str, Any]:
         "api_endpoints": api_endpoints,
         "selected_plan": selected_plan,
         "selected_scenario": selected_scenario,
+        "risks": risks_payload,
+        "mitigation_plans": mitigation_plans_payload,
+        "risk_mitigations": risk_mitigations_payload,
     }
 
 
@@ -408,6 +478,7 @@ def automation_test_plans(request):
         "api_endpoints": data["api_endpoints"],
         "initial_selected_plan": data["selected_plan"],
         "initial_selected_scenario": data["selected_scenario"],
+        "risk_mitigations": data["risk_mitigations"],
     }
     return render(request, "core/automation_test_plans.html", context)
 
@@ -449,6 +520,20 @@ def automation_test_plan_maintenance(request):
         "initial_selected_scenario": data["selected_scenario"],
     }
     return render(request, "core/automation_test_plan_maintenance.html", context)
+
+
+@login_required
+def automation_data_management(request, section: str | None = None):
+    data = _prepare_automation_data()
+    context = {
+        "initial_metrics": data["metrics"],
+        "initial_risks": data["risks"],
+        "initial_mitigation_plans": data["mitigation_plans"],
+        "initial_risk_mitigations": data["risk_mitigations"],
+        "api_endpoints": data["api_endpoints"],
+        "initial_section": section or "",
+    }
+    return render(request, "core/automation_data_management.html", context)
 
 
 class ApiAdhocRequestView(APIView):

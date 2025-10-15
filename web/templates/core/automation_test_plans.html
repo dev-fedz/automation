@@ -99,6 +99,54 @@
                         </div>
                         <p class="form-hint">Enter one item per line; entries populate the scope table for this plan.</p>
                     </div>
+                    <div class="form-row">
+                        <label for="plan-risk-matrix">Risk &amp; Mitigation Matrix</label>
+                        <div id="plan-risk-matrix" class="automation-case-summary">
+                            {% if risk_mitigations %}
+                                <p class="form-hint">Select the risk and mitigation combinations that apply to this plan.</p>
+                                <div class="card table-card automation-table-card" aria-live="polite">
+                                    <table class="table-modern automation-table" aria-label="Risk and mitigation matrix">
+                                        <thead>
+                                            <tr>
+                                                <th scope="col">Include</th>
+                                                <th scope="col">#</th>
+                                                <th scope="col">Risk</th>
+                                                <th scope="col">Mitigation Plan</th>
+                                                <th scope="col">Impact</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for item in risk_mitigations %}
+                                                <tr>
+                                                    <td data-label="Include">
+                                                        <input type="checkbox" id="plan-risk-{{ item.id }}" value="{{ item.id }}" data-role="plan-risk-checkbox">
+                                                        <label class="sr-only" for="plan-risk-{{ item.id }}">Include {{ item.risk_title }} mitigation</label>
+                                                    </td>
+                                                    <td data-label="#">{{ forloop.counter }}</td>
+                                                    <td data-label="Risk">
+                                                        <strong>{{ item.risk_title }}</strong>
+                                                        {% if item.risk_description %}
+                                                            <div class="table-secondary">{{ item.risk_description }}</div>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td data-label="Mitigation Plan">
+                                                        <strong>{{ item.mitigation_plan_title }}</strong>
+                                                        {% if item.mitigation_plan_description %}
+                                                            <div class="table-secondary">{{ item.mitigation_plan_description }}</div>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td data-label="Impact">{{ item.impact|default:"—" }}</td>
+                                                </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            {% else %}
+                                <p class="empty">Create risk and mitigation links from the Data Management workspace to populate this matrix.</p>
+                            {% endif %}
+                            <p class="form-hint">Risk and mitigation links stay with the plan once saved.</p>
+                        </div>
+                    </div>
                     <div class="form-row inline">
                         <div>
                             <label for="plan-modules">Modules (comma separated)</label>

@@ -151,6 +151,7 @@
             scenarioFormReset: root.querySelector('[data-action="reset-scenario-form"]'),
             caseFormReset: root.querySelector('[data-action="reset-case-form"]'),
             maintenanceFormReset: root.querySelector('[data-action="reset-maintenance-form"]'),
+            planRiskMatrix: document.getElementById('plan-risk-matrix'),
         };
 
         const planModalCloseButtons = Array.from(root.querySelectorAll('[data-action="close-plan-modal"]'));
@@ -332,6 +333,19 @@
             } else if (!next.scopes) {
                 next.scopes = [];
             }
+            if (Array.isArray(next.risk_mitigations)) {
+                next.risk_mitigations = next.risk_mitigations.map((value) => {
+                    const parsed = Number(value);
+                    return Number.isNaN(parsed) ? value : parsed;
+                });
+            } else if (!next.risk_mitigations) {
+                next.risk_mitigations = [];
+            }
+            if (Array.isArray(next.risk_mitigation_details)) {
+                next.risk_mitigation_details = next.risk_mitigation_details.map((entry) => ({ ...entry }));
+            } else if (!next.risk_mitigation_details) {
+                next.risk_mitigation_details = [];
+            }
             if (Array.isArray(next.modules_under_test)) {
                 next.modules_under_test = [...next.modules_under_test];
             }
@@ -471,6 +485,18 @@
             return segments.length ? `<div class="table-scope-preview">${segments.join('')}</div>` : '';
         };
 
+        const buildRiskPreview = (plan) => {
+            if (!plan || typeof plan !== 'object') {
+                return '';
+            }
+            const linked = Array.isArray(plan.risk_mitigation_details) ? plan.risk_mitigation_details : [];
+            if (!linked.length) {
+                return '';
+            }
+            const summary = linked.length === 1 ? '1 linked risk' : `${linked.length} linked risks`;
+            return `<div class="table-tertiary">${escapeHtml(summary)}</div>`;
+        };
+
         const renderPlanList = () => {
             if (!els.planList) {
                 return;
@@ -500,6 +526,7 @@
                 const signoff = timeline.signoff || '—';
                 const approver = plan.approver || '—';
                 const scopePreview = buildScopePreview(plan);
+                const riskPreview = buildRiskPreview(plan);
 
                 if (plan.id === state.selectedPlanId) {
                     row.classList.add('is-active');
@@ -514,6 +541,7 @@
                         ${plan.description ? `<div class="table-secondary">${escapeHtml(plan.description)}</div>` : ''}
                         ${plan.objective ? `<div class="table-tertiary table-tertiary-rich">${plan.objective}</div>` : ''}
                         ${scopePreview}
+                        ${riskPreview}
                     </td>
                     <td data-label="Scenarios">${scenarioCount}</td>
                     <td data-label="Modules">${moduleCount}</td>
@@ -849,6 +877,17 @@
                 }
                 if (inputs.plan.signoff.value) {
                     payload.testing_timeline.signoff = inputs.plan.signoff.value;
+                }
+                if (els.planRiskMatrix) {
+                    const selectedRisks = Array.from(
+                        els.planRiskMatrix.querySelectorAll('[data-role="plan-risk-checkbox"]')
+                    )
+                        .filter((input) => input instanceof HTMLInputElement && input.checked && input.value !== '')
+                        .map((input) => Number(input.value))
+                        .filter((value) => Number.isFinite(value));
+                    if (selectedRisks.length) {
+                        payload.risk_mitigations = selectedRisks;
+                    }
                 }
                 const created = await submitJson(apiEndpoints.plans || '/api/core/test-plans/', payload);
                 await refreshPlans({ selectPlanId: created.id, silent: true });

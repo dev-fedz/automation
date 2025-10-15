@@ -110,6 +110,18 @@ class TestPlanWorkflowTests(APITestCase):
         )
         self.client.force_authenticate(self.user)
 
+    def _create_risk_mapping(self) -> models.RiskAndMitigationPlan:
+        risk = models.Risk.objects.create(title="Payment gateway outage", description="Card processor unavailable")
+        mitigation = models.MitigationPlan.objects.create(
+            title="Switch to secondary processor",
+            description="Route transactions to backup provider",
+        )
+        return models.RiskAndMitigationPlan.objects.create(
+            risk=risk,
+            mitigation_plan=mitigation,
+            impact="Keeps payment downtime below 15 minutes",
+        )
+
     def test_stlc_end_to_end_workflow(self) -> None:
         plan_payload = {
             "name": "Release 1 Automation",
@@ -209,3 +221,106 @@ class TestPlanWorkflowTests(APITestCase):
         scenario_data = detail_response.data["scenarios"][0]
         self.assertEqual(len(scenario_data["cases"]), 1)
         self.assertEqual(scenario_data["cases"][0]["dynamic_variables"]["expected_status"], 200)
+
+    def test_plan_can_attach_risk_mitigations(self) -> None:
+        mapping = self._create_risk_mapping()
+        plan_payload = {
+            "name": "Release 2 Automation",
+            "objective": "Cover regression with known risks.",
+            "modules_under_test": [],
+            "testing_types": {"functional": [], "non_functional": []},
+            "tools": [],
+            "testing_timeline": {},
+            "testers": [],
+            "approver": "qa-lead@example.com",
+            "risk_mitigations": [mapping.id],
+        }
+        response = self.client.post(reverse("core:core-test-plans-list"), data=plan_payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        plan_id = response.data["id"]
+        plan = models.TestPlan.objects.get(pk=plan_id)
+        self.assertEqual(plan.risk_mitigations.count(), 1)
+        self.assertEqual(plan.risk_mitigations.first(), mapping)
+
+        detail_response = self.client.get(reverse("core:core-test-plans-detail", kwargs={"pk": plan_id}))
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        self.assertIn(mapping.id, detail_response.data["risk_mitigations"])
+        details = detail_response.data["risk_mitigation_details"]
+        self.assertEqual(len(details), 1)
+        self.assertEqual(details[0]["risk"], mapping.risk.id)
+        self.assertEqual(details[0]["mitigation_plan"], mapping.mitigation_plan.id)
+        self.assertEqual(details[0]["impact"], mapping.impact)
+
+
+class DataManagementTests(APITestCase):
+    def setUp(self) -> None:
+        self.user = get_user_model().objects.create_user(
+            username="riskmanager",
+            email="rm@example.com",
+            password="secret123",
+        )
+        self.client.force_authenticate(self.user)
+
+    def test_risk_mitigation_crud_flow(self) -> None:
+        risk_payload = {"title": "Data center outage", "description": "Primary region unavailable."}
+        risk_response = self.client.post(
+            reverse("core:core-risks-list"),
+            data=risk_payload,
+            format="json",
+        )
+        self.assertEqual(risk_response.status_code, status.HTTP_201_CREATED)
+        risk_id = risk_response.data["id"]
+
+        mitigation_payload = {"title": "Activate failover site", "description": "Route traffic to secondary region."}
+        mitigation_response = self.client.post(
+            reverse("core:core-mitigation-plans-list"),
+            data=mitigation_payload,
+            format="json",
+        )
+        self.assertEqual(mitigation_response.status_code, status.HTTP_201_CREATED)
+        mitigation_id = mitigation_response.data["id"]
+
+        mapping_payload = {
+            "risk": risk_id,
+            "mitigation_plan": mitigation_id,
+            "impact": "Service downtime reduced to under 30 minutes.",
+        }
+        mapping_response = self.client.post(
+            reverse("core:core-risk-mitigation-plans-list"),
+            data=mapping_payload,
+            format="json",
+        )
+        self.assertEqual(mapping_response.status_code, status.HTTP_201_CREATED)
+        mapping_id = mapping_response.data["id"]
+
+        list_response = self.client.get(reverse("core:core-risks-list"), data={"search": "outage"})
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(any(item["id"] == risk_id for item in list_response.data))
+
+        mapping_list_response = self.client.get(
+            reverse("core:core-risk-mitigation-plans-list"),
+            data={"search": "failover"},
+        )
+        self.assertEqual(mapping_list_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(any(item["id"] == mapping_id for item in mapping_list_response.data))
+
+        patch_response = self.client.patch(
+            reverse("core:core-risks-detail", kwargs={"pk": risk_id}),
+            data={"description": "Primary region unavailable. Initiate DR plan."},
+            format="json",
+        )
+        self.assertEqual(patch_response.status_code, status.HTTP_200_OK)
+        self.assertIn("Initiate DR", patch_response.data["description"])
+
+        delete_mapping_response = self.client.delete(
+            reverse("core:core-risk-mitigation-plans-detail", kwargs={"pk": mapping_id})
+        )
+        self.assertEqual(delete_mapping_response.status_code, status.HTTP_204_NO_CONTENT)
+
+        delete_risk_response = self.client.delete(reverse("core:core-risks-detail", kwargs={"pk": risk_id}))
+        self.assertEqual(delete_risk_response.status_code, status.HTTP_204_NO_CONTENT)
+
+        delete_mitigation_response = self.client.delete(
+            reverse("core:core-mitigation-plans-detail", kwargs={"pk": mitigation_id})
+        )
+        self.assertEqual(delete_mitigation_response.status_code, status.HTTP_204_NO_CONTENT)

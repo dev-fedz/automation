@@ -33,6 +33,16 @@ http://docs.celeryproject.org/en/latest/userguide/configuration.html
 docker compose run automation python manage.py makemigrations
 docker compose run automation python manage.py migrate
 docker compose run automation pip install -r requirements.txt
-docker compose run automation pip install -r requirements.txt
 docker compose run automation python manage.py collectstatic
 docker compose up --build automation
+
+
+Creds:
+admin@example.com
+password
+
+## Run Init User Modules for Admin
+```bash
+$ docker compose exec projectprofit  python manage.py init_modules
+$ docker compose exec projectprofit python manage.py init_module_permissions
+$ docker compose exec projectprofit python manage.py  init_superuser_role

@@ -76,6 +76,10 @@ urlpatterns = [
 	path('automation/test-scenarios/', app_views.automation_test_scenarios, name='automation-test-scenarios'),
 	path('automation/test-cases/', app_views.automation_test_cases, name='automation-test-cases'),
 	path('automation/test-plan-maintenance/', app_views.automation_test_plan_maintenance, name='automation-test-plan-maintenance'),
+	path('automation/data-management/', RedirectView.as_view(pattern_name='data-management', permanent=False)),
+	path('data-management/', app_views.automation_data_management, name='data-management'),
+	path('data-management/risks/', app_views.automation_data_management, {"section": "risks"}, name='data-management-risks'),
+	path('data-management/mitigation-plans/', app_views.automation_data_management, {"section": "mitigation"}, name='data-management-mitigation'),
 	path('automation/api-tester/', app_views.api_tester_page, name='api-tester'),
 	path('healthz/', healthz, name='healthz'),
 	path('healthz', healthz),  # fallback no slash

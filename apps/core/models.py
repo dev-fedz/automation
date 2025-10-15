@@ -216,6 +216,11 @@ class TestPlan(TimeStampedModel):
     testing_timeline = models.JSONField(default=dict, blank=True)
     testers = models.JSONField(default=list, blank=True)
     approver = models.CharField(max_length=255, blank=True)
+    risk_mitigations = models.ManyToManyField(
+        "RiskAndMitigationPlan",
+        related_name="test_plans",
+        blank=True,
+    )
 
     class Meta:
         ordering = ["name", "id"]
@@ -278,6 +283,51 @@ class TestScenario(TimeStampedModel):
 
     def __str__(self) -> str:  # pragma: no cover
         return self.title
+
+
+class Risk(TimeStampedModel):
+    """Catalog of identified project risks."""
+
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["title", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.title
+
+
+class MitigationPlan(TimeStampedModel):
+    """Mitigation strategies that can address project risks."""
+
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["title", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.title
+
+
+class RiskAndMitigationPlan(TimeStampedModel):
+    """Links risks to mitigation plans with contextual impact notes."""
+
+    risk = models.ForeignKey(Risk, on_delete=models.CASCADE, related_name="mitigation_links")
+    mitigation_plan = models.ForeignKey(
+        MitigationPlan,
+        on_delete=models.CASCADE,
+        related_name="risk_links",
+    )
+    impact = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["risk", "mitigation_plan", "id"]
+        unique_together = ("risk", "mitigation_plan")
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.risk} → {self.mitigation_plan}"
 
 
 class TestCase(TimeStampedModel):

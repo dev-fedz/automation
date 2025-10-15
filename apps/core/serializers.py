@@ -402,6 +402,53 @@ class TestPlanMaintenanceSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "updated_at"]
 
 
+class RiskSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = models.Risk
+        fields = ["id", "title", "description", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class MitigationPlanSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = models.MitigationPlan
+        fields = ["id", "title", "description", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class RiskAndMitigationPlanSerializer(serializers.ModelSerializer):
+    risk = serializers.PrimaryKeyRelatedField(queryset=models.Risk.objects.all())
+    mitigation_plan = serializers.PrimaryKeyRelatedField(queryset=models.MitigationPlan.objects.all())
+    risk_title = serializers.CharField(source="risk.title", read_only=True)
+    risk_description = serializers.CharField(source="risk.description", read_only=True)
+    mitigation_plan_title = serializers.CharField(source="mitigation_plan.title", read_only=True)
+    mitigation_plan_description = serializers.CharField(source="mitigation_plan.description", read_only=True)
+
+    class Meta:
+        model = models.RiskAndMitigationPlan
+        fields = [
+            "id",
+            "risk",
+            "risk_title",
+            "risk_description",
+            "mitigation_plan",
+            "mitigation_plan_title",
+            "mitigation_plan_description",
+            "impact",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "risk_title",
+            "risk_description",
+            "mitigation_plan_title",
+            "mitigation_plan_description",
+            "created_at",
+            "updated_at",
+        ]
+
+
 class TestPlanSerializer(serializers.ModelSerializer):
     modules_under_test = serializers.ListField(child=serializers.CharField(), required=False)
     testing_types = serializers.DictField(child=serializers.ListField(child=serializers.CharField()), required=False)
@@ -411,6 +458,16 @@ class TestPlanSerializer(serializers.ModelSerializer):
     scopes = TestPlanScopeSerializer(many=True, required=False)
     maintenances = TestPlanMaintenanceSerializer(many=True, read_only=True)
     scenarios = TestScenarioSerializer(many=True, read_only=True)
+    risk_mitigations = serializers.PrimaryKeyRelatedField(
+        queryset=models.RiskAndMitigationPlan.objects.all(),
+        many=True,
+        required=False,
+    )
+    risk_mitigation_details = RiskAndMitigationPlanSerializer(
+        source="risk_mitigations",
+        many=True,
+        read_only=True,
+    )
 
     class Meta:
         model = models.TestPlan
@@ -427,6 +484,8 @@ class TestPlanSerializer(serializers.ModelSerializer):
             "testers",
             "approver",
             "scopes",
+            "risk_mitigations",
+            "risk_mitigation_details",
             "maintenances",
             "scenarios",
             "created_at",
@@ -481,18 +540,24 @@ class TestPlanSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data: dict[str, Any]) -> models.TestPlan:
         scopes_data = validated_data.pop("scopes", [])
+        risk_mitigations = validated_data.pop("risk_mitigations", [])
         plan = models.TestPlan.objects.create(**validated_data)
         self._replace_scopes(plan, scopes_data)
+        if risk_mitigations:
+            plan.risk_mitigations.set(risk_mitigations)
         return plan
 
     @transaction.atomic
     def update(self, instance: models.TestPlan, validated_data: dict[str, Any]) -> models.TestPlan:
         scopes_data = validated_data.pop("scopes", None)
+        risk_mitigations = validated_data.pop("risk_mitigations", None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
         if scopes_data is not None:
             self._replace_scopes(instance, scopes_data)
+        if risk_mitigations is not None:
+            instance.risk_mitigations.set(risk_mitigations)
         return instance
 
     def _replace_scopes(self, plan: models.TestPlan, scopes_data: list[dict[str, Any]]) -> None:

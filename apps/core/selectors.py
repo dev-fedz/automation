@@ -50,12 +50,18 @@ def test_plan_list() -> QuerySet[models.TestPlan]:
     ).order_by("title", "id")
     maintenance_qs = models.TestPlanMaintenance.objects.order_by("-effective_date", "-created_at", "id")
     scope_qs = models.TestPlanScope.objects.order_by("category", "order", "id")
+    risk_mitigation_qs = models.RiskAndMitigationPlan.objects.select_related("risk", "mitigation_plan").order_by(
+        "risk__title",
+        "mitigation_plan__title",
+        "id",
+    )
     return (
         models.TestPlan.objects.order_by("name", "id")
         .prefetch_related(
             Prefetch("scenarios", queryset=scenario_qs),
             Prefetch("maintenances", queryset=maintenance_qs),
             Prefetch("scopes", queryset=scope_qs),
+            Prefetch("risk_mitigations", queryset=risk_mitigation_qs),
         )
     )
 
@@ -74,3 +80,19 @@ def test_case_list() -> QuerySet[models.TestCase]:
 
 def test_plan_maintenance_list() -> QuerySet[models.TestPlanMaintenance]:
     return models.TestPlanMaintenance.objects.select_related("plan").order_by("-effective_date", "-created_at", "id")
+
+
+def risk_list() -> QuerySet[models.Risk]:
+    return models.Risk.objects.order_by("title", "id")
+
+
+def mitigation_plan_list() -> QuerySet[models.MitigationPlan]:
+    return models.MitigationPlan.objects.order_by("title", "id")
+
+
+def risk_and_mitigation_list() -> QuerySet[models.RiskAndMitigationPlan]:
+    return models.RiskAndMitigationPlan.objects.select_related("risk", "mitigation_plan").order_by(
+        "risk__title",
+        "mitigation_plan__title",
+        "id",
+    )
