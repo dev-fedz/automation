@@ -201,3 +201,82 @@ class ApiRunResult(TimeStampedModel):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Result {self.pk} ({self.status})"
+
+
+class TestPlan(TimeStampedModel):
+    """High-level plan describing the scope and approach for automation testing."""
+
+    name = models.CharField(max_length=150, unique=True)
+    objective = models.TextField()
+    objectives = models.JSONField(default=list, blank=True)
+    description = models.TextField(blank=True)
+    modules_under_test = models.JSONField(default=list, blank=True)
+    testing_types = models.JSONField(default=dict, blank=True)
+    tools = models.JSONField(default=list, blank=True)
+    testing_timeline = models.JSONField(default=dict, blank=True)
+    testers = models.JSONField(default=list, blank=True)
+    approver = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["name", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+
+class TestPlanMaintenance(TimeStampedModel):
+    """Tracks revisions made to a test plan across the STLC lifecycle."""
+
+    plan = models.ForeignKey(TestPlan, on_delete=models.CASCADE, related_name="maintenances")
+    version = models.CharField(max_length=50)
+    summary = models.TextField()
+    updates = models.JSONField(default=dict, blank=True)
+    effective_date = models.DateField(null=True, blank=True)
+    updated_by = models.CharField(max_length=255, blank=True)
+    approved_by = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["-effective_date", "-created_at", "id"]
+        unique_together = ("plan", "version")
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.plan.name} v{self.version}"
+
+
+class TestScenario(TimeStampedModel):
+    """Concrete scenario derived from the test plan, grouping related test cases."""
+
+    plan = models.ForeignKey(TestPlan, on_delete=models.CASCADE, related_name="scenarios")
+    title = models.CharField(max_length=150)
+    description = models.TextField(blank=True)
+    preconditions = models.TextField(blank=True)
+    postconditions = models.TextField(blank=True)
+    tags = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        ordering = ["plan", "title", "id"]
+        unique_together = ("plan", "title")
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.title
+
+
+class TestCase(TimeStampedModel):
+    """Executable test case with dynamic variables for API validation."""
+
+    scenario = models.ForeignKey(TestScenario, on_delete=models.CASCADE, related_name="cases")
+    title = models.CharField(max_length=150)
+    description = models.TextField(blank=True)
+    steps = models.JSONField(default=list, blank=True)
+    expected_results = models.JSONField(default=list, blank=True)
+    dynamic_variables = models.JSONField(default=dict, blank=True)
+    related_api_request = models.ForeignKey(ApiRequest, on_delete=models.SET_NULL, null=True, blank=True, related_name="test_cases")
+    priority = models.CharField(max_length=20, blank=True)
+    owner = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["scenario", "title", "id"]
+        unique_together = ("scenario", "title")
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.title

@@ -28,3 +28,11 @@ https://github.com/adamchainz/django-cors-headers
 
 # Celery
 http://docs.celeryproject.org/en/latest/userguide/configuration.html
+
+
+docker compose run automation python manage.py makemigrations
+docker compose run automation python manage.py migrate
+docker compose run automation pip install -r requirements.txt
+docker compose run automation pip install -r requirements.txt
+docker compose run automation python manage.py collectstatic
+docker compose up --build automation

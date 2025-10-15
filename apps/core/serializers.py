@@ -316,3 +316,148 @@ class ApiRunSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = fields
+
+
+class TestCaseSerializer(serializers.ModelSerializer):
+    steps = serializers.ListField(child=serializers.JSONField(), required=False)
+    expected_results = serializers.ListField(child=serializers.JSONField(), required=False)
+    dynamic_variables = serializers.DictField(child=serializers.JSONField(), required=False)
+
+    class Meta:
+        model = models.TestCase
+        fields = [
+            "id",
+            "scenario",
+            "title",
+            "description",
+            "steps",
+            "expected_results",
+            "dynamic_variables",
+            "related_api_request",
+            "priority",
+            "owner",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate_dynamic_variables(self, value: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValidationError({"dynamic_variables": "Dynamic variables must be an object."})
+        return value
+
+
+class TestScenarioSerializer(serializers.ModelSerializer):
+    cases = TestCaseSerializer(many=True, read_only=True)
+    tags = serializers.ListField(child=serializers.CharField(), required=False)
+
+    class Meta:
+        model = models.TestScenario
+        fields = [
+            "id",
+            "plan",
+            "title",
+            "description",
+            "preconditions",
+            "postconditions",
+            "tags",
+            "cases",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "cases", "created_at", "updated_at"]
+
+
+class TestPlanMaintenanceSerializer(serializers.ModelSerializer):
+    updates = serializers.DictField(child=serializers.JSONField(), required=False)
+
+    class Meta:
+        model = models.TestPlanMaintenance
+        fields = [
+            "id",
+            "plan",
+            "version",
+            "summary",
+            "updates",
+            "effective_date",
+            "updated_by",
+            "approved_by",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class TestPlanSerializer(serializers.ModelSerializer):
+    modules_under_test = serializers.ListField(child=serializers.CharField(), required=False)
+    testing_types = serializers.DictField(child=serializers.ListField(child=serializers.CharField()), required=False)
+    tools = serializers.ListField(child=serializers.CharField(), required=False)
+    testing_timeline = serializers.DictField(child=serializers.JSONField(), required=False)
+    testers = serializers.ListField(child=serializers.CharField(), required=False)
+    maintenances = TestPlanMaintenanceSerializer(many=True, read_only=True)
+    scenarios = TestScenarioSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = models.TestPlan
+        fields = [
+            "id",
+            "name",
+            "objective",
+            "objectives",
+            "description",
+            "modules_under_test",
+            "testing_types",
+            "tools",
+            "testing_timeline",
+            "testers",
+            "approver",
+            "maintenances",
+            "scenarios",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "maintenances", "scenarios", "created_at", "updated_at"]
+
+    def validate_testing_types(self, value: dict[str, list[str]]) -> dict[str, list[str]]:
+        if not isinstance(value, dict):
+            raise ValidationError({"testing_types": "Testing types must be an object with functional categories."})
+        allowed_keys = {"functional", "non_functional"}
+        for key, tests in value.items():
+            if key not in allowed_keys:
+                raise ValidationError({"testing_types": f"Unsupported category '{key}'."})
+            if not isinstance(tests, list):
+                raise ValidationError({"testing_types": f"Category '{key}' must be a list."})
+        return value
+
+    def validate_objectives(self, value: Any) -> list[dict[str, str]]:
+        if value in (None, serializers.empty):
+            if self.instance is not None:
+                return self.instance.objectives
+
+            raise ValidationError({"objectives": "At least one objective/goal pair is required."})
+        if not isinstance(value, list):
+            raise ValidationError({"objectives": "Objectives must be a list of entries."})
+
+        normalized: list[dict[str, str]] = []
+        for index, entry in enumerate(value, start=1):
+            if not isinstance(entry, dict):
+                raise ValidationError({"objectives": f"Entry {index} must be an object."})
+            title = str(entry.get("title", "")).strip()
+            objective_text = str(entry.get("objective", "")).strip()
+            goal = str(entry.get("goal", "")).strip()
+            if not title or not objective_text or not goal:
+                raise ValidationError(
+                    {
+                        "objectives": f"Entry {index} requires title, objective, and goal values.",
+                    }
+                )
+            normalized.append({
+                "title": title,
+                "objective": objective_text,
+                "goal": goal,
+            })
+
+        if not normalized:
+            raise ValidationError({"objectives": "At least one objective/goal pair is required."})
+
+        return normalized

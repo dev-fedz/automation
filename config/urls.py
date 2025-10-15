@@ -71,11 +71,17 @@ urlpatterns = [
 	# Preserve old /dashboard/ URL as a redirect for existing links/bookmarks
 	path('dashboard/', RedirectView.as_view(pattern_name='dashboard', permanent=False), name='dashboard_redirect'),
 	path('logout/', logout_view, name='logout'),
+	path('automation/', app_views.automation_overview, name='automation-overview'),
+	path('automation/test-plans/', app_views.automation_test_plans, name='automation-test-plans'),
+	path('automation/test-scenarios/', app_views.automation_test_scenarios, name='automation-test-scenarios'),
+	path('automation/test-cases/', app_views.automation_test_cases, name='automation-test-cases'),
+	path('automation/test-plan-maintenance/', app_views.automation_test_plan_maintenance, name='automation-test-plan-maintenance'),
 	path('automation/api-tester/', app_views.api_tester_page, name='api-tester'),
 	path('healthz/', healthz, name='healthz'),
 	path('healthz', healthz),  # fallback no slash
 	path('api/metrics/', metrics_api, name='metrics'),
 	path('api/core/', include(('apps.core.urls', 'core'), namespace='core')),
+	path('tinymce/', include('tinymce.urls')),
 ] + account_page_patterns
 
 if django_apps.is_installed('apps.accounts'):

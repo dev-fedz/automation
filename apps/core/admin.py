@@ -56,3 +56,31 @@ class ApiAssertionAdmin(admin.ModelAdmin):
     list_display = ("request", "type", "field", "comparator")
     list_filter = ("type", "comparator")
     search_fields = ("request__name", "field")
+
+
+@admin.register(models.TestPlan)
+class TestPlanAdmin(admin.ModelAdmin):
+    list_display = ("name", "approver", "created_at", "updated_at")
+    search_fields = ("name", "objective", "approver")
+    ordering = ("name",)
+
+
+@admin.register(models.TestPlanMaintenance)
+class TestPlanMaintenanceAdmin(admin.ModelAdmin):
+    list_display = ("plan", "version", "effective_date", "updated_by", "approved_by")
+    search_fields = ("plan__name", "version", "summary")
+    list_filter = ("effective_date", "plan")
+
+
+@admin.register(models.TestScenario)
+class TestScenarioAdmin(admin.ModelAdmin):
+    list_display = ("title", "plan", "created_at")
+    search_fields = ("title", "description", "plan__name")
+    list_filter = ("plan",)
+
+
+@admin.register(models.TestCase)
+class TestCaseAdmin(admin.ModelAdmin):
+    list_display = ("title", "scenario", "priority", "owner")
+    search_fields = ("title", "description", "scenario__title")
+    list_filter = ("scenario__plan", "priority")

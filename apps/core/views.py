@@ -17,6 +17,7 @@ from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.http import Http404
 from django.shortcuts import render
+from django.urls import reverse
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
@@ -245,6 +246,190 @@ class ApiRunViewSet(viewsets.ReadOnlyModelViewSet):
         if not instance:
             raise Http404
         return instance
+
+
+class TestPlanViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.TestPlanSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return selectors.test_plan_list()
+
+    def get_object(self):
+        instance = selectors.test_plan_get(self.kwargs["pk"])
+        if instance is None:
+            raise Http404
+        return instance
+
+
+class TestPlanMaintenanceViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.TestPlanMaintenanceSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = selectors.test_plan_maintenance_list()
+        plan_id = self.request.query_params.get("plan")
+        if plan_id:
+            try:
+                queryset = queryset.filter(plan_id=int(plan_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"plan": "Plan must be an integer."}) from exc
+        return queryset
+
+
+class TestScenarioViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.TestScenarioSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = selectors.test_scenario_list()
+        plan_id = self.request.query_params.get("plan")
+        if plan_id:
+            try:
+                queryset = queryset.filter(plan_id=int(plan_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"plan": "Plan must be an integer."}) from exc
+        return queryset
+
+
+class TestCaseViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.TestCaseSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = selectors.test_case_list()
+        scenario_id = self.request.query_params.get("scenario")
+        if scenario_id:
+            try:
+                queryset = queryset.filter(scenario_id=int(scenario_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"scenario": "Scenario must be an integer."}) from exc
+        plan_id = self.request.query_params.get("plan")
+        if plan_id:
+            try:
+                queryset = queryset.filter(scenario__plan_id=int(plan_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"plan": "Plan must be an integer."}) from exc
+        return queryset
+
+
+def _prepare_automation_data() -> dict[str, Any]:
+    plans_qs = selectors.test_plan_list()
+    plans_payload = serializers.TestPlanSerializer(plans_qs, many=True).data
+
+    scenario_count = sum(len(plan.get("scenarios", [])) for plan in plans_payload)
+    case_count = sum(
+        len(scenario.get("cases", []))
+        for plan in plans_payload
+        for scenario in plan.get("scenarios", [])
+    )
+
+    metrics = {
+        "plans": len(plans_payload),
+        "scenarios": scenario_count,
+        "cases": case_count,
+        "collections": models.ApiCollection.objects.count(),
+        "runs": models.ApiRun.objects.count(),
+        "environments": models.ApiEnvironment.objects.count(),
+    }
+
+    recent_runs = (
+        models.ApiRun.objects.select_related("collection", "environment", "triggered_by")
+        .order_by("-created_at")[:5]
+    )
+    highlighted_collections = models.ApiCollection.objects.order_by("name")[:6]
+
+    api_endpoints = {
+        "plans": reverse("core:core-test-plans-list"),
+        "maintenances": reverse("core:core-test-plan-maintenances-list"),
+        "scenarios": reverse("core:core-test-scenarios-list"),
+        "cases": reverse("core:core-test-cases-list"),
+        "collections": reverse("core:core-collections-list"),
+        "environments": reverse("core:core-environments-list"),
+        "runs": reverse("core:core-runs-list"),
+    }
+
+    selected_plan = plans_payload[0] if plans_payload else None
+    selected_scenario = None
+    if selected_plan:
+        scenarios = selected_plan.get("scenarios", [])
+        if scenarios:
+            selected_scenario = scenarios[0]
+
+    return {
+        "plans": plans_payload,
+        "metrics": metrics,
+        "recent_runs": recent_runs,
+        "highlighted_collections": highlighted_collections,
+        "api_endpoints": api_endpoints,
+        "selected_plan": selected_plan,
+        "selected_scenario": selected_scenario,
+    }
+
+
+@login_required
+def automation_overview(request):
+    """Render top-level Automation overview content."""
+
+    data = _prepare_automation_data()
+    context = {
+        "initial_metrics": data["metrics"],
+        "recent_runs": data["recent_runs"],
+        "highlighted_collections": data["highlighted_collections"],
+    }
+    return render(request, "core/automation_overview.html", context)
+
+
+@login_required
+def automation_test_plans(request):
+    data = _prepare_automation_data()
+    context = {
+        "initial_plans": data["plans"],
+        "initial_metrics": data["metrics"],
+        "api_endpoints": data["api_endpoints"],
+        "initial_selected_plan": data["selected_plan"],
+        "initial_selected_scenario": data["selected_scenario"],
+    }
+    return render(request, "core/automation_test_plans.html", context)
+
+
+@login_required
+def automation_test_scenarios(request):
+    data = _prepare_automation_data()
+    context = {
+        "initial_plans": data["plans"],
+        "initial_metrics": data["metrics"],
+        "api_endpoints": data["api_endpoints"],
+        "initial_selected_plan": data["selected_plan"],
+        "initial_selected_scenario": data["selected_scenario"],
+    }
+    return render(request, "core/automation_test_scenarios.html", context)
+
+
+@login_required
+def automation_test_cases(request):
+    data = _prepare_automation_data()
+    context = {
+        "initial_plans": data["plans"],
+        "initial_metrics": data["metrics"],
+        "api_endpoints": data["api_endpoints"],
+        "initial_selected_plan": data["selected_plan"],
+        "initial_selected_scenario": data["selected_scenario"],
+    }
+    return render(request, "core/automation_test_cases.html", context)
+
+
+@login_required
+def automation_test_plan_maintenance(request):
+    data = _prepare_automation_data()
+    context = {
+        "initial_plans": data["plans"],
+        "initial_metrics": data["metrics"],
+        "api_endpoints": data["api_endpoints"],
+        "initial_selected_plan": data["selected_plan"],
+        "initial_selected_scenario": data["selected_scenario"],
+    }
+    return render(request, "core/automation_test_plan_maintenance.html", context)
 
 
 class ApiAdhocRequestView(APIView):

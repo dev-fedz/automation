@@ -99,3 +99,104 @@ class ApiAutomationTests(APITestCase):
 
         environments = selectors.api_environment_list()
         self.assertEqual(environments.count(), 1)
+
+
+class TestPlanWorkflowTests(APITestCase):
+    def setUp(self) -> None:
+        self.user = get_user_model().objects.create_user(
+            username="planner",
+            email="planner@example.com",
+            password="secret123",
+        )
+        self.client.force_authenticate(self.user)
+
+    def test_stlc_end_to_end_workflow(self) -> None:
+        plan_payload = {
+            "name": "Release 1 Automation",
+            "objective": "Validate end-to-end flows before release.",
+            "description": "Automation scope summary for release 1.",
+            "modules_under_test": ["Accounts", "Billing"],
+            "testing_types": {
+                "functional": ["Regression", "Smoke"],
+                "non_functional": ["Performance"],
+            },
+            "tools": ["Postman", "Locust"],
+            "testing_timeline": {
+                "kickoff": "2025-10-10",
+                "signoff": "2025-10-20",
+            },
+            "testers": ["planner@example.com", "qa@example.com"],
+            "approver": "qa-lead@example.com",
+        }
+        plan_response = self.client.post(
+            reverse("core:core-test-plans-list"),
+            data=plan_payload,
+            format="json",
+        )
+        self.assertEqual(plan_response.status_code, status.HTTP_201_CREATED)
+        plan_id = plan_response.data["id"]
+
+        scenario_payload = {
+            "plan": plan_id,
+            "title": "User upgrades subscription",
+            "description": "Covers billing and entitlement updates.",
+            "preconditions": "User exists on basic tier.",
+            "tags": ["billing", "critical"],
+        }
+        scenario_response = self.client.post(
+            reverse("core:core-test-scenarios-list"),
+            data=scenario_payload,
+            format="json",
+        )
+        self.assertEqual(scenario_response.status_code, status.HTTP_201_CREATED)
+        scenario_id = scenario_response.data["id"]
+
+        case_payload = {
+            "scenario": scenario_id,
+            "title": "Upgrade via API",
+            "steps": [
+                {"action": "Call subscription upgrade endpoint", "method": "POST"},
+                {"action": "Verify response payload"},
+            ],
+            "expected_results": [
+                {"status_code": 200},
+                {"json": {"plan": "premium"}},
+            ],
+            "dynamic_variables": {
+                "expected_status": 200,
+                "expected_plan": "premium",
+            },
+            "priority": "P1",
+        }
+        case_response = self.client.post(
+            reverse("core:core-test-cases-list"),
+            data=case_payload,
+            format="json",
+        )
+        self.assertEqual(case_response.status_code, status.HTTP_201_CREATED)
+
+        maintenance_payload = {
+            "plan": plan_id,
+            "version": "1.0",
+            "summary": "Initial approval.",
+            "updates": {"notes": "Baseline coverage"},
+            "effective_date": "2025-10-11",
+            "updated_by": "planner@example.com",
+            "approved_by": "qa-lead@example.com",
+        }
+        maintenance_response = self.client.post(
+            reverse("core:core-test-plan-maintenances-list"),
+            data=maintenance_payload,
+            format="json",
+        )
+        self.assertEqual(maintenance_response.status_code, status.HTTP_201_CREATED)
+
+        detail_response = self.client.get(reverse("core:core-test-plans-detail", kwargs={"pk": plan_id}))
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail_response.data["name"], plan_payload["name"])
+        self.assertEqual(detail_response.data["description"], plan_payload["description"])
+        self.assertEqual(len(detail_response.data["maintenances"]), 1)
+        self.assertEqual(len(detail_response.data["scenarios"]), 1)
+        scenario_data = detail_response.data["scenarios"][0]
+        self.assertEqual(len(scenario_data["cases"]), 1)
+        self.assertEqual(scenario_data["cases"][0]["dynamic_variables"]["expected_status"], 200)

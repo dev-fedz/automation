@@ -70,6 +70,7 @@ THIRD_PARTY_APPS = [
     "corsheaders",
     "polymorphic",
     "storages",
+    "tinymce",
 ]
 
 PROJECT_APPS = [
