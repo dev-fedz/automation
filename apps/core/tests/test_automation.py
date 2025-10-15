@@ -127,6 +127,10 @@ class TestPlanWorkflowTests(APITestCase):
             },
             "testers": ["planner@example.com", "qa@example.com"],
             "approver": "qa-lead@example.com",
+            "scopes": [
+                {"category": "in_scope", "item": "API regression covering billing"},
+                {"category": "out_scope", "item": "Manual UI verification"},
+            ],
         }
         plan_response = self.client.post(
             reverse("core:core-test-plans-list"),
@@ -195,6 +199,11 @@ class TestPlanWorkflowTests(APITestCase):
         self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
         self.assertEqual(detail_response.data["name"], plan_payload["name"])
         self.assertEqual(detail_response.data["description"], plan_payload["description"])
+        self.assertEqual(len(detail_response.data["scopes"]), 2)
+        self.assertEqual(detail_response.data["scopes"][0]["category"], "in_scope")
+        self.assertEqual(detail_response.data["scopes"][0]["item"], "API regression covering billing")
+        self.assertEqual(detail_response.data["scopes"][1]["category"], "out_scope")
+        self.assertEqual(detail_response.data["scopes"][1]["item"], "Manual UI verification")
         self.assertEqual(len(detail_response.data["maintenances"]), 1)
         self.assertEqual(len(detail_response.data["scenarios"]), 1)
         scenario_data = detail_response.data["scenarios"][0]

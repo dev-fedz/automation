@@ -49,9 +49,14 @@ def test_plan_list() -> QuerySet[models.TestPlan]:
         Prefetch("cases", queryset=models.TestCase.objects.order_by("title", "id"))
     ).order_by("title", "id")
     maintenance_qs = models.TestPlanMaintenance.objects.order_by("-effective_date", "-created_at", "id")
+    scope_qs = models.TestPlanScope.objects.order_by("category", "order", "id")
     return (
         models.TestPlan.objects.order_by("name", "id")
-        .prefetch_related(Prefetch("scenarios", queryset=scenario_qs), Prefetch("maintenances", queryset=maintenance_qs))
+        .prefetch_related(
+            Prefetch("scenarios", queryset=scenario_qs),
+            Prefetch("maintenances", queryset=maintenance_qs),
+            Prefetch("scopes", queryset=scope_qs),
+        )
     )
 
 

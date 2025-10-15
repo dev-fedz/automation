@@ -161,6 +161,8 @@
                 name: document.getElementById('plan-name'),
                 objective: document.getElementById('plan-objective-editor'),
                 description: document.getElementById('plan-description'),
+                scopeIn: document.getElementById('plan-scope-in'),
+                scopeOut: document.getElementById('plan-scope-out'),
                 modules: document.getElementById('plan-modules'),
                 tools: document.getElementById('plan-tools'),
                 functional: document.getElementById('plan-functional'),
@@ -325,6 +327,11 @@
             if (Array.isArray(next.scenarios)) {
                 next.scenarios = next.scenarios.map((scenario) => ({ ...scenario }));
             }
+            if (Array.isArray(next.scopes)) {
+                next.scopes = next.scopes.map((scope) => ({ ...scope }));
+            } else if (!next.scopes) {
+                next.scopes = [];
+            }
             if (Array.isArray(next.modules_under_test)) {
                 next.modules_under_test = [...next.modules_under_test];
             }
@@ -415,6 +422,55 @@
             }
         };
 
+        const formatScopePreview = (items) => {
+            if (!items.length) {
+                return '';
+            }
+            const previewItems = items.slice(0, 3).map((value) => escapeHtml(value));
+            let summary = previewItems.join(', ');
+            if (items.length > 3) {
+                summary += ` +${items.length - 3} more`;
+            }
+            return summary;
+        };
+
+        const buildScopePreview = (plan) => {
+            if (!plan || typeof plan !== 'object') {
+                return '';
+            }
+            const scopes = Array.isArray(plan.scopes) ? plan.scopes : [];
+            if (!scopes.length) {
+                return '';
+            }
+            const inScopeItems = [];
+            const outScopeItems = [];
+            scopes.forEach((entry) => {
+                if (!entry || typeof entry !== 'object') {
+                    return;
+                }
+                const value = typeof entry.item === 'string' ? entry.item.trim() : '';
+                if (!value) {
+                    return;
+                }
+                if (entry.category === 'out_scope') {
+                    outScopeItems.push(value);
+                } else if (entry.category === 'in_scope') {
+                    inScopeItems.push(value);
+                }
+            });
+            if (!inScopeItems.length && !outScopeItems.length) {
+                return '';
+            }
+            const segments = [];
+            if (inScopeItems.length) {
+                segments.push(`<span class="scope-chip scope-chip--in">In: ${formatScopePreview(inScopeItems)}</span>`);
+            }
+            if (outScopeItems.length) {
+                segments.push(`<span class="scope-chip scope-chip--out">Out: ${formatScopePreview(outScopeItems)}</span>`);
+            }
+            return segments.length ? `<div class="table-scope-preview">${segments.join('')}</div>` : '';
+        };
+
         const renderPlanList = () => {
             if (!els.planList) {
                 return;
@@ -443,6 +499,7 @@
                 const kickoff = timeline.kickoff || '—';
                 const signoff = timeline.signoff || '—';
                 const approver = plan.approver || '—';
+                const scopePreview = buildScopePreview(plan);
 
                 if (plan.id === state.selectedPlanId) {
                     row.classList.add('is-active');
@@ -456,6 +513,7 @@
                         <strong>${escapeHtml(plan.name || 'Untitled plan')}</strong>
                         ${plan.description ? `<div class="table-secondary">${escapeHtml(plan.description)}</div>` : ''}
                         ${plan.objective ? `<div class="table-tertiary table-tertiary-rich">${plan.objective}</div>` : ''}
+                        ${scopePreview}
                     </td>
                     <td data-label="Scenarios">${scenarioCount}</td>
                     <td data-label="Modules">${moduleCount}</td>
@@ -774,6 +832,18 @@
                     throw new Error('Plan objective is required.');
                 }
                 payload.objective = objectiveContent.html;
+                const scopeInRaw = inputs.plan.scopeIn ? inputs.plan.scopeIn.value : '';
+                const scopeOutRaw = inputs.plan.scopeOut ? inputs.plan.scopeOut.value : '';
+                const scopeItems = [];
+                splitList(scopeInRaw).forEach((item) => {
+                    scopeItems.push({ category: 'in_scope', item });
+                });
+                splitList(scopeOutRaw).forEach((item) => {
+                    scopeItems.push({ category: 'out_scope', item });
+                });
+                if (scopeItems.length) {
+                    payload.scopes = scopeItems;
+                }
                 if (inputs.plan.kickoff.value) {
                     payload.testing_timeline.kickoff = inputs.plan.kickoff.value;
                 }

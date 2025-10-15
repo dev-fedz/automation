@@ -13,6 +13,7 @@ router.register(r"requests", views.ApiRequestViewSet, basename="core-requests")
 router.register(r"directories", views.ApiCollectionDirectoryViewSet, basename="core-directories")
 router.register(r"test-plans", views.TestPlanViewSet, basename="core-test-plans")
 router.register(r"test-plan-maintenances", views.TestPlanMaintenanceViewSet, basename="core-test-plan-maintenances")
+router.register(r"test-plan-scopes", views.TestPlanScopeViewSet, basename="core-test-plan-scopes")
 router.register(r"test-scenarios", views.TestScenarioViewSet, basename="core-test-scenarios")
 router.register(r"test-cases", views.TestCaseViewSet, basename="core-test-cases")
 

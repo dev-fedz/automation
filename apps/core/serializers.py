@@ -368,6 +368,20 @@ class TestScenarioSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "cases", "created_at", "updated_at"]
 
 
+class TestPlanScopeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = models.TestPlanScope
+        fields = [
+            "id",
+            "category",
+            "item",
+            "order",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "order", "created_at", "updated_at"]
+
+
 class TestPlanMaintenanceSerializer(serializers.ModelSerializer):
     updates = serializers.DictField(child=serializers.JSONField(), required=False)
 
@@ -394,6 +408,7 @@ class TestPlanSerializer(serializers.ModelSerializer):
     tools = serializers.ListField(child=serializers.CharField(), required=False)
     testing_timeline = serializers.DictField(child=serializers.JSONField(), required=False)
     testers = serializers.ListField(child=serializers.CharField(), required=False)
+    scopes = TestPlanScopeSerializer(many=True, required=False)
     maintenances = TestPlanMaintenanceSerializer(many=True, read_only=True)
     scenarios = TestScenarioSerializer(many=True, read_only=True)
 
@@ -411,6 +426,7 @@ class TestPlanSerializer(serializers.ModelSerializer):
             "testing_timeline",
             "testers",
             "approver",
+            "scopes",
             "maintenances",
             "scenarios",
             "created_at",
@@ -461,3 +477,31 @@ class TestPlanSerializer(serializers.ModelSerializer):
             raise ValidationError({"objectives": "At least one objective/goal pair is required."})
 
         return normalized
+
+    @transaction.atomic
+    def create(self, validated_data: dict[str, Any]) -> models.TestPlan:
+        scopes_data = validated_data.pop("scopes", [])
+        plan = models.TestPlan.objects.create(**validated_data)
+        self._replace_scopes(plan, scopes_data)
+        return plan
+
+    @transaction.atomic
+    def update(self, instance: models.TestPlan, validated_data: dict[str, Any]) -> models.TestPlan:
+        scopes_data = validated_data.pop("scopes", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if scopes_data is not None:
+            self._replace_scopes(instance, scopes_data)
+        return instance
+
+    def _replace_scopes(self, plan: models.TestPlan, scopes_data: list[dict[str, Any]]) -> None:
+        plan.scopes.all().delete()
+        if not scopes_data:
+            return
+        for index, entry in enumerate(scopes_data):
+            models.TestPlanScope.objects.create(
+                plan=plan,
+                order=index,
+                **entry,
+            )

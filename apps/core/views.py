@@ -262,6 +262,24 @@ class TestPlanViewSet(viewsets.ModelViewSet):
         return instance
 
 
+class TestPlanScopeViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.TestPlanScopeSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = models.TestPlanScope.objects.select_related("plan").order_by("plan", "category", "order", "id")
+        plan_id = self.request.query_params.get("plan")
+        if plan_id:
+            try:
+                queryset = queryset.filter(plan_id=int(plan_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"plan": "Plan must be an integer."}) from exc
+        category = self.request.query_params.get("category")
+        if category:
+            queryset = queryset.filter(category=category)
+        return queryset
+
+
 class TestPlanMaintenanceViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.TestPlanMaintenanceSerializer
     permission_classes = [IsAuthenticated]
@@ -344,6 +362,7 @@ def _prepare_automation_data() -> dict[str, Any]:
         "maintenances": reverse("core:core-test-plan-maintenances-list"),
         "scenarios": reverse("core:core-test-scenarios-list"),
         "cases": reverse("core:core-test-cases-list"),
+        "scopes": reverse("core:core-test-plan-scopes-list"),
         "collections": reverse("core:core-collections-list"),
         "environments": reverse("core:core-environments-list"),
         "runs": reverse("core:core-runs-list"),

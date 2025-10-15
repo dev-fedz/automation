@@ -85,6 +85,20 @@
                         </div>
                         <p class="form-hint">Use the toolbar to adjust fonts, headings, lists, and spacing.</p>
                     </div>
+                    <div class="form-row">
+                        <label for="plan-scope-in" id="plan-scope-label">Scope Definition</label>
+                        <div class="scope-grid" role="group" aria-labelledby="plan-scope-label">
+                            <div class="scope-column">
+                                <label class="scope-column__title" for="plan-scope-in">In Scope</label>
+                                <textarea id="plan-scope-in" name="scope_in" rows="5" placeholder="Core API flows&#10;Billing regression"></textarea>
+                            </div>
+                            <div class="scope-column">
+                                <label class="scope-column__title" for="plan-scope-out">Out of Scope</label>
+                                <textarea id="plan-scope-out" name="scope_out" rows="5" placeholder="Legacy UI tests&#10;Manual sign-off"></textarea>
+                            </div>
+                        </div>
+                        <p class="form-hint">Enter one item per line; entries populate the scope table for this plan.</p>
+                    </div>
                     <div class="form-row inline">
                         <div>
                             <label for="plan-modules">Modules (comma separated)</label>

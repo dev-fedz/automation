@@ -224,6 +224,25 @@ class TestPlan(TimeStampedModel):
         return self.name
 
 
+class TestPlanScope(TimeStampedModel):
+    """Categorized scope entries linked to a test plan."""
+
+    class ScopeCategory(models.TextChoices):
+        IN_SCOPE = "in_scope", "In Scope"
+        OUT_SCOPE = "out_scope", "Out of Scope"
+
+    plan = models.ForeignKey(TestPlan, on_delete=models.CASCADE, related_name="scopes")
+    category = models.CharField(max_length=20, choices=ScopeCategory.choices)
+    item = models.CharField(max_length=255)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["plan", "category", "order", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.get_category_display()}: {self.item}"
+
+
 class TestPlanMaintenance(TimeStampedModel):
     """Tracks revisions made to a test plan across the STLC lifecycle."""
 
