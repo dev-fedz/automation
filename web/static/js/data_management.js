@@ -69,6 +69,56 @@
         return `${base}?${suffix}`;
     };
 
+    const formatDateTime = (value) => {
+        if (!value) {
+            return "--";
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return "--";
+        }
+        return date.toLocaleString();
+    };
+
+    const toKeyValueRows = (source) => {
+        if (!source || typeof source !== "object") {
+            return [{ key: "", value: "" }];
+        }
+        const rows = Object.entries(source).map(([key, value]) => ({
+            key,
+            value: value === null || value === undefined ? "" : String(value),
+        }));
+        if (!rows.length) {
+            rows.push({ key: "", value: "" });
+        }
+        return rows;
+    };
+
+    const ensureKeyValueRows = (rows) => {
+        if (!Array.isArray(rows) || !rows.length) {
+            return [{ key: "", value: "" }];
+        }
+        return rows.map((row) => ({
+            key: row && row.key ? String(row.key) : "",
+            value: row && row.value !== undefined && row.value !== null ? String(row.value) : "",
+        }));
+    };
+
+    const keyValueRowsToObject = (rows) => {
+        const result = {};
+        if (!Array.isArray(rows)) {
+            return result;
+        }
+        rows.forEach((row) => {
+            const key = row && row.key ? String(row.key).trim() : "";
+            if (!key) {
+                return;
+            }
+            result[key] = row && row.value !== undefined && row.value !== null ? String(row.value) : "";
+        });
+        return result;
+    };
+
     const request = async (url, options = {}) => {
         const method = (options.method || "GET").toUpperCase();
         const headers = { ...(options.headers || {}) };
@@ -130,19 +180,21 @@
             }
         };
 
-    const initialRisks = readScriptJson("automation-initial-risks") || [];
-    const initialMitigations = readScriptJson("automation-initial-mitigation-plans") || [];
-    const initialMappings = readScriptJson("automation-initial-risk-mitigations") || [];
-    const initialSection = readScriptJson("data-management-initial-section") || "";
+        const initialEnvironments = readScriptJson("automation-initial-environments") || [];
+        const initialRisks = readScriptJson("automation-initial-risks") || [];
+        const initialMitigations = readScriptJson("automation-initial-mitigation-plans") || [];
+        const initialMappings = readScriptJson("automation-initial-risk-mitigations") || [];
+        const initialSection = readScriptJson("data-management-initial-section") || "";
         const apiEndpoints = readScriptJson("automation-api-endpoints") || {};
 
         const endpoints = {
+            environments: ensureTrailingSlash(apiEndpoints.environments || ""),
             risks: ensureTrailingSlash(apiEndpoints.risks || ""),
             mitigations: ensureTrailingSlash(apiEndpoints.mitigation_plans || ""),
             mappings: ensureTrailingSlash(apiEndpoints.risk_mitigations || ""),
         };
 
-        if (!endpoints.risks || !endpoints.mitigations || !endpoints.mappings) {
+        if (!endpoints.environments || !endpoints.risks || !endpoints.mitigations || !endpoints.mappings) {
             // eslint-disable-next-line no-console
             console.warn("[data-management] Missing API endpoints. Aborting module initialisation.");
             return;
@@ -150,6 +202,21 @@
 
         const els = {
             status: root.querySelector('[data-role="status"]'),
+            environmentList: root.querySelector('[data-role="environment-list"]'),
+            environmentSearch: root.querySelector('[data-role="environment-search"]'),
+            environmentModal: root.querySelector('[data-role="environment-modal"]'),
+            environmentForm: document.getElementById("environment-form"),
+            environmentName: document.getElementById("environment-name"),
+            environmentDescription: document.getElementById("environment-description"),
+            environmentVariableRows: root.querySelector('[data-role="environment-variable-rows"]'),
+            environmentHeaderRows: root.querySelector('[data-role="environment-header-rows"]'),
+            environmentAddVariable: root.querySelector('[data-role="environment-add-variable"]'),
+            environmentAddHeader: root.querySelector('[data-role="environment-add-header"]'),
+            environmentSubmit: root.querySelector('[data-role="environment-submit"]'),
+            environmentMeta: root.querySelector('[data-role="environment-meta"]'),
+            environmentCreated: root.querySelector('[data-role="environment-created"]'),
+            environmentUpdated: root.querySelector('[data-role="environment-updated"]'),
+            metricEnvironments: root.querySelector('[data-role="metric-environments"]'),
             riskList: root.querySelector('[data-role="risk-list"]'),
             mitigationList: root.querySelector('[data-role="mitigation-list"]'),
             mappingList: root.querySelector('[data-role="mapping-list"]'),
@@ -177,9 +244,14 @@
         const body = document.body;
 
         const state = {
+            environments: Array.isArray(initialEnvironments) ? initialEnvironments : [],
             risks: Array.isArray(initialRisks) ? initialRisks : [],
             mitigationPlans: Array.isArray(initialMitigations) ? initialMitigations : [],
             mappings: Array.isArray(initialMappings) ? initialMappings : [],
+            environmentModalMode: "create",
+            environmentCurrentId: null,
+            environmentForm: null,
+            environmentSearch: "",
             riskModalMode: "create",
             riskCurrentId: null,
             mitigationModalMode: "create",
@@ -225,6 +297,226 @@
         const applyHashSection = () => {
             const hash = window.location.hash ? window.location.hash.replace(/^#/, "") : "";
             highlightSection(hash);
+        };
+
+        const focusEnvironmentRow = (group, index) => {
+            const container = group === "variables" ? els.environmentVariableRows : els.environmentHeaderRows;
+            if (!container) {
+                return;
+            }
+            const selector = `[data-group="${group}"][data-field="key"][data-index="${index}"]`;
+            const target = container.querySelector(selector);
+            if (target && typeof target.focus === "function") {
+                target.focus();
+            }
+        };
+
+        const renderEnvironmentRows = (group) => {
+            const container = group === "variables" ? els.environmentVariableRows : els.environmentHeaderRows;
+            if (!container || !state.environmentForm) {
+                return;
+            }
+            const rows = Array.isArray(state.environmentForm[group]) ? state.environmentForm[group] : [];
+            const readOnly = state.environmentModalMode === "view";
+            if (!rows.length) {
+                const emptyText = group === "variables" ? "No variables defined." : "No headers defined.";
+                container.innerHTML = `<tr><td colspan="3" class="empty">${emptyText}</td></tr>`;
+                return;
+            }
+            const markup = rows
+                .map((row, index) => {
+                    const keyValue = escapeHtml(row.key || "");
+                    const valueValue = escapeHtml(row.value || "");
+                    const removeCell = readOnly
+                        ? "&mdash;"
+                        : `<button type="button" class="btn-tertiary" data-action="environment-remove-row" data-group="${group}" data-index="${index}">Remove</button>`;
+                    return (
+                        `\n                        <tr data-index="${index}">\n` +
+                        `                            <td data-label="Key">\n` +
+                        `                                <input type="text" data-group="${group}" data-field="key" data-index="${index}" value="${keyValue}"${readOnly ? " readonly" : ""}>\n` +
+                        "                            </td>\n" +
+                        `                            <td data-label="Value">\n` +
+                        `                                <input type="text" data-group="${group}" data-field="value" data-index="${index}" value="${valueValue}"${readOnly ? " readonly" : ""}>\n` +
+                        "                            </td>\n" +
+                        `                            <td data-label="Actions">${removeCell}</td>\n` +
+                        "                        </tr>\n"
+                    );
+                })
+                .join("");
+            container.innerHTML = markup;
+        };
+
+        const renderEnvironmentMeta = () => {
+            if (!els.environmentMeta || !state.environmentForm) {
+                return;
+            }
+            const createdText = state.environmentForm.createdAt ? formatDateTime(state.environmentForm.createdAt) : null;
+            const updatedText = state.environmentForm.updatedAt ? formatDateTime(state.environmentForm.updatedAt) : null;
+            if (createdText || updatedText) {
+                els.environmentMeta.hidden = false;
+                if (els.environmentCreated) {
+                    els.environmentCreated.textContent = createdText || "--";
+                }
+                if (els.environmentUpdated) {
+                    els.environmentUpdated.textContent = updatedText || "--";
+                }
+            } else {
+                els.environmentMeta.hidden = true;
+            }
+        };
+
+        const applyEnvironmentFormState = () => {
+            if (!state.environmentForm) {
+                return;
+            }
+            state.environmentForm.variables = ensureKeyValueRows(state.environmentForm.variables);
+            state.environmentForm.headers = ensureKeyValueRows(state.environmentForm.headers);
+            const readOnly = state.environmentModalMode === "view";
+            if (els.environmentName) {
+                els.environmentName.value = state.environmentForm.name || "";
+                els.environmentName.readOnly = readOnly;
+            }
+            if (els.environmentDescription) {
+                els.environmentDescription.value = state.environmentForm.description || "";
+                els.environmentDescription.readOnly = readOnly;
+            }
+            if (els.environmentAddVariable) {
+                els.environmentAddVariable.disabled = readOnly;
+            }
+            if (els.environmentAddHeader) {
+                els.environmentAddHeader.disabled = readOnly;
+            }
+            if (els.environmentSubmit) {
+                els.environmentSubmit.hidden = readOnly;
+                els.environmentSubmit.textContent = state.environmentModalMode === "edit" ? "Update" : "Save";
+            }
+            renderEnvironmentRows("variables");
+            renderEnvironmentRows("headers");
+            renderEnvironmentMeta();
+        };
+
+        const openEnvironmentModal = (mode, environment = null) => {
+            if (!els.environmentModal) {
+                return;
+            }
+            state.environmentModalMode = mode;
+            state.environmentCurrentId = environment ? environment.id : null;
+            state.environmentForm = {
+                name: environment && environment.name ? environment.name : "",
+                description: environment && environment.description ? environment.description : "",
+                variables: toKeyValueRows(environment ? environment.variables : null),
+                headers: toKeyValueRows(environment ? environment.default_headers : null),
+                createdAt: environment && environment.created_at ? environment.created_at : null,
+                updatedAt: environment && environment.updated_at ? environment.updated_at : null,
+            };
+            const header = root.querySelector("#environment-modal-title");
+            if (header) {
+                if (mode === "edit") {
+                    header.textContent = "Edit Environment";
+                } else if (mode === "view") {
+                    header.textContent = "View Environment";
+                } else {
+                    header.textContent = "New Environment";
+                }
+            }
+            applyEnvironmentFormState();
+            els.environmentModal.hidden = false;
+            body.classList.add("automation-modal-open");
+            if (mode !== "view" && els.environmentName) {
+                window.requestAnimationFrame(() => {
+                    els.environmentName.focus();
+                });
+            }
+        };
+
+        const closeEnvironmentModal = () => {
+            closeModal(els.environmentModal);
+            state.environmentModalMode = "create";
+            state.environmentCurrentId = null;
+            state.environmentForm = null;
+            if (els.environmentSubmit) {
+                els.environmentSubmit.hidden = false;
+                els.environmentSubmit.textContent = "Save";
+            }
+        };
+
+        const renderEnvironments = () => {
+            if (!els.environmentList) {
+                return;
+            }
+            if (els.metricEnvironments) {
+                els.metricEnvironments.textContent = String(state.environments.length);
+            }
+            if (!state.environments.length) {
+                els.environmentList.innerHTML = '<tr><td colspan="6" class="empty">No environments match the current filters.</td></tr>';
+                return;
+            }
+            const rows = state.environments
+                .map((env) => {
+                    const name = env && env.name ? escapeHtml(env.name) : "Untitled";
+                    const description = env && env.description ? escapeHtml(env.description) : "&mdash;";
+                    const variableCount = env && env.variables && typeof env.variables === "object"
+                        ? Object.keys(env.variables).length
+                        : 0;
+                    const headerCount = env && env.default_headers && typeof env.default_headers === "object"
+                        ? Object.keys(env.default_headers).length
+                        : 0;
+                    const updatedText = escapeHtml(formatDateTime(env ? env.updated_at : null));
+                    return (
+                        `\n                        <tr data-environment-id="${env.id}">\n` +
+                        `                            <td data-label="Name">${name}</td>\n` +
+                        `                            <td data-label="Description">${description}</td>\n` +
+                        `                            <td data-label="Variables">${variableCount}</td>\n` +
+                        `                            <td data-label="Headers">${headerCount}</td>\n` +
+                        `                            <td data-label="Updated">${updatedText}</td>\n` +
+                        "                            <td data-label=\"Actions\">\n" +
+                        "                                <div class=\"table-action-group\">\n" +
+                        `                                    <button type="button" class="action-button" data-action="view-environment" data-id="${env.id}">View</button>\n` +
+                        `                                    <button type="button" class="action-button" data-action="edit-environment" data-id="${env.id}">Edit</button>\n` +
+                        `                                    <button type="button" class="action-button" data-action="delete-environment" data-id="${env.id}" data-variant="danger">Delete</button>\n` +
+                        "                                </div>\n" +
+                        "                            </td>\n" +
+                        "                        </tr>\n"
+                    );
+                })
+                .join("");
+            els.environmentList.innerHTML = rows;
+        };
+
+        const loadEnvironments = async () => {
+            const url = buildUrl(endpoints.environments, { search: state.environmentSearch });
+            const data = await request(url, { method: "GET" });
+            state.environments = Array.isArray(data) ? data : [];
+            renderEnvironments();
+        };
+
+        const handleEnvironmentFormInput = (event) => {
+            if (!state.environmentForm || state.environmentModalMode === "view") {
+                return;
+            }
+            const target = event.target;
+            if (target === els.environmentName) {
+                state.environmentForm.name = target.value;
+                return;
+            }
+            if (target === els.environmentDescription) {
+                state.environmentForm.description = target.value;
+                return;
+            }
+            const group = target.dataset.group;
+            const field = target.dataset.field;
+            if (!group || !field) {
+                return;
+            }
+            const index = Number(target.dataset.index);
+            if (!Number.isFinite(index)) {
+                return;
+            }
+            const bucket = state.environmentForm[group];
+            if (!Array.isArray(bucket) || !bucket[index]) {
+                return;
+            }
+            bucket[index][field] = target.value;
         };
 
         const renderRisks = () => {
@@ -618,6 +910,17 @@
             renderMappings();
         };
 
+        if (els.environmentSearch) {
+            els.environmentSearch.value = state.environmentSearch;
+            els.environmentSearch.addEventListener(
+                "input",
+                debounce(() => {
+                    state.environmentSearch = (els.environmentSearch.value || "").trim();
+                    loadEnvironments().catch((error) => setStatus(error.message, "error"));
+                }, 250),
+            );
+        }
+
         if (els.riskSearch) {
             els.riskSearch.value = state.riskSearch;
             els.riskSearch.addEventListener(
@@ -651,6 +954,7 @@
             );
         }
 
+        renderEnvironments();
         renderRisks();
         renderMitigationPlans();
         renderMappings();
@@ -691,6 +995,90 @@
             const id = trigger.dataset.id ? Number(trigger.dataset.id) : null;
 
             switch (action) {
+                case "open-environment-modal":
+                    event.preventDefault();
+                    openEnvironmentModal("create");
+                    break;
+                case "close-environment-modal":
+                    event.preventDefault();
+                    closeEnvironmentModal();
+                    break;
+                case "view-environment": {
+                    event.preventDefault();
+                    const environment = state.environments.find((item) => item.id === id);
+                    if (environment) {
+                        openEnvironmentModal("view", environment);
+                    }
+                    break;
+                }
+                case "edit-environment": {
+                    event.preventDefault();
+                    const environment = state.environments.find((item) => item.id === id);
+                    if (environment) {
+                        openEnvironmentModal("edit", environment);
+                    }
+                    break;
+                }
+                case "delete-environment": {
+                    event.preventDefault();
+                    if (!id) {
+                        break;
+                    }
+                    if (!window.confirm("Are you sure you want to delete this environment?")) {
+                        break;
+                    }
+                    try {
+                        await request(`${endpoints.environments}${id}/`, { method: "DELETE" });
+                        setStatus("Environment deleted.", "success");
+                        await loadEnvironments();
+                    } catch (error) {
+                        setStatus(error.message, "error");
+                    }
+                    break;
+                }
+                case "environment-add-variable":
+                    event.preventDefault();
+                    if (!state.environmentForm || state.environmentModalMode === "view") {
+                        break;
+                    }
+                    state.environmentForm.variables.push({ key: "", value: "" });
+                    renderEnvironmentRows("variables");
+                    window.requestAnimationFrame(() => {
+                        focusEnvironmentRow("variables", state.environmentForm.variables.length - 1);
+                    });
+                    break;
+                case "environment-add-header":
+                    event.preventDefault();
+                    if (!state.environmentForm || state.environmentModalMode === "view") {
+                        break;
+                    }
+                    state.environmentForm.headers.push({ key: "", value: "" });
+                    renderEnvironmentRows("headers");
+                    window.requestAnimationFrame(() => {
+                        focusEnvironmentRow("headers", state.environmentForm.headers.length - 1);
+                    });
+                    break;
+                case "environment-remove-row": {
+                    event.preventDefault();
+                    if (!state.environmentForm || state.environmentModalMode === "view") {
+                        break;
+                    }
+                    const group = trigger.dataset.group;
+                    const index = Number(trigger.dataset.index);
+                    if (!group || !Number.isFinite(index)) {
+                        break;
+                    }
+                    const bucket = state.environmentForm[group];
+                    if (!Array.isArray(bucket) || !bucket[index]) {
+                        break;
+                    }
+                    bucket.splice(index, 1);
+                    if (!bucket.length) {
+                        bucket.push({ key: "", value: "" });
+                    }
+                    renderEnvironmentRows(group);
+                    break;
+                }
                 case "open-risk-modal":
                     event.preventDefault();
                     openRiskModal("create");
@@ -817,7 +1205,7 @@
                 case "refresh-data":
                     event.preventDefault();
                     try {
-                        await Promise.all([loadRisks(), loadMitigationPlans(), loadMappings()]);
+                        await Promise.all([loadEnvironments(), loadRisks(), loadMitigationPlans(), loadMappings()]);
                         setStatus("Data refreshed.", "success");
                     } catch (error) {
                         setStatus(error.message, "error");
@@ -827,6 +1215,49 @@
                     break;
             }
         });
+
+        if (els.environmentForm) {
+            els.environmentForm.addEventListener("input", handleEnvironmentFormInput);
+            els.environmentForm.addEventListener("submit", async (event) => {
+                event.preventDefault();
+                if (!state.environmentForm) {
+                    return;
+                }
+                const name = (state.environmentForm.name || "").trim();
+                if (!name) {
+                    setStatus("Environment name is required.", "error");
+                    if (els.environmentName) {
+                        els.environmentName.focus();
+                    }
+                    return;
+                }
+                const payload = {
+                    name,
+                    description: state.environmentForm.description || "",
+                    variables: keyValueRowsToObject(state.environmentForm.variables),
+                    default_headers: keyValueRowsToObject(state.environmentForm.headers),
+                };
+                try {
+                    if (state.environmentModalMode === "edit" && state.environmentCurrentId) {
+                        await request(`${endpoints.environments}${state.environmentCurrentId}/`, {
+                            method: "PATCH",
+                            body: JSON.stringify(payload),
+                        });
+                        setStatus("Environment updated successfully.", "success");
+                    } else {
+                        await request(endpoints.environments, {
+                            method: "POST",
+                            body: JSON.stringify(payload),
+                        });
+                        setStatus("Environment created successfully.", "success");
+                    }
+                    closeEnvironmentModal();
+                    await loadEnvironments();
+                } catch (error) {
+                    setStatus(error.message, "error");
+                }
+            });
+        }
 
         if (els.riskForm) {
             els.riskForm.addEventListener("submit", async (event) => {
@@ -935,7 +1366,9 @@
 
         document.addEventListener("keydown", (event) => {
             if (event.key === "Escape") {
-                if (els.mappingModal && !els.mappingModal.hidden) {
+                if (els.environmentModal && !els.environmentModal.hidden) {
+                    closeEnvironmentModal();
+                } else if (els.mappingModal && !els.mappingModal.hidden) {
                     closeMappingModal();
                 } else if (els.mitigationModal && !els.mitigationModal.hidden) {
                     closeMitigationModal();

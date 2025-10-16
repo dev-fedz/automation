@@ -400,6 +400,8 @@ class RiskAndMitigationPlanViewSet(viewsets.ModelViewSet):
 def _prepare_automation_data() -> dict[str, Any]:
     plans_qs = selectors.test_plan_list()
     plans_payload = serializers.TestPlanSerializer(plans_qs, many=True).data
+    environments_qs = selectors.api_environment_list()
+    environments_payload = serializers.ApiEnvironmentSerializer(environments_qs, many=True).data
     risks_qs = selectors.risk_list()
     risks_payload = serializers.RiskSerializer(risks_qs, many=True).data
     mitigation_plans_qs = selectors.mitigation_plan_list()
@@ -420,7 +422,7 @@ def _prepare_automation_data() -> dict[str, Any]:
         "cases": case_count,
         "collections": models.ApiCollection.objects.count(),
         "runs": models.ApiRun.objects.count(),
-        "environments": models.ApiEnvironment.objects.count(),
+        "environments": len(environments_payload),
         "risks": len(risks_payload),
         "mitigation_plans": len(mitigation_plans_payload),
         "risk_mitigations": len(risk_mitigations_payload),
@@ -461,6 +463,7 @@ def _prepare_automation_data() -> dict[str, Any]:
         "api_endpoints": api_endpoints,
         "selected_plan": selected_plan,
         "selected_scenario": selected_scenario,
+        "environments": environments_payload,
         "risks": risks_payload,
         "mitigation_plans": mitigation_plans_payload,
         "risk_mitigations": risk_mitigations_payload,
@@ -538,6 +541,7 @@ def automation_data_management(request, section: str | None = None):
     data = _prepare_automation_data()
     context = {
         "initial_metrics": data["metrics"],
+        "initial_environments": data["environments"],
         "initial_risks": data["risks"],
         "initial_mitigation_plans": data["mitigation_plans"],
         "initial_risk_mitigations": data["risk_mitigations"],

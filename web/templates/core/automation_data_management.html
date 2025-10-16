@@ -25,6 +25,10 @@
 
     <div class="metric-tiles" aria-label="Data management metrics">
         <div class="metric-tile">
+            <span class="label">Environments</span>
+            <span class="val" data-role="metric-environments">{{ initial_metrics.environments }}</span>
+        </div>
+        <div class="metric-tile">
             <span class="label">Risks</span>
             <span class="val" data-role="metric-risks">{{ initial_metrics.risks }}</span>
         </div>
@@ -39,6 +43,38 @@
     </div>
 
     <div class="automation-grid data-management-grid">
+    <section class="automation-panel data-card wide" data-entity="environments" data-section="environments" aria-labelledby="headline-environments" id="environments">
+            <div class="panel-header">
+                <div>
+                    <h3 id="headline-environments">API Environments</h3>
+                    <p class="panel-subtitle">Define shared variables and headers for collections and tests.</p>
+                </div>
+                <div class="panel-actions">
+                    <input type="search" class="automation-search" placeholder="Search environments" data-role="environment-search" aria-label="Search environments">
+                    <button type="button" class="btn-primary" data-action="open-environment-modal">New Environment</button>
+                </div>
+            </div>
+            <div class="card table-card automation-table-card" aria-live="polite">
+                <table class="table-modern automation-table" aria-label="API environments">
+                    <thead>
+                        <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col">Description</th>
+                            <th scope="col">Variables</th>
+                            <th scope="col">Headers</th>
+                            <th scope="col">Updated</th>
+                            <th scope="col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody data-role="environment-list">
+                        <tr>
+                            <td colspan="6" class="empty">No environments defined yet. Add one to centralise variables.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
         <section class="automation-panel data-card" data-entity="risks" data-section="risks" aria-labelledby="headline-risk" id="section-risks">
             <div class="panel-header">
                 <div>
@@ -133,6 +169,87 @@
                 </table>
             </div>
         </section>
+    </div>
+
+    <div class="automation-modal" data-role="environment-modal" hidden>
+        <div class="automation-modal__backdrop" data-action="close-environment-modal"></div>
+        <div class="automation-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="environment-modal-title">
+            <header class="automation-modal__header">
+                <h2 id="environment-modal-title">New Environment</h2>
+                <button type="button" class="automation-modal__close" data-action="close-environment-modal" aria-label="Close environment modal">&times;</button>
+            </header>
+            <form id="environment-form" class="automation-form" autocomplete="off">
+                <fieldset>
+                    <legend class="sr-only">Environment details</legend>
+                    <div class="form-row">
+                        <label for="environment-name">Name<span aria-hidden="true">*</span></label>
+                        <input type="text" id="environment-name" name="name" required maxlength="255" placeholder="Staging">
+                    </div>
+                    <div class="form-row">
+                        <label for="environment-description">Description</label>
+                        <textarea id="environment-description" name="description" rows="3" placeholder="Describe where this environment is used."></textarea>
+                    </div>
+                    <div class="form-row">
+                        <label>Variables</label>
+                        <div class="kv-table">
+                            <div class="kv-table__scroll">
+                                <table aria-label="Environment variables">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">Key</th>
+                                            <th scope="col">Value</th>
+                                            <th scope="col" aria-hidden="true"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody data-role="environment-variable-rows">
+                                        <tr>
+                                            <td colspan="3" class="empty">No variables defined.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <button type="button" class="btn-tertiary" data-role="environment-add-variable" data-action="environment-add-variable">Add Variable</button>
+                    </div>
+                    <div class="form-row">
+                        <label>Default Headers</label>
+                        <div class="kv-table">
+                            <div class="kv-table__scroll">
+                                <table aria-label="Environment default headers">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">Key</th>
+                                            <th scope="col">Value</th>
+                                            <th scope="col" aria-hidden="true"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody data-role="environment-header-rows">
+                                        <tr>
+                                            <td colspan="3" class="empty">No headers defined.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <button type="button" class="btn-tertiary" data-role="environment-add-header" data-action="environment-add-header">Add Header</button>
+                    </div>
+                </fieldset>
+                <div class="form-meta" data-role="environment-meta" hidden>
+                    <div class="form-meta__entry">
+                        <span class="form-meta__label">Created</span>
+                        <span class="form-meta__value"><time data-role="environment-created">&mdash;</time></span>
+                    </div>
+                    <div class="form-meta__entry">
+                        <span class="form-meta__label">Updated</span>
+                        <span class="form-meta__value"><time data-role="environment-updated">&mdash;</time></span>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary" data-role="environment-submit">Save</button>
+                    <button type="button" class="btn-secondary" data-action="close-environment-modal">Close</button>
+                </div>
+            </form>
+        </div>
     </div>
 
     <div class="automation-modal" data-role="risk-modal" hidden>
@@ -250,6 +367,7 @@
         </div>
     </div>
 
+    {{ initial_environments|json_script:"automation-initial-environments" }}
     {{ initial_risks|json_script:"automation-initial-risks" }}
     {{ initial_mitigation_plans|json_script:"automation-initial-mitigation-plans" }}
     {{ initial_risk_mitigations|json_script:"automation-initial-risk-mitigations" }}
