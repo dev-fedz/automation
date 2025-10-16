@@ -25,13 +25,290 @@
         html: '<!DOCTYPE html>\n<html>\n  <head></head>\n  <body>\n  </body>\n</html>',
         xml: '<root></root>',
     };
-    const SCRIPT_PLACEHOLDERS = {
-        pre: '// Runs before the request',
-        post: '// Runs after the response',
-    };
     const BODY_MODE_CONTENT_TYPES = {
         urlencoded: 'application/x-www-form-urlencoded; charset=UTF-8',
         binary: 'application/octet-stream',
+    };
+    const SIGNATURE_ALGORITHMS = [
+        { key: 'sha256', label: 'SHA-256' },
+        { key: 'sha384', label: 'SHA-384' },
+        { key: 'sha512', label: 'SHA-512' },
+    ];
+    const VARIABLE_TEMPLATE_PATTERN = /{{\s*([\w\.-]+)\s*}}/g;
+    const GLOBAL_STORAGE_KEY = 'automation.apiTester.globals';
+
+    const normalizeVariableValue = (value) => {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        if (typeof value === 'string') {
+            return value;
+        }
+        if (typeof value === 'object') {
+            try {
+                return JSON.stringify(value);
+            } catch (error) {
+                return String(value);
+            }
+        }
+        return String(value);
+    };
+
+    const cloneVariableStore = (source) => {
+        if (!source || typeof source !== 'object') {
+            return {};
+        }
+        const result = {};
+        Object.entries(source).forEach(([key, value]) => {
+            if (!key) {
+                return;
+            }
+            result[key] = normalizeVariableValue(value);
+        });
+        return result;
+    };
+
+    const resolveTemplateWithLookups = (template, stores) => {
+        if (typeof template !== 'string') {
+            return template;
+        }
+        const lookupStores = Array.isArray(stores) ? stores : [];
+        return template.replace(VARIABLE_TEMPLATE_PATTERN, (match, key) => {
+            for (const store of lookupStores) {
+                if (store && Object.prototype.hasOwnProperty.call(store, key)) {
+                    const value = store[key];
+                    return value === undefined || value === null ? '' : String(value);
+                }
+            }
+            return match;
+        });
+    };
+
+    const clonePlainObject = (value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            return {};
+        }
+        return { ...value };
+    };
+
+    const resolveTemplatesDeep = (value, stores) => {
+        if (typeof value === 'string') {
+            return resolveTemplateWithLookups(value, stores);
+        }
+        if (Array.isArray(value)) {
+            return value.map((item) => resolveTemplatesDeep(item, stores));
+        }
+        if (value && typeof value === 'object' && value.constructor === Object) {
+            const result = {};
+            Object.entries(value).forEach(([key, nested]) => {
+                result[key] = resolveTemplatesDeep(nested, stores);
+            });
+            return result;
+        }
+        return value;
+    };
+
+    const splitPathSegments = (path) => {
+        if (!path) {
+            return [];
+        }
+        return path
+            .split('.')
+            .map((segment) => segment.trim())
+            .filter(Boolean);
+    };
+
+    const getValueAtObjectPath = (subject, path) => {
+        if (!subject || typeof subject !== 'object') {
+            return undefined;
+        }
+        const segments = splitPathSegments(path);
+        if (!segments.length) {
+            return undefined;
+        }
+        return segments.reduce((accumulator, key) => {
+            if (accumulator === undefined || accumulator === null) {
+                return undefined;
+            }
+            if (typeof accumulator !== 'object') {
+                return undefined;
+            }
+            return accumulator[key];
+        }, subject);
+    };
+
+    const setValueAtObjectPath = (subject, path, value) => {
+        if (!subject || typeof subject !== 'object') {
+            return;
+        }
+        const segments = splitPathSegments(path);
+        if (!segments.length) {
+            return;
+        }
+        const { length } = segments;
+        let cursor = subject;
+        segments.forEach((segment, index) => {
+            if (index === length - 1) {
+                cursor[segment] = value;
+                return;
+            }
+            if (!Object.prototype.hasOwnProperty.call(cursor, segment) || typeof cursor[segment] !== 'object') {
+                cursor[segment] = {};
+            }
+            cursor = cursor[segment];
+        });
+    };
+
+    const bufferToHex = (buffer) => {
+        if (!(buffer instanceof ArrayBuffer)) {
+            return '';
+        }
+        return Array.from(new Uint8Array(buffer))
+            .map((byte) => byte.toString(16).padStart(2, '0'))
+            .join('');
+    };
+
+    const computeHashHex = async (algorithmKey, message) => {
+        const normalizedKey = (algorithmKey || '').toLowerCase();
+        const normalizedMessage = message === undefined || message === null ? '' : String(message);
+        const subtleAlgorithms = {
+            sha256: 'SHA-256',
+            sha384: 'SHA-384',
+            sha512: 'SHA-512',
+        };
+        const subtleName = subtleAlgorithms[normalizedKey];
+        if (subtleName && typeof window !== 'undefined' && window.crypto?.subtle) {
+            try {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(normalizedMessage);
+                const digest = await window.crypto.subtle.digest(subtleName, data);
+                return bufferToHex(digest);
+            } catch (error) {
+                console.warn('Failed to compute signature with SubtleCrypto.', error);
+            }
+        }
+
+        if (typeof window !== 'undefined' && window.CryptoJS) {
+            try {
+                const cryptoFns = {
+                    sha256: window.CryptoJS.SHA256,
+                    sha384: window.CryptoJS.SHA384,
+                    sha512: window.CryptoJS.SHA512,
+                };
+                const fn = cryptoFns[normalizedKey];
+                if (fn) {
+                    const hash = fn(normalizedMessage);
+                    if (window.CryptoJS.enc && window.CryptoJS.enc.Hex) {
+                        return window.CryptoJS.enc.Hex.stringify(hash);
+                    }
+                    return String(hash);
+                }
+            } catch (error) {
+                console.warn('Failed to compute signature with CryptoJS.', error);
+            }
+        }
+
+        throw new Error(`Hash algorithm '${algorithmKey}' is not available in this browser.`);
+    };
+
+    const parseSignatureComponents = (rawText) => {
+        if (!rawText || typeof rawText !== 'string') {
+            return [];
+        }
+        const lines = rawText
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean);
+        return lines.map((entry) => {
+            if (entry.startsWith('literal:')) {
+                return { type: 'literal', value: entry.slice('literal:'.length) };
+            }
+            if (entry.startsWith('path:')) {
+                return { type: 'path', value: entry.slice('path:'.length) };
+            }
+            if ((entry.startsWith('"') && entry.endsWith('"')) || (entry.startsWith("'") && entry.endsWith("'"))) {
+                return { type: 'literal', value: entry.slice(1, -1) };
+            }
+            return { type: 'path', value: entry };
+        });
+    };
+
+    const loadStoredGlobals = () => {
+        try {
+            const raw = window.localStorage.getItem(GLOBAL_STORAGE_KEY);
+            if (!raw) {
+                return {};
+            }
+            const parsed = JSON.parse(raw);
+            return cloneVariableStore(parsed);
+        } catch (error) {
+            console.warn('Unable to load API tester globals from storage.', error);
+            return {};
+        }
+    };
+
+    const saveStoredGlobals = (globals) => {
+        try {
+            const payload = globals && typeof globals === 'object' ? globals : {};
+            window.localStorage.setItem(GLOBAL_STORAGE_KEY, JSON.stringify(payload));
+        } catch (error) {
+            console.warn('Unable to persist API tester globals.', error);
+        }
+    };
+
+    const createVariableScope = ({ store, onMutate } = {}) => {
+        const scopeStore = store || {};
+        const scope = {
+            get: (key) => {
+                if (!key) {
+                    return undefined;
+                }
+                return scopeStore[key];
+            },
+            set: (key, value) => {
+                if (!key) {
+                    return;
+                }
+                scopeStore[key] = normalizeVariableValue(value);
+                if (onMutate) {
+                    onMutate('set', key, scopeStore[key]);
+                }
+            },
+            unset: (key) => {
+                if (!key) {
+                    return;
+                }
+                if (Object.prototype.hasOwnProperty.call(scopeStore, key)) {
+                    delete scopeStore[key];
+                    if (onMutate) {
+                        onMutate('unset', key);
+                    }
+                }
+            },
+            has: (key) => Object.prototype.hasOwnProperty.call(scopeStore, key || ''),
+            clear: () => {
+                Object.keys(scopeStore).forEach((key) => {
+                    delete scopeStore[key];
+                });
+                if (onMutate) {
+                    onMutate('clear');
+                }
+            },
+        };
+        scope.replaceIn = (template) => resolveTemplateWithLookups(template, [scopeStore]);
+        scope.toObject = () => ({ ...scopeStore });
+        return scope;
+    };
+
+    const tryParseJsonSilent = (text) => {
+        if (typeof text !== 'string' || !text.trim()) {
+            return null;
+        }
+        try {
+            return JSON.parse(text);
+        } catch (error) {
+            return null;
+        }
     };
 
     const escapeHtml = (value) => {
@@ -150,6 +427,11 @@
         }));
     };
 
+    const createInitialTransforms = () => ({
+        overrides: [],
+        signatures: [],
+    });
+
     const getInitialBuilderState = () => ({
         params: [],
         headers: cloneDefaultHeaders(),
@@ -160,6 +442,7 @@
         bodyUrlEncoded: [],
         bodyBinary: null,
         auth: { type: 'none', username: '', password: '', token: '' },
+        transforms: createInitialTransforms(),
         scripts: { pre: '', post: '' },
     });
 
@@ -172,7 +455,10 @@
         urlBase: '',
         builder: getInitialBuilderState(),
         activeTab: 'params',
-        activeScriptsTab: 'pre',
+        bodyTools: {
+            overridesIdSeed: 0,
+            signaturesIdSeed: 0,
+        },
         activeEnvironmentId: null,
         collapsedCollections: new Set(),
         collapsedDirectoryKeys: new Set(),
@@ -195,6 +481,7 @@
             triggerStart: null,
             query: '',
         },
+        globalVariables: loadStoredGlobals(),
     };
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -204,6 +491,7 @@
         }
 
         const elements = {
+            form: document.getElementById('api-request-form'),
             collectionsList: root.querySelector('.api-tester__collections-list'),
             search: document.getElementById('collection-search'),
             method: document.getElementById('request-method'),
@@ -225,8 +513,6 @@
             responseBody: document.getElementById('response-body'),
             responseAssertions: document.getElementById('response-assertions'),
             builderMeta: document.getElementById('builder-meta'),
-            form: document.getElementById('api-request-form'),
-            variableSuggest: null,
             tabButtons: Array.from(root.querySelectorAll('[data-tab]')),
             tabPanels: Array.from(root.querySelectorAll('[data-tab-panel]')),
             paramsBody: document.getElementById('params-rows'),
@@ -248,10 +534,10 @@
             addBodyUrlencodedRow: document.getElementById('add-body-urlencoded-row'),
             bodyBinaryInput: document.getElementById('body-binary-input'),
             bodyBinaryInfo: document.getElementById('body-binary-info'),
-            scriptsTabButtons: Array.from(root.querySelectorAll('[data-script-tab]')),
-            scriptsPanels: Array.from(root.querySelectorAll('[data-script-panel]')),
-            scriptEditorPre: document.getElementById('script-pre-editor'),
-            scriptEditorPost: document.getElementById('script-post-editor'),
+            bodyOverridesBody: document.getElementById('body-overrides-rows'),
+            addBodyOverrideRow: document.getElementById('add-body-override'),
+            bodySignaturesBody: document.getElementById('body-signatures-rows'),
+            addBodySignatureRow: document.getElementById('add-body-signature'),
             collectionsActionsToggle: document.getElementById('collections-actions-toggle'),
             collectionsActionsMenu: document.getElementById('collections-actions-menu'),
             collectionsCreateAction: document.getElementById('collections-action-create'),
@@ -342,20 +628,22 @@
 
         const tabButtons = elements.tabButtons;
         const tabPanels = elements.tabPanels;
-    const scriptTabButtons = elements.scriptsTabButtons || [];
-    const scriptPanels = elements.scriptsPanels || [];
-        const scriptEditorContainers = {
-            pre: elements.scriptEditorPre,
-            post: elements.scriptEditorPost,
-        };
+        const overridesTable = elements.bodyOverridesBody;
+        const signaturesTable = elements.bodySignaturesBody;
         let suppressUrlSync = false;
         let rawEditor = null;
         let jsonCompletionDisposable = null;
         let monacoLoaderPromise = null;
         let hasConfiguredJsonDiagnostics = false;
         let isRequestInFlight = false;
-        const scriptEditors = { pre: null, post: null };
-        const scriptFallbacks = { pre: null, post: null };
+        const createTransformRowId = (type) => {
+            if (type === 'override') {
+                state.bodyTools.overridesIdSeed += 1;
+                return `override-${state.bodyTools.overridesIdSeed}`;
+            }
+            state.bodyTools.signaturesIdSeed += 1;
+            return `signature-${state.bodyTools.signaturesIdSeed}`;
+        };
 
         const setStatus = (message, variant = 'neutral') => {
             if (!elements.status) {
@@ -658,169 +946,200 @@
             }
         };
 
-        const getScriptPlaceholder = (key) => SCRIPT_PLACEHOLDERS[key] || '';
-
-        const ensureScriptPlaceholder = (key) => {
-            const container = scriptEditorContainers[key];
-            if (container) {
-                container.setAttribute('data-placeholder', getScriptPlaceholder(key));
+        const ensureTransformState = () => {
+            if (!state.builder.transforms) {
+                state.builder.transforms = createInitialTransforms();
+            }
+            if (!Array.isArray(state.builder.transforms.overrides)) {
+                state.builder.transforms.overrides = [];
+            }
+            if (!Array.isArray(state.builder.transforms.signatures)) {
+                state.builder.transforms.signatures = [];
             }
         };
 
-        const updateScriptEmptyState = (key, value) => {
-            const container = scriptEditorContainers[key];
-            if (container) {
-                container.classList.toggle('is-empty', !(value && value.trim()));
-            }
-        };
+        const createOverrideTransform = (override = {}) => ({
+            id: override.id || createTransformRowId('override'),
+            path: override.path || '',
+            value: override.value === undefined ? '' : String(override.value),
+        });
 
-        const setScriptEditorValue = (key, value) => {
-            ensureScriptPlaceholder(key);
-            const normalized = value ?? '';
-            state.builder.scripts[key] = normalized;
-            const editor = scriptEditors[key];
-            if (editor && editor.getValue() !== normalized) {
-                editor.setValue(normalized);
-            }
-            const fallback = scriptFallbacks[key];
-            if (fallback && fallback.value !== normalized) {
-                fallback.value = normalized;
-            }
-            updateScriptEmptyState(key, normalized);
-        };
+        const createSignatureTransform = (signature = {}) => ({
+            id: signature.id || createTransformRowId('signature'),
+            targetPath: signature.targetPath || signature.target_path || signature.target || '',
+            algorithm: (signature.algorithm || SIGNATURE_ALGORITHMS[2].key).toLowerCase(),
+            components: signature.components || '',
+            storeAs: signature.storeAs || signature.store_as || '',
+        });
 
-        const focusScriptEditor = (key) => {
-            const editor = scriptEditors[key];
-            if (editor && typeof editor.focus === 'function') {
-                editor.focus();
+        const renderBodyOverrides = () => {
+            ensureTransformState();
+            if (!overridesTable) {
                 return;
             }
-            const fallback = scriptFallbacks[key];
-            if (fallback && typeof fallback.focus === 'function') {
-                fallback.focus();
+            const rows = state.builder.transforms.overrides;
+            if (!rows.length) {
+                overridesTable.innerHTML = '<tr class="empty"><td colspan="3" class="muted">No overrides defined.</td></tr>';
+                return;
             }
-        };
-
-        const initializeScriptEditor = (key) => {
-            ensureScriptPlaceholder(key);
-            const container = scriptEditorContainers[key];
-            if (!container) {
-                return Promise.resolve(null);
-            }
-            if (scriptEditors[key]) {
-                updateScriptEmptyState(key, scriptEditors[key].getValue());
-                return Promise.resolve(scriptEditors[key]);
-            }
-            return ensureMonaco()
-                .then((monaco) => {
-                    if (scriptEditors[key]) {
-                        return scriptEditors[key];
-                    }
-                    const initialValue = state.builder.scripts[key] || '';
-                    const editor = monaco.editor.create(container, {
-                        value: initialValue,
-                        language: 'javascript',
-                        automaticLayout: true,
-                        minimap: { enabled: false },
-                        fontSize: 14,
-                        fontFamily: 'ui-monospace, Consolas, Menlo, monospace',
-                        lineNumbers: 'on',
-                        wordWrap: 'on',
-                        tabSize: 2,
-                        insertSpaces: true,
-                        smoothScrolling: true,
-                    });
-                    scriptEditors[key] = editor;
-
-                    const togglePlaceholder = () => {
-                        updateScriptEmptyState(key, editor.getValue());
-                    };
-
-                    togglePlaceholder();
-
-                    editor.onDidChangeModelContent(() => {
-                        const nextValue = editor.getValue();
-                        state.builder.scripts[key] = nextValue;
-                        togglePlaceholder();
-                    });
-
-                    editor.onDidFocusEditorText(() => {
-                        state.activeInputTarget = { type: 'monaco', editor };
-                    });
-
-                    editor.onDidBlurEditorText(() => {
-                        if (state.activeInputTarget?.type === 'monaco' && state.activeInputTarget.editor === editor) {
-                            state.activeInputTarget = null;
-                        }
-                    });
-
-                    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF, () => {
-                        const formatAction = editor.getAction('editor.action.formatDocument');
-                        if (formatAction && typeof formatAction.run === 'function') {
-                            formatAction.run().catch(() => {});
-                        }
-                    });
-
-                    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Space, () => {
-                        monaco.commands.executeCommand('editor.action.triggerSuggest');
-                    });
-
-                    return editor;
+            const markup = rows
+                .map((row) => {
+                    const safePath = escapeHtml(row.path || '');
+                    const safeValue = escapeHtml(row.value || '');
+                    return `<tr data-row-id="${row.id}">
+                        <td><input type="text" class="kv-input body-override-input" data-field="path" value="${safePath}" placeholder="transaction.request_id" /></td>
+                        <td><input type="text" class="kv-input body-override-input" data-field="value" value="${safeValue}" placeholder="New value" /></td>
+                        <td class="kv-actions"><button type="button" class="kv-remove body-override-remove" data-row-id="${row.id}" aria-label="Remove override">×</button></td>
+                    </tr>`;
                 })
-                .catch(() => {
-                    if (scriptFallbacks[key]) {
-                        return scriptFallbacks[key];
-                    }
-                    container.innerHTML = '';
-                    const textarea = document.createElement('textarea');
-                    textarea.className = 'script-textarea-fallback';
-                    textarea.rows = 8;
-                    textarea.placeholder = getScriptPlaceholder(key);
-                    textarea.value = state.builder.scripts[key] || '';
-                    textarea.addEventListener('input', (event) => {
-                        const nextValue = event.target.value;
-                        state.builder.scripts[key] = nextValue;
-                        updateScriptEmptyState(key, nextValue);
-                    });
-                    textarea.addEventListener('focus', () => {
-                        state.activeInputTarget = { type: 'dom', element: textarea };
-                    });
-                    textarea.addEventListener('blur', () => {
-                        if (state.activeInputTarget?.type === 'dom' && state.activeInputTarget.element === textarea) {
-                            state.activeInputTarget = null;
-                        }
-                    });
-                    container.appendChild(textarea);
-                    scriptFallbacks[key] = textarea;
-                    updateScriptEmptyState(key, textarea.value);
-                    return textarea;
-                });
+                .join('');
+            overridesTable.innerHTML = markup;
         };
 
-        const activateScriptsTab = (tabName, options = {}) => {
-            if (!scriptTabButtons.length || !scriptPanels.length) {
+        const renderBodySignatures = () => {
+            ensureTransformState();
+            if (!signaturesTable) {
                 return;
             }
-            const target = tabName || 'pre';
-            const shouldFocus = Boolean(options.focus);
-            state.activeScriptsTab = target;
-            scriptTabButtons.forEach((button) => {
-                const isActive = button.dataset.scriptTab === target;
-                button.classList.toggle('is-active', isActive);
-                button.setAttribute('aria-selected', isActive ? 'true' : 'false');
-                button.setAttribute('tabindex', isActive ? '0' : '-1');
-            });
-            scriptPanels.forEach((panel) => {
-                const isActive = panel.dataset.scriptPanel === target;
-                panel.classList.toggle('is-active', isActive);
-                panel.hidden = !isActive;
-                panel.setAttribute('aria-hidden', isActive ? 'false' : 'true');
-            });
-            initializeScriptEditor(target).then(() => {
-                if (shouldFocus) {
-                    window.requestAnimationFrame(() => focusScriptEditor(target));
+            const rows = state.builder.transforms.signatures;
+            if (!rows.length) {
+                signaturesTable.innerHTML = '<tr class="empty"><td colspan="5" class="muted">No signatures configured.</td></tr>';
+                return;
+            }
+            const markup = rows
+                .map((row) => {
+                    const safeTarget = escapeHtml(row.targetPath || '');
+                    const safeComponents = escapeHtml(row.components || '');
+                    const safeStoreAs = escapeHtml(row.storeAs || '');
+                    const algorithmOptions = SIGNATURE_ALGORITHMS.map((item) => `<option value="${item.key}"${item.key === row.algorithm ? ' selected' : ''}>${item.label}</option>`).join('');
+                    return `<tr data-row-id="${row.id}">
+                        <td><input type="text" class="kv-input body-signature-input" data-field="targetPath" value="${safeTarget}" placeholder="transaction.signature" /></td>
+                        <td><select class="kv-input body-signature-select" data-field="algorithm">${algorithmOptions}</select></td>
+                        <td><textarea class="kv-input body-signature-textarea" data-field="components" placeholder="path:transaction.merchantid\npath:transaction.request_id\nliteral:SECRET">${safeComponents}</textarea></td>
+                        <td><input type="text" class="kv-input body-signature-input" data-field="storeAs" value="${safeStoreAs}" placeholder="signature variable (optional)" /></td>
+                        <td class="kv-actions"><button type="button" class="kv-remove body-signature-remove" data-row-id="${row.id}" aria-label="Remove signature">×</button></td>
+                    </tr>`;
+                })
+                .join('');
+            signaturesTable.innerHTML = markup;
+        };
+
+        const renderBodyTools = () => {
+            renderBodyOverrides();
+            renderBodySignatures();
+        };
+
+        const addOverrideTransform = () => {
+            ensureTransformState();
+            state.builder.transforms.overrides.push(createOverrideTransform());
+            renderBodyOverrides();
+        };
+
+        const removeOverrideTransform = (rowId) => {
+            ensureTransformState();
+            state.builder.transforms.overrides = state.builder.transforms.overrides.filter((row) => row.id !== rowId);
+            renderBodyOverrides();
+        };
+
+        const updateOverrideTransform = (rowId, field, value) => {
+            ensureTransformState();
+            const row = state.builder.transforms.overrides.find((item) => item.id === rowId);
+            if (!row) {
+                return;
+            }
+            if (field === 'path') {
+                row.path = value;
+            } else if (field === 'value') {
+                row.value = value;
+            }
+        };
+
+        const addSignatureTransform = () => {
+            ensureTransformState();
+            state.builder.transforms.signatures.push(createSignatureTransform());
+            renderBodySignatures();
+        };
+
+        const removeSignatureTransform = (rowId) => {
+            ensureTransformState();
+            state.builder.transforms.signatures = state.builder.transforms.signatures.filter((row) => row.id !== rowId);
+            renderBodySignatures();
+        };
+
+        const updateSignatureTransform = (rowId, field, value) => {
+            ensureTransformState();
+            const row = state.builder.transforms.signatures.find((item) => item.id === rowId);
+            if (!row) {
+                return;
+            }
+            if (field === 'targetPath') {
+                row.targetPath = value;
+            } else if (field === 'algorithm') {
+                row.algorithm = value.toLowerCase();
+            } else if (field === 'components') {
+                row.components = value;
+            } else if (field === 'storeAs') {
+                row.storeAs = value;
+            }
+        };
+
+        const applyBodyTransforms = async (jsonBody, transforms, overridesAccumulator, templateResolver) => {
+            if (!jsonBody || typeof jsonBody !== 'object') {
+                return { json: jsonBody, overrides: overridesAccumulator || {} };
+            }
+            const resultOverrides = overridesAccumulator || {};
+            const normalizedTransforms = transforms || {};
+            const overrideRows = Array.isArray(normalizedTransforms.overrides) ? normalizedTransforms.overrides : [];
+            const signatureRows = Array.isArray(normalizedTransforms.signatures) ? normalizedTransforms.signatures : [];
+
+            const resolveLiteral = (rawValue) => {
+                const normalized = rawValue === undefined || rawValue === null ? '' : String(rawValue);
+                return typeof templateResolver === 'function' ? templateResolver(normalized) : normalized;
+            };
+
+            overrideRows.forEach((row) => {
+                const path = (row?.path || '').trim();
+                if (!path) {
+                    return;
                 }
+                const resolvedValue = resolveLiteral(row?.value);
+                setValueAtObjectPath(jsonBody, path, resolvedValue);
             });
+
+            for (const row of signatureRows) {
+                if (!row || !row.targetPath) {
+                    continue;
+                }
+                const targetPath = String(row.targetPath).trim();
+                if (!targetPath) {
+                    continue;
+                }
+                const algorithm = (row.algorithm || SIGNATURE_ALGORITHMS[2].key).toLowerCase();
+                const components = parseSignatureComponents(row.components);
+                if (!components.length) {
+                    continue;
+                }
+                const rawParts = components.map((component) => {
+                    if (component.type === 'literal') {
+                        return resolveLiteral(component.value);
+                    }
+                    const value = getValueAtObjectPath(jsonBody, component.value);
+                    return value === undefined || value === null ? '' : String(value);
+                });
+                let signature;
+                try {
+                    signature = await computeHashHex(algorithm, rawParts.join(''));
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : 'Unknown hashing error';
+                    throw new Error(`Unable to compute signature for '${targetPath}': ${message}`);
+                }
+                setValueAtObjectPath(jsonBody, targetPath, signature);
+                if (row.storeAs && String(row.storeAs).trim()) {
+                    resultOverrides[String(row.storeAs).trim()] = signature;
+                }
+            }
+
+            return { json: jsonBody, overrides: resultOverrides };
         };
 
         const renderKeyValueRows = (tbody, rows, options) => {
@@ -940,7 +1259,7 @@
             if (rawEditor && typeof rawEditor.getAction === 'function') {
                 const formatAction = rawEditor.getAction('editor.action.formatDocument');
                 if (formatAction && typeof formatAction.run === 'function') {
-                    formatAction.run().catch(() => {});
+                    formatAction.run().catch(() => { });
                     handledByEditor = true;
                 }
             }
@@ -1174,25 +1493,20 @@
             renderBodyUrlencoded();
         };
 
-        const updateScriptsUI = () => {
-            setScriptEditorValue('pre', state.builder.scripts.pre);
-            setScriptEditorValue('post', state.builder.scripts.post);
-            activateScriptsTab(state.activeScriptsTab || 'pre');
-        };
-
         const renderBuilder = () => {
             renderParams();
             renderHeaders();
             updateAuthUI();
             updateBodyUI();
-            updateScriptsUI();
+            renderBodyTools();
             activateTab(state.activeTab || 'params');
             updateRunButtonState();
         };
 
         const resetBuilderState = () => {
             state.builder = getInitialBuilderState();
-            state.activeScriptsTab = 'pre';
+            state.bodyTools.overridesIdSeed = 0;
+            state.bodyTools.signaturesIdSeed = 0;
         };
 
         const setUrlValue = (value, parseParams = true) => {
@@ -1252,8 +1566,16 @@
                 state.builder.auth.token = request.auth_bearer || '';
             }
 
-            state.builder.scripts.pre = request.pre_request_script || '';
-            state.builder.scripts.post = request.tests_script || '';
+            ensureTransformState();
+            const rawTransforms = request.body_transforms && typeof request.body_transforms === 'object'
+                ? request.body_transforms
+                : {};
+            const overrideItems = Array.isArray(rawTransforms.overrides) ? rawTransforms.overrides : [];
+            const signatureItems = Array.isArray(rawTransforms.signatures) ? rawTransforms.signatures : [];
+            state.builder.transforms.overrides = overrideItems.map((item) => createOverrideTransform(item));
+            state.builder.transforms.signatures = signatureItems.map((item) => createSignatureTransform(item));
+            state.builder.scripts.pre = '';
+            state.builder.scripts.post = '';
 
             if (elements.runCollectionButton) {
                 elements.runCollectionButton.disabled = false;
@@ -2579,8 +2901,8 @@
                     const isApplied = state.activeEnvironmentId === env.id;
                     const isEditingCurrent = Boolean(
                         state.environmentEditor &&
-                            !state.environmentEditor.isNew &&
-                            state.environmentEditor.environmentId === env.id,
+                        !state.environmentEditor.isNew &&
+                        state.environmentEditor.environmentId === env.id,
                     );
                     const nameSource = isEditingCurrent ? state.environmentEditor.form.name : env.name;
                     const rawName = typeof nameSource === 'string' ? nameSource : '';
@@ -4003,9 +4325,188 @@
             }
         };
 
-        const buildPayloadFromBuilder = (collection, request) => {
+        const createScriptConsoleProxy = () => {
+            const buffer = [];
+            const proxy = {};
+            ['log', 'info', 'warn', 'error'].forEach((method) => {
+                proxy[method] = (...args) => {
+                    buffer.push({ level: method, args });
+                    if (typeof console[method] === 'function') {
+                        console[method](...args);
+                    } else {
+                        console.log(...args);
+                    }
+                };
+            });
+            return { proxy, buffer };
+        };
+
+        const runPreRequestScript = (scriptText, { environmentId = null, requestSnapshot }) => {
+            const trimmed = (scriptText || '').trim();
+
+            const environmentInstance = environmentId !== null ? getEnvironmentById(environmentId) : null;
+            const baseEnvironmentStore = cloneVariableStore(environmentInstance?.variables);
+            const workingEnvironmentStore = { ...baseEnvironmentStore };
+            const localStore = {};
+            const lookups = [localStore, workingEnvironmentStore, state.globalVariables];
+
+            const attachReplaceIn = (scope) => {
+                scope.replaceIn = (template) => resolveTemplateWithLookups(template, lookups);
+                return scope;
+            };
+
+            const globalsScope = attachReplaceIn(
+                createVariableScope({
+                    store: state.globalVariables,
+                    onMutate: () => {
+                        saveStoredGlobals(state.globalVariables);
+                    },
+                }),
+            );
+
+            const environmentScope = attachReplaceIn(
+                createVariableScope({
+                    store: workingEnvironmentStore,
+                }),
+            );
+
+            const variablesScope = attachReplaceIn(
+                createVariableScope({
+                    store: localStore,
+                }),
+            );
+
+            const collectionScope = attachReplaceIn(createVariableScope({ store: {} }));
+
+            const { proxy: consoleProxy, buffer: consoleBuffer } = createScriptConsoleProxy();
+
+            const safeRequestSnapshot = {
+                method: requestSnapshot?.method || 'GET',
+                url: requestSnapshot?.url || '',
+                headers: { ...(requestSnapshot?.headers || {}) },
+                body: { ...(requestSnapshot?.body || {}) },
+            };
+
+            const pm = {
+                globals: globalsScope,
+                environment: environmentScope,
+                variables: variablesScope,
+                collectionVariables: collectionScope,
+                request: safeRequestSnapshot,
+                info: { eventName: 'prerequest' },
+                console: consoleProxy,
+                iterationData: {
+                    get: () => undefined,
+                    toObject: () => ({}),
+                },
+            };
+            const postman = pm;
+
+            if (trimmed) {
+                try {
+                    const scriptFunction = new Function('pm', 'postman', 'console', 'require', 'module', 'exports', 'process', 'global', 'window', 'document', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'XMLHttpRequest', 'fetch', 'FormData', 'Headers', 'Request', 'Response', 'btoa', 'atob', 'URLSearchParams', 'CryptoJS', `"use strict";\n${trimmed}`);
+                    scriptFunction(
+                        pm,
+                        postman,
+                        consoleProxy,
+                        undefined,
+                        undefined,
+                        undefined,
+                        undefined,
+                        undefined,
+                        undefined,
+                        undefined,
+                        setTimeout,
+                        setInterval,
+                        clearTimeout,
+                        clearInterval,
+                        undefined,
+                        undefined,
+                        undefined,
+                        undefined,
+                        undefined,
+                        undefined,
+                        typeof btoa === 'function' ? btoa : undefined,
+                        typeof atob === 'function' ? atob : undefined,
+                        typeof URLSearchParams !== 'undefined' ? URLSearchParams : undefined,
+                        typeof window !== 'undefined' ? window.CryptoJS : undefined,
+                    );
+                } catch (error) {
+                    throw new Error(`Pre-request script error: ${error && error.message ? error.message : String(error)}`);
+                }
+            }
+
+            saveStoredGlobals(state.globalVariables);
+
+            if (environmentInstance) {
+                environmentInstance.variables = { ...workingEnvironmentStore };
+            }
+
+            const environmentOverrides = {};
+            const environmentKeys = new Set([
+                ...Object.keys(baseEnvironmentStore),
+                ...Object.keys(workingEnvironmentStore),
+            ]);
+            environmentKeys.forEach((key) => {
+                const nextValue = workingEnvironmentStore[key];
+                const prevValue = baseEnvironmentStore[key];
+                if (nextValue !== prevValue) {
+                    environmentOverrides[key] = nextValue === undefined ? '' : nextValue;
+                }
+            });
+
+            const overrides = {
+                ...state.globalVariables,
+                ...environmentOverrides,
+                ...localStore,
+            };
+            return {
+                overrides,
+                environmentVariables: { ...workingEnvironmentStore },
+                localVariables: { ...localStore },
+                logs: consoleBuffer,
+            };
+        };
+
+        const buildPayloadFromBuilder = async (collection, request) => {
             const headersPayload = rowsToObject(state.builder.headers);
             const paramsPayload = rowsToObject(state.builder.params);
+
+            const requestSnapshot = {
+                method: elements.method.value,
+                url: getTrimmedUrlValue(),
+                headers: { ...headersPayload },
+                body: {
+                    mode: state.builder.bodyMode,
+                    raw: state.builder.bodyMode === 'raw' ? getRawEditorValue() : '',
+                    rawType: state.builder.bodyRawType,
+                    json: state.builder.bodyMode === 'raw' && state.builder.bodyRawType === 'json'
+                        ? tryParseJsonSilent(getRawEditorValue())
+                        : null,
+                    formData: state.builder.bodyFormData.map((row) => ({
+                        key: row.key,
+                        value: row.value,
+                        type: row.type,
+                        fileName: row.fileName,
+                        fileType: row.fileType,
+                    })),
+                    urlencoded: rowsToObject(state.builder.bodyUrlEncoded),
+                },
+            };
+
+            const selectedEnvironmentId = normalizeEnvironmentId(elements.environmentSelect?.value ?? state.activeEnvironmentId);
+            const scriptResult = runPreRequestScript(state.builder.scripts.pre || '', {
+                environmentId: selectedEnvironmentId,
+                requestSnapshot,
+            });
+            const scriptOverrides = scriptResult?.overrides ? { ...scriptResult.overrides } : { ...state.globalVariables };
+            const activeStores = [
+                clonePlainObject(scriptResult?.localVariables),
+                clonePlainObject(scriptResult?.environmentVariables),
+                scriptOverrides,
+            ].filter((store) => store && Object.keys(store).length);
+            const resolveStringTemplate = (value) => (typeof value === 'string' ? resolveTemplateWithLookups(value, activeStores) : value);
+            const resolveJsonTemplate = (value) => resolveTemplatesDeep(value, activeStores);
 
             const payload = {
                 method: elements.method.value,
@@ -4016,6 +4517,10 @@
                 timeout: request?.timeout_ms ? request.timeout_ms / 1000 : 30,
             };
             payload.overrides = {};
+            if (scriptOverrides && Object.keys(scriptOverrides).length) {
+                payload.overrides = { ...scriptOverrides };
+            }
+            payload.url = resolveStringTemplate(payload.url);
 
             const authType = state.builder.auth.type;
             if (authType === 'basic') {
@@ -4034,16 +4539,32 @@
                 }
             }
 
+            payload.headers = Object.fromEntries(
+                Object.entries(headersPayload).map(([key, value]) => [key, resolveStringTemplate(value)]),
+            );
+            payload.params = Object.fromEntries(
+                Object.entries(paramsPayload).map(([key, value]) => [key, resolveStringTemplate(value)]),
+            );
+
             const { bodyMode, bodyRawType, bodyRawText, bodyFormData, bodyUrlEncoded, bodyBinary } = state.builder;
             if (bodyMode === 'raw') {
                 if (bodyRawType === 'json') {
                     try {
-                        payload.json = JSON.parse(bodyRawText || '{}');
+                        const parsedJson = JSON.parse(bodyRawText || '{}');
+                        const resolvedJson = resolveJsonTemplate(parsedJson);
+                        const transformResult = await applyBodyTransforms(
+                            resolvedJson,
+                            state.builder.transforms,
+                            scriptOverrides,
+                            resolveStringTemplate,
+                        );
+                        payload.json = transformResult.json;
+                        Object.assign(payload.overrides, transformResult.overrides);
                     } catch (error) {
                         throw new Error('Raw body must be valid JSON.');
                     }
                 } else {
-                    payload.body = bodyRawText || '';
+                    payload.body = resolveStringTemplate(bodyRawText || '');
                 }
                 const recommended = RAW_TYPE_CONTENT_TYPES[bodyRawType];
                 if (recommended && !payload.headers['Content-Type']) {
@@ -4070,7 +4591,7 @@
                         return {
                             key,
                             type: 'text',
-                            value: row.value ?? '',
+                            value: resolveStringTemplate(row.value ?? ''),
                         };
                     })
                     .filter(Boolean);
@@ -4078,8 +4599,13 @@
                     payload.form_data = formEntries;
                 }
             } else if (bodyMode === 'urlencoded') {
-                const query = rowsToQueryString(bodyUrlEncoded);
-                payload.body = query;
+                const urlencodedObject = rowsToObject(bodyUrlEncoded);
+                const resolvedUrlencoded = Object.fromEntries(
+                    Object.entries(urlencodedObject).map(([key, value]) => [key, resolveStringTemplate(value)]),
+                );
+                payload.body = rowsToQueryString(
+                    Object.entries(resolvedUrlencoded).map(([key, value]) => ({ key, value })),
+                );
                 if (!payload.headers['Content-Type']) {
                     payload.headers['Content-Type'] = BODY_MODE_CONTENT_TYPES.urlencoded;
                 }
@@ -4090,13 +4616,6 @@
                         payload.headers['Content-Type'] = BODY_MODE_CONTENT_TYPES.binary;
                     }
                 }
-            }
-
-            if (state.builder.scripts.pre) {
-                payload.pre_request_script = state.builder.scripts.pre;
-            }
-            if (state.builder.scripts.post) {
-                payload.tests_script = state.builder.scripts.post;
             }
 
             return payload;
@@ -4122,7 +4641,7 @@
 
             let payload;
             try {
-                payload = buildPayloadFromBuilder(collection, request);
+                payload = await buildPayloadFromBuilder(collection, request);
             } catch (error) {
                 setStatus(error instanceof Error ? error.message : 'Invalid request configuration.', 'error');
                 return;
@@ -4192,8 +4711,12 @@
                 auth_type: state.builder.auth.type || 'none',
                 auth_basic: {},
                 auth_bearer: '',
-                pre_request_script: state.builder.scripts.pre || '',
-                tests_script: state.builder.scripts.post || '',
+                pre_request_script: '',
+                tests_script: '',
+                body_transforms: {
+                    overrides: [],
+                    signatures: [],
+                },
                 assertions: [],
             };
 
@@ -4244,6 +4767,26 @@
                     definition.body_raw = '';
                 }
             }
+
+            ensureTransformState();
+            const normalizedOverrides = state.builder.transforms.overrides
+                .filter((row) => row.path && row.path.trim())
+                .map((row) => ({
+                    path: row.path.trim(),
+                    value: row.value ?? '',
+                }));
+            const normalizedSignatures = state.builder.transforms.signatures
+                .filter((row) => row.targetPath && row.targetPath.trim() && row.components && row.components.trim())
+                .map((row) => ({
+                    target_path: row.targetPath.trim(),
+                    algorithm: (row.algorithm || SIGNATURE_ALGORITHMS[2].key).toLowerCase(),
+                    components: row.components,
+                    store_as: row.storeAs ? row.storeAs.trim() : '',
+                }));
+            definition.body_transforms = {
+                overrides: normalizedOverrides,
+                signatures: normalizedSignatures,
+            };
 
             return definition;
         };
@@ -4391,30 +4934,100 @@
             });
         });
 
-        scriptTabButtons.forEach((button) => {
-            button.addEventListener('click', () => {
-                const target = button.dataset.scriptTab;
-                if (!target || target === state.activeScriptsTab) {
+        if (elements.addBodyOverrideRow) {
+            elements.addBodyOverrideRow.addEventListener('click', (event) => {
+                event.preventDefault();
+                addOverrideTransform();
+            });
+        }
+
+        if (overridesTable) {
+            overridesTable.addEventListener('input', (event) => {
+                const target = event.target;
+                if (!target.classList.contains('body-override-input')) {
                     return;
                 }
-                activateScriptsTab(target, { focus: true });
+                const row = target.closest('tr');
+                if (!row) {
+                    return;
+                }
+                const rowId = row.dataset.rowId;
+                const field = target.dataset.field;
+                if (!rowId || !field) {
+                    return;
+                }
+                updateOverrideTransform(rowId, field, target.value);
             });
-            button.addEventListener('keydown', (event) => {
-                if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') {
+
+            overridesTable.addEventListener('click', (event) => {
+                const target = event.target;
+                if (!target.classList.contains('body-override-remove')) {
                     return;
                 }
                 event.preventDefault();
-                const currentIndex = scriptTabButtons.findIndex((item) => item.dataset.scriptTab === state.activeScriptsTab);
-                if (currentIndex === -1) {
+                const rowId = target.dataset.rowId;
+                if (!rowId) {
                     return;
                 }
-                const delta = event.key === 'ArrowRight' ? 1 : -1;
-                const nextIndex = (currentIndex + delta + scriptTabButtons.length) % scriptTabButtons.length;
-                const nextTab = scriptTabButtons[nextIndex].dataset.scriptTab;
-                activateScriptsTab(nextTab, { focus: true });
-                scriptTabButtons[nextIndex].focus();
+                removeOverrideTransform(rowId);
             });
-        });
+        }
+
+        if (elements.addBodySignatureRow) {
+            elements.addBodySignatureRow.addEventListener('click', (event) => {
+                event.preventDefault();
+                addSignatureTransform();
+            });
+        }
+
+        if (signaturesTable) {
+            signaturesTable.addEventListener('input', (event) => {
+                const target = event.target;
+                if (!target.classList.contains('body-signature-input') && !target.classList.contains('body-signature-textarea')) {
+                    return;
+                }
+                const row = target.closest('tr');
+                if (!row) {
+                    return;
+                }
+                const rowId = row.dataset.rowId;
+                const field = target.dataset.field;
+                if (!rowId || !field) {
+                    return;
+                }
+                updateSignatureTransform(rowId, field, target.value);
+            });
+
+            signaturesTable.addEventListener('change', (event) => {
+                const target = event.target;
+                if (!target.classList.contains('body-signature-select')) {
+                    return;
+                }
+                const row = target.closest('tr');
+                if (!row) {
+                    return;
+                }
+                const rowId = row.dataset.rowId;
+                const field = target.dataset.field;
+                if (!rowId || !field) {
+                    return;
+                }
+                updateSignatureTransform(rowId, field, target.value);
+            });
+
+            signaturesTable.addEventListener('click', (event) => {
+                const target = event.target;
+                if (!target.classList.contains('body-signature-remove')) {
+                    return;
+                }
+                event.preventDefault();
+                const rowId = target.dataset.rowId;
+                if (!rowId) {
+                    return;
+                }
+                removeSignatureTransform(rowId);
+            });
+        }
 
         elements.search.addEventListener('input', (event) => {
             renderCollections(event.target.value);

@@ -104,6 +104,7 @@ class ApiRequestSerializer(serializers.ModelSerializer):
             "body_json",
             "body_form",
             "body_raw",
+            "body_transforms",
             "auth_type",
             "auth_basic",
             "auth_bearer",
