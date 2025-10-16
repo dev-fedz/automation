@@ -200,7 +200,7 @@
                         </div>
                         <div class="auth-basic__field form-field">
                             <label for="auth-basic-password">Password</label>
-                            <input type="password" id="auth-basic-password" autocomplete="new-password" />
+                            <input type="text" id="auth-basic-password" autocomplete="off" />
                         </div>
                     </div>
                     <div class="auth-bearer" data-auth-section="bearer" hidden aria-hidden="true">
@@ -438,5 +438,6 @@
         },
     };
 </script>
-<script src="{% static 'js/api_tester.js' %}"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+<script src="{% static 'js/api_tester.js' %}?v=20251016"></script>
 {% endblock %}

@@ -46,7 +46,7 @@ def api_run_get(pk: int) -> models.ApiRun | None:
 
 def test_plan_list() -> QuerySet[models.TestPlan]:
     scenario_qs = models.TestScenario.objects.prefetch_related(
-        Prefetch("cases", queryset=models.TestCase.objects.order_by("title", "id"))
+            Prefetch("cases", queryset=models.TestCase.objects.order_by("testcase_id", "id"))
     ).order_by("title", "id")
     maintenance_qs = models.TestPlanMaintenance.objects.order_by("-effective_date", "-created_at", "id")
     scope_qs = models.TestPlanScope.objects.order_by("category", "order", "id")
@@ -75,7 +75,7 @@ def test_scenario_list() -> QuerySet[models.TestScenario]:
 
 
 def test_case_list() -> QuerySet[models.TestCase]:
-    return models.TestCase.objects.select_related("scenario", "scenario__plan", "related_api_request").order_by("scenario", "title", "id")
+    return models.TestCase.objects.select_related("scenario", "scenario__plan", "related_api_request").order_by("scenario", "testcase_id", "id")
 
 
 def test_plan_maintenance_list() -> QuerySet[models.TestPlanMaintenance]:

@@ -23,6 +23,21 @@
         <div class="automation-status" data-role="status" hidden></div>
     </section>
 
+    <div class="metric-tiles" aria-label="Data management metrics">
+        <div class="metric-tile">
+            <span class="label">Risks</span>
+            <span class="val" data-role="metric-risks">{{ initial_metrics.risks }}</span>
+        </div>
+        <div class="metric-tile">
+            <span class="label">Mitigation Plans</span>
+            <span class="val" data-role="metric-mitigations">{{ initial_metrics.mitigation_plans }}</span>
+        </div>
+        <div class="metric-tile">
+            <span class="label">Risk Links</span>
+            <span class="val" data-role="metric-mappings">{{ initial_metrics.risk_mitigations }}</span>
+        </div>
+    </div>
+
     <div class="automation-grid data-management-grid">
         <section class="automation-panel data-card" data-entity="risks" data-section="risks" aria-labelledby="headline-risk" id="section-risks">
             <div class="panel-header">
@@ -41,12 +56,14 @@
                         <tr>
                             <th scope="col">Title</th>
                             <th scope="col">Description</th>
+                            <th scope="col">Created</th>
+                            <th scope="col">Updated</th>
                             <th scope="col">Actions</th>
                         </tr>
                     </thead>
                     <tbody data-role="risk-list">
                         <tr>
-                            <td colspan="3" class="empty">No risks captured yet. Create one to start the registry.</td>
+                            <td colspan="5" class="empty">No risks captured yet. Create one to start the registry.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -70,12 +87,14 @@
                         <tr>
                             <th scope="col">Title</th>
                             <th scope="col">Description</th>
+                            <th scope="col">Created</th>
+                            <th scope="col">Updated</th>
                             <th scope="col">Actions</th>
                         </tr>
                     </thead>
                     <tbody data-role="mitigation-list">
                         <tr>
-                            <td colspan="3" class="empty">Mitigation plans will appear here once added.</td>
+                            <td colspan="5" class="empty">Mitigation plans will appear here once added.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -101,12 +120,14 @@
                             <th scope="col">Risk</th>
                             <th scope="col">Mitigation Plan</th>
                             <th scope="col">Impact</th>
+                            <th scope="col">Linked</th>
+                            <th scope="col">Updated</th>
                             <th scope="col">Actions</th>
                         </tr>
                     </thead>
                     <tbody data-role="mapping-list">
                         <tr>
-                            <td colspan="5" class="empty">Create a link to see the mitigation matrix populate.</td>
+                            <td colspan="7" class="empty">Create a link to see the mitigation matrix populate.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -133,6 +154,16 @@
                         <textarea id="risk-description" name="description" rows="4" placeholder="Describe the risk factors, triggers, or conditions."></textarea>
                     </div>
                 </fieldset>
+                <div class="form-meta" data-role="risk-meta" hidden>
+                    <div class="form-meta__entry">
+                        <span class="form-meta__label">Created</span>
+                        <span class="form-meta__value"><time data-role="risk-created">—</time></span>
+                    </div>
+                    <div class="form-meta__entry">
+                        <span class="form-meta__label">Updated</span>
+                        <span class="form-meta__value"><time data-role="risk-updated">—</time></span>
+                    </div>
+                </div>
                 <div class="form-actions">
                     <button type="submit" class="btn-primary" data-role="risk-submit">Save</button>
                     <button type="button" class="btn-secondary" data-action="close-risk-modal">Close</button>
@@ -160,6 +191,16 @@
                         <textarea id="mitigation-description" name="description" rows="4" placeholder="Outline ownership, steps, and timelines."></textarea>
                     </div>
                 </fieldset>
+                <div class="form-meta" data-role="mitigation-meta" hidden>
+                    <div class="form-meta__entry">
+                        <span class="form-meta__label">Created</span>
+                        <span class="form-meta__value"><time data-role="mitigation-created">—</time></span>
+                    </div>
+                    <div class="form-meta__entry">
+                        <span class="form-meta__label">Updated</span>
+                        <span class="form-meta__value"><time data-role="mitigation-updated">—</time></span>
+                    </div>
+                </div>
                 <div class="form-actions">
                     <button type="submit" class="btn-primary" data-role="mitigation-submit">Save</button>
                     <button type="button" class="btn-secondary" data-action="close-mitigation-modal">Close</button>
@@ -191,6 +232,16 @@
                         <textarea id="mapping-impact" name="impact" rows="4" placeholder="Summarize the impact if the risk materializes."></textarea>
                     </div>
                 </fieldset>
+                <div class="form-meta" data-role="mapping-meta" hidden>
+                    <div class="form-meta__entry">
+                        <span class="form-meta__label">Linked</span>
+                        <span class="form-meta__value"><time data-role="mapping-created">—</time></span>
+                    </div>
+                    <div class="form-meta__entry">
+                        <span class="form-meta__label">Updated</span>
+                        <span class="form-meta__value"><time data-role="mapping-updated">—</time></span>
+                    </div>
+                </div>
                 <div class="form-actions">
                     <button type="submit" class="btn-primary" data-role="mapping-submit">Save</button>
                     <button type="button" class="btn-secondary" data-action="close-mapping-modal">Close</button>

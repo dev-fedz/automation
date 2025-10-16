@@ -81,9 +81,9 @@ class TestScenarioAdmin(admin.ModelAdmin):
 
 @admin.register(models.TestCase)
 class TestCaseAdmin(admin.ModelAdmin):
-    list_display = ("title", "scenario", "priority", "owner")
-    search_fields = ("title", "description", "scenario__title")
-    list_filter = ("scenario__plan", "priority")
+    list_display = ("testcase_id", "scenario", "related_api_request", "created_at")
+    search_fields = ("testcase_id", "description", "scenario__title", "related_api_request__name")
+    list_filter = ("scenario__plan", "scenario")
 
 
 @admin.register(models.Risk)

@@ -7,9 +7,9 @@ from typing import Any
 import base64
 import binascii
 import io
-import time
-
 import json
+import logging
+import time
 
 import requests
 
@@ -27,6 +27,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import models, selectors, serializers, services
+
+
+logger = logging.getLogger(__name__)
 
 
 class ApiEnvironmentViewSet(viewsets.ModelViewSet):
@@ -317,6 +320,14 @@ class TestCaseViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = selectors.test_case_list()
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(testcase_id__icontains=search)
+                | Q(description__icontains=search)
+                | Q(precondition__icontains=search)
+                | Q(requirements__icontains=search)
+            )
         scenario_id = self.request.query_params.get("scenario")
         if scenario_id:
             try:
@@ -668,6 +679,22 @@ class ApiAdhocRequestView(APIView):
                 resolved_json = services._resolve_variables(body, variables)  # type: ignore[attr-defined]
             else:
                 resolved_body = services._resolve_variables(str(body), variables)  # type: ignore[attr-defined]
+
+        signature_value = None
+        if isinstance(resolved_json, dict):
+            signature_value = resolved_json.get("signature")
+        elif isinstance(resolved_body, dict):
+            signature_value = resolved_body.get("signature")
+        elif isinstance(resolved_body, str):
+            try:
+                parsed_body = json.loads(resolved_body)
+                if isinstance(parsed_body, dict):
+                    signature_value = parsed_body.get("signature")
+            except (TypeError, ValueError):
+                pass
+
+        if signature_value not in (None, ""):
+            logger.info("API tester resolved signature: %s", signature_value)
 
         try:
             start = time.perf_counter()

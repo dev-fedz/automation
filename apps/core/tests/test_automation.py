@@ -169,20 +169,14 @@ class TestPlanWorkflowTests(APITestCase):
 
         case_payload = {
             "scenario": scenario_id,
-            "title": "Upgrade via API",
-            "steps": [
-                {"action": "Call subscription upgrade endpoint", "method": "POST"},
-                {"action": "Verify response payload"},
-            ],
+            "testcase_id": "TC-API-001",
+            "description": "Covers billing API upgrade flow",
+            "precondition": "User exists on basic tier.",
+            "requirements": "Ensure entitlement service propagates changes.",
             "expected_results": [
                 {"status_code": 200},
                 {"json": {"plan": "premium"}},
             ],
-            "dynamic_variables": {
-                "expected_status": 200,
-                "expected_plan": "premium",
-            },
-            "priority": "P1",
         }
         case_response = self.client.post(
             reverse("core:core-test-cases-list"),
@@ -220,7 +214,7 @@ class TestPlanWorkflowTests(APITestCase):
         self.assertEqual(len(detail_response.data["scenarios"]), 1)
         scenario_data = detail_response.data["scenarios"][0]
         self.assertEqual(len(scenario_data["cases"]), 1)
-        self.assertEqual(scenario_data["cases"][0]["dynamic_variables"]["expected_status"], 200)
+        self.assertEqual(scenario_data["cases"][0]["expected_results"][0]["status_code"], 200)
 
     def test_plan_can_attach_risk_mitigations(self) -> None:
         mapping = self._create_risk_mapping()

@@ -4,6 +4,21 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+# Install system dependencies for building Python packages
+RUN apk update && apk add --no-cache \
+    build-base \
+    postgresql-dev \
+    jpeg-dev \
+    zlib-dev \
+    libffi-dev \
+    openssl-dev \
+    cargo \
+    rust \
+    && rm -rf /var/cache/apk/*
+
+# Upgrade pip first
+RUN pip install --upgrade pip
+
 COPY requirements.txt /app
 RUN pip install -r requirements.txt
 

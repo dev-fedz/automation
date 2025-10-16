@@ -319,32 +319,38 @@ class ApiRunSerializer(serializers.ModelSerializer):
 
 
 class TestCaseSerializer(serializers.ModelSerializer):
-    steps = serializers.ListField(child=serializers.JSONField(), required=False)
+    title = serializers.CharField(source="testcase_id", read_only=True)
     expected_results = serializers.ListField(child=serializers.JSONField(), required=False)
-    dynamic_variables = serializers.DictField(child=serializers.JSONField(), required=False)
 
     class Meta:
         model = models.TestCase
         fields = [
             "id",
             "scenario",
+            "testcase_id",
             "title",
             "description",
-            "steps",
+            "precondition",
+            "requirements",
             "expected_results",
-            "dynamic_variables",
             "related_api_request",
-            "priority",
-            "owner",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at", "title"]
+        validators = [
+            serializers.UniqueTogetherValidator(
+                queryset=models.TestCase.objects.all(),
+                fields=["scenario", "testcase_id"],
+                message="Test case ID must be unique per scenario.",
+            )
+        ]
 
-    def validate_dynamic_variables(self, value: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(value, dict):
-            raise ValidationError({"dynamic_variables": "Dynamic variables must be an object."})
-        return value
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        testcase_id = attrs.get("testcase_id")
+        if testcase_id:
+            attrs["testcase_id"] = str(testcase_id).strip()
+        return attrs
 
 
 class TestScenarioSerializer(serializers.ModelSerializer):

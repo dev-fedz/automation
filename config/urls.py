@@ -80,6 +80,7 @@ urlpatterns = [
 	path('data-management/', app_views.automation_data_management, name='data-management'),
 	path('data-management/risks/', app_views.automation_data_management, {"section": "risks"}, name='data-management-risks'),
 	path('data-management/mitigation-plans/', app_views.automation_data_management, {"section": "mitigation"}, name='data-management-mitigation'),
+	path('data-management/risk-matrix/', app_views.automation_data_management, {"section": "matrix"}, name='data-management-matrix'),
 	path('automation/api-tester/', app_views.api_tester_page, name='api-tester'),
 	path('healthz/', healthz, name='healthz'),
 	path('healthz', healthz),  # fallback no slash

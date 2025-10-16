@@ -203,9 +203,37 @@ class ApiRunResult(TimeStampedModel):
         return f"Result {self.pk} ({self.status})"
 
 
+
+class TestTools(TimeStampedModel):
+    """Test Tool for test strategies."""
+    title = models.CharField(max_length=150)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["title", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.title
+
+
 class TestPlan(TimeStampedModel):
     """High-level plan describing the scope and approach for automation testing."""
 
+    class TestEnvironment(models.TextChoices):
+        TEST_ENVIRONMENT = "T", "Test Environment"
+        PRE_STAGING_ENVIRONMENT = "PS", "Pre Staging Environment"
+        STAGING_ENVIRONMENT = "S", "Staging Environment"
+        UAT_ENVIRONMENT = "UAT", "UAT Environment"
+        PRODUCTION_ENVIRONMENT = "P", "Production Environment"
+
+    test_environment = models.CharField(max_length=20, choices=TestEnvironment.choices, blank=True, null=True)
+    test_tools = models.ForeignKey(
+        TestTools,
+        on_delete=models.SET_NULL,
+        related_name="test_plans",
+        blank=True,
+        null=True,
+    )
     name = models.CharField(max_length=150, unique=True)
     objective = models.TextField()
     objectives = models.JSONField(default=list, blank=True)
@@ -227,6 +255,20 @@ class TestPlan(TimeStampedModel):
 
     def __str__(self) -> str:  # pragma: no cover
         return self.name
+
+class TestPlanObjectives(TimeStampedModel):
+    """Categorized objectives entries linked to a test plan."""
+
+    plan = models.ForeignKey(TestPlan, on_delete=models.CASCADE, related_name="objective_entries")
+    title = models.CharField(max_length=50)
+    description = models.TextField(blank=True)
+    goal = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["plan", "title", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.title}"
 
 
 class TestPlanScope(TimeStampedModel):
@@ -265,24 +307,6 @@ class TestPlanMaintenance(TimeStampedModel):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"{self.plan.name} v{self.version}"
-
-
-class TestScenario(TimeStampedModel):
-    """Concrete scenario derived from the test plan, grouping related test cases."""
-
-    plan = models.ForeignKey(TestPlan, on_delete=models.CASCADE, related_name="scenarios")
-    title = models.CharField(max_length=150)
-    description = models.TextField(blank=True)
-    preconditions = models.TextField(blank=True)
-    postconditions = models.TextField(blank=True)
-    tags = models.JSONField(default=list, blank=True)
-
-    class Meta:
-        ordering = ["plan", "title", "id"]
-        unique_together = ("plan", "title")
-
-    def __str__(self) -> str:  # pragma: no cover
-        return self.title
 
 
 class Risk(TimeStampedModel):
@@ -330,22 +354,125 @@ class RiskAndMitigationPlan(TimeStampedModel):
         return f"{self.risk} → {self.mitigation_plan}"
 
 
+class TestStrategy(TimeStampedModel):
+    """Test strategies that can address project risks."""
+
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["title", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.title
+    
+class VersionHistory(TimeStampedModel):
+    """Version history for test strategies."""
+
+    version = models.CharField(max_length=50)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="version_histories_authored",
+    )
+    description_of_change = models.TextField(blank=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="version_histories_approved",
+    )
+
+    class Meta:
+        ordering = ["version", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.version
+
+
+class TestDataAndAccounts(TimeStampedModel):
+    """Test Data and Accounts for test strategies."""
+
+    class AccountType(models.TextChoices):
+        IN_SCOPE = "in_scope", "In Scope"
+        OUT_SCOPE = "out_scope", "Out of Scope"
+
+    account_type = models.CharField(max_length=20, choices=AccountType.choices)
+    description = models.TextField(blank=True)
+    purpose = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["account_type", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.get_account_type_display()}"
+
+
+class TeamMember(TimeStampedModel):
+    """Team members involved in test strategies."""
+
+    class Role(models.TextChoices):
+        DEVELOPER = "developer", "Developer"
+        TESTER = "tester", "Tester"
+        MANAGER = "manager", "Manager"
+
+    name = models.CharField(max_length=255)
+    role = models.CharField(max_length=20, choices=Role.choices)
+
+    class Meta:
+        ordering = ["role", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.get_role_display()}"
+
+
+class TestModules(TimeStampedModel):
+    """Test Module for test strategies."""
+    title = models.CharField(max_length=150)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["title", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.title
+    
+
+class TestScenario(TimeStampedModel):
+    """Concrete scenario derived from the test plan, grouping related test cases."""
+
+    plan = models.ForeignKey(TestPlan, on_delete=models.CASCADE, related_name="scenarios")
+    title = models.CharField(max_length=150)
+    description = models.TextField(blank=True)
+    preconditions = models.TextField(blank=True)
+    postconditions = models.TextField(blank=True)
+    tags = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        ordering = ["plan", "title", "id"]
+        unique_together = ("plan", "title")
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.title
+    
+
 class TestCase(TimeStampedModel):
     """Executable test case with dynamic variables for API validation."""
 
     scenario = models.ForeignKey(TestScenario, on_delete=models.CASCADE, related_name="cases")
-    title = models.CharField(max_length=150)
+    testcase_id = models.CharField(max_length=50)
     description = models.TextField(blank=True)
-    steps = models.JSONField(default=list, blank=True)
+    precondition = models.TextField(blank=True)
+    requirements = models.TextField(blank=True)
     expected_results = models.JSONField(default=list, blank=True)
-    dynamic_variables = models.JSONField(default=dict, blank=True)
     related_api_request = models.ForeignKey(ApiRequest, on_delete=models.SET_NULL, null=True, blank=True, related_name="test_cases")
-    priority = models.CharField(max_length=20, blank=True)
-    owner = models.CharField(max_length=255, blank=True)
 
     class Meta:
-        ordering = ["scenario", "title", "id"]
-        unique_together = ("scenario", "title")
+        ordering = ["scenario", "testcase_id", "id"]
+        unique_together = ("scenario", "testcase_id")
 
     def __str__(self) -> str:  # pragma: no cover
-        return self.title
+        return self.testcase_id

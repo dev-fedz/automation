@@ -69,6 +69,74 @@
         return `${base}?${suffix}`;
     };
 
+    const parseDate = (value) => {
+        if (!value) {
+            return null;
+        }
+        const date = value instanceof Date ? value : new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return null;
+        }
+        return date;
+    };
+
+    const formatDateLabel = (value) => {
+        const date = parseDate(value);
+        if (!date) {
+            return null;
+        }
+        try {
+            return new Intl.DateTimeFormat(undefined, {
+                year: "numeric",
+                month: "short",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+            }).format(date);
+        } catch (error) {
+            return date.toLocaleString();
+        }
+    };
+
+    const renderTimestamp = (value) => {
+        const date = parseDate(value);
+        const label = formatDateLabel(value);
+        if (!date || !label) {
+            return "&mdash;";
+        }
+        return `<time datetime="${date.toISOString()}">${escapeHtml(label)}</time>`;
+    };
+
+    const setTimeElement = (node, value) => {
+        if (!node) {
+            return;
+        }
+        const date = parseDate(value);
+        const label = formatDateLabel(value);
+        if (!date || !label) {
+            node.textContent = "—";
+            node.removeAttribute("datetime");
+            return;
+        }
+        node.textContent = label;
+        node.setAttribute("datetime", date.toISOString());
+    };
+
+    const updateMetaBlock = (container, createdNode, updatedNode, source) => {
+        if (!container || !createdNode || !updatedNode) {
+            return;
+        }
+        if (!source) {
+            container.hidden = true;
+            setTimeElement(createdNode, null);
+            setTimeElement(updatedNode, null);
+            return;
+        }
+        setTimeElement(createdNode, source.created_at);
+        setTimeElement(updatedNode, source.updated_at);
+        container.hidden = false;
+    };
+
     const request = async (url, options = {}) => {
         const method = (options.method || "GET").toUpperCase();
         const headers = { ...(options.headers || {}) };
@@ -130,10 +198,10 @@
             }
         };
 
-    const initialRisks = readScriptJson("automation-initial-risks") || [];
-    const initialMitigations = readScriptJson("automation-initial-mitigation-plans") || [];
-    const initialMappings = readScriptJson("automation-initial-risk-mitigations") || [];
-    const initialSection = readScriptJson("data-management-initial-section") || "";
+        const initialRisks = readScriptJson("automation-initial-risks") || [];
+        const initialMitigations = readScriptJson("automation-initial-mitigation-plans") || [];
+        const initialMappings = readScriptJson("automation-initial-risk-mitigations") || [];
+        const initialSection = readScriptJson("data-management-initial-section") || "";
         const apiEndpoints = readScriptJson("automation-api-endpoints") || {};
 
         const endpoints = {
@@ -172,6 +240,18 @@
             mappingRiskSelect: root.querySelector('[data-role="mapping-risk-select"]'),
             mappingMitigationSelect: root.querySelector('[data-role="mapping-mitigation-select"]'),
             mappingImpact: document.getElementById("mapping-impact"),
+            metricsRisks: root.querySelector('[data-role="metric-risks"]'),
+            metricsMitigations: root.querySelector('[data-role="metric-mitigations"]'),
+            metricsMappings: root.querySelector('[data-role="metric-mappings"]'),
+            riskMeta: root.querySelector('[data-role="risk-meta"]'),
+            riskCreated: root.querySelector('[data-role="risk-created"]'),
+            riskUpdated: root.querySelector('[data-role="risk-updated"]'),
+            mitigationMeta: root.querySelector('[data-role="mitigation-meta"]'),
+            mitigationCreated: root.querySelector('[data-role="mitigation-created"]'),
+            mitigationUpdated: root.querySelector('[data-role="mitigation-updated"]'),
+            mappingMeta: root.querySelector('[data-role="mapping-meta"]'),
+            mappingCreated: root.querySelector('[data-role="mapping-created"]'),
+            mappingUpdated: root.querySelector('[data-role="mapping-updated"]'),
         };
 
         const body = document.body;
@@ -189,6 +269,18 @@
             riskSearch: "",
             mitigationSearch: "",
             mappingSearch: "",
+        };
+
+        const updateMetrics = () => {
+            if (els.metricsRisks) {
+                els.metricsRisks.textContent = String(state.risks.length);
+            }
+            if (els.metricsMitigations) {
+                els.metricsMitigations.textContent = String(state.mitigationPlans.length);
+            }
+            if (els.metricsMappings) {
+                els.metricsMappings.textContent = String(state.mappings.length);
+            }
         };
 
         const setStatus = (message, variant = "info") => {
@@ -232,17 +324,22 @@
                 return;
             }
             if (!state.risks.length) {
-                els.riskList.innerHTML = '<tr><td colspan="3" class="empty">No risks match the current filters.</td></tr>';
+                els.riskList.innerHTML = '<tr><td colspan="5" class="empty">No risks match the current filters.</td></tr>';
+                updateMetrics();
                 return;
             }
             const rows = state.risks
                 .map((risk) => {
                     const title = risk.title ? escapeHtml(risk.title) : "Untitled";
                     const description = risk.description ? escapeHtml(risk.description) : "&mdash;";
+                    const created = renderTimestamp(risk.created_at);
+                    const updated = renderTimestamp(risk.updated_at);
                     return `
                         <tr data-risk-id="${risk.id}">
                             <td data-label="Title">${title}</td>
                             <td data-label="Description">${description}</td>
+                            <td data-label="Created">${created}</td>
+                            <td data-label="Updated">${updated}</td>
                             <td data-label="Actions">
                                 <div class="table-action-group">
                                     <button type="button" class="action-button" data-action="view-risk" data-id="${risk.id}">View</button>
@@ -255,6 +352,7 @@
                 })
                 .join("");
             els.riskList.innerHTML = rows;
+            updateMetrics();
         };
 
         const renderMitigationPlans = () => {
@@ -262,17 +360,22 @@
                 return;
             }
             if (!state.mitigationPlans.length) {
-                els.mitigationList.innerHTML = '<tr><td colspan="3" class="empty">No mitigation plans match the current filters.</td></tr>';
+                els.mitigationList.innerHTML = '<tr><td colspan="5" class="empty">No mitigation plans match the current filters.</td></tr>';
+                updateMetrics();
                 return;
             }
             const rows = state.mitigationPlans
                 .map((plan) => {
                     const title = plan.title ? escapeHtml(plan.title) : "Untitled";
                     const description = plan.description ? escapeHtml(plan.description) : "&mdash;";
+                    const created = renderTimestamp(plan.created_at);
+                    const updated = renderTimestamp(plan.updated_at);
                     return `
                         <tr data-mitigation-id="${plan.id}">
                             <td data-label="Title">${title}</td>
                             <td data-label="Description">${description}</td>
+                            <td data-label="Created">${created}</td>
+                            <td data-label="Updated">${updated}</td>
                             <td data-label="Actions">
                                 <div class="table-action-group">
                                     <button type="button" class="action-button" data-action="view-mitigation" data-id="${plan.id}">View</button>
@@ -285,6 +388,7 @@
                 })
                 .join("");
             els.mitigationList.innerHTML = rows;
+            updateMetrics();
         };
 
         const renderMappings = () => {
@@ -292,7 +396,8 @@
                 return;
             }
             if (!state.mappings.length) {
-                els.mappingList.innerHTML = '<tr><td colspan="5" class="empty">No risk to mitigation links found for the current filters.</td></tr>';
+                els.mappingList.innerHTML = '<tr><td colspan="7" class="empty">No risk to mitigation links found for the current filters.</td></tr>';
+                updateMetrics();
                 return;
             }
             const rows = state.mappings
@@ -300,6 +405,8 @@
                     const riskTitle = mapping.risk_title ? escapeHtml(mapping.risk_title) : "Untitled";
                     const mitigationTitle = mapping.mitigation_plan_title ? escapeHtml(mapping.mitigation_plan_title) : "Untitled";
                     const impact = mapping.impact ? escapeHtml(mapping.impact) : "&mdash;";
+                    const created = renderTimestamp(mapping.created_at);
+                    const updated = renderTimestamp(mapping.updated_at);
                     return `
                         <tr data-mapping-id="${mapping.id}">
                             <td data-label="#">${index + 1}</td>
@@ -312,6 +419,8 @@
                                 ${mapping.mitigation_plan_description ? `<div class="table-secondary">${escapeHtml(mapping.mitigation_plan_description)}</div>` : ""}
                             </td>
                             <td data-label="Impact">${impact}</td>
+                            <td data-label="Linked">${created}</td>
+                            <td data-label="Updated">${updated}</td>
                             <td data-label="Actions">
                                 <div class="table-action-group">
                                     <button type="button" class="action-button" data-action="view-mapping" data-id="${mapping.id}">View</button>
@@ -324,6 +433,7 @@
                 })
                 .join("");
             els.mappingList.innerHTML = rows;
+            updateMetrics();
         };
 
         const closeModal = (modal) => {
@@ -355,6 +465,7 @@
             if (header) {
                 header.textContent = "New Risk";
             }
+            updateMetaBlock(els.riskMeta, els.riskCreated, els.riskUpdated, null);
         };
 
         const resetMitigationFormState = () => {
@@ -378,6 +489,7 @@
             if (header) {
                 header.textContent = "New Mitigation Plan";
             }
+            updateMetaBlock(els.mitigationMeta, els.mitigationCreated, els.mitigationUpdated, null);
         };
 
         const resetMappingFormState = () => {
@@ -403,6 +515,7 @@
             if (header) {
                 header.textContent = "Link Risk to Mitigation";
             }
+            updateMetaBlock(els.mappingMeta, els.mappingCreated, els.mappingUpdated, null);
         };
 
         const openRiskModal = (mode, risk = null) => {
@@ -445,6 +558,7 @@
                     header.textContent = "View Risk";
                 }
             }
+            updateMetaBlock(els.riskMeta, els.riskCreated, els.riskUpdated, risk && (mode === "edit" || mode === "view") ? risk : null);
             els.riskModal.hidden = false;
             body.classList.add("automation-modal-open");
             if (els.riskTitle && els.riskSubmit && !els.riskSubmit.hidden) {
@@ -494,6 +608,12 @@
                     header.textContent = "View Mitigation Plan";
                 }
             }
+            updateMetaBlock(
+                els.mitigationMeta,
+                els.mitigationCreated,
+                els.mitigationUpdated,
+                mitigation && (mode === "edit" || mode === "view") ? mitigation : null,
+            );
             els.mitigationModal.hidden = false;
             body.classList.add("automation-modal-open");
             if (els.mitigationTitle && els.mitigationSubmit && !els.mitigationSubmit.hidden) {
@@ -588,6 +708,12 @@
                     els.mappingImpact.value = "";
                 }
             }
+            updateMetaBlock(
+                els.mappingMeta,
+                els.mappingCreated,
+                els.mappingUpdated,
+                mapping && (mode === "edit" || mode === "view") ? mapping : null,
+            );
             els.mappingModal.hidden = false;
             body.classList.add("automation-modal-open");
             if (els.mappingRiskSelect && els.mappingSubmit && !els.mappingSubmit.hidden) {

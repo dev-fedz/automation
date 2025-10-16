@@ -33,6 +33,157 @@
         urlencoded: 'application/x-www-form-urlencoded; charset=UTF-8',
         binary: 'application/octet-stream',
     };
+    const VARIABLE_TEMPLATE_PATTERN = /{{\s*([\w\.-]+)\s*}}/g;
+    const GLOBAL_STORAGE_KEY = 'automation.apiTester.globals';
+
+    const normalizeVariableValue = (value) => {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        if (typeof value === 'string') {
+            return value;
+        }
+        if (typeof value === 'object') {
+            try {
+                return JSON.stringify(value);
+            } catch (error) {
+                return String(value);
+            }
+        }
+        return String(value);
+    };
+
+    const cloneVariableStore = (source) => {
+        if (!source || typeof source !== 'object') {
+            return {};
+        }
+        const result = {};
+        Object.entries(source).forEach(([key, value]) => {
+            if (!key) {
+                return;
+            }
+            result[key] = normalizeVariableValue(value);
+        });
+        return result;
+    };
+
+    const resolveTemplateWithLookups = (template, stores) => {
+        if (typeof template !== 'string') {
+            return template;
+        }
+        const lookupStores = Array.isArray(stores) ? stores : [];
+        return template.replace(VARIABLE_TEMPLATE_PATTERN, (match, key) => {
+            for (const store of lookupStores) {
+                if (store && Object.prototype.hasOwnProperty.call(store, key)) {
+                    const value = store[key];
+                    return value === undefined || value === null ? '' : String(value);
+                }
+            }
+            return match;
+        });
+    };
+
+    const clonePlainObject = (value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            return {};
+        }
+        return { ...value };
+    };
+
+    const resolveTemplatesDeep = (value, stores) => {
+        if (typeof value === 'string') {
+            return resolveTemplateWithLookups(value, stores);
+        }
+        if (Array.isArray(value)) {
+            return value.map((item) => resolveTemplatesDeep(item, stores));
+        }
+        if (value && typeof value === 'object' && value.constructor === Object) {
+            const result = {};
+            Object.entries(value).forEach(([key, nested]) => {
+                result[key] = resolveTemplatesDeep(nested, stores);
+            });
+            return result;
+        }
+        return value;
+    };
+
+    const loadStoredGlobals = () => {
+        try {
+            const raw = window.localStorage.getItem(GLOBAL_STORAGE_KEY);
+            if (!raw) {
+                return {};
+            }
+            const parsed = JSON.parse(raw);
+            return cloneVariableStore(parsed);
+        } catch (error) {
+            console.warn('Unable to load API tester globals from storage.', error);
+            return {};
+        }
+    };
+
+    const saveStoredGlobals = (globals) => {
+        try {
+            const payload = globals && typeof globals === 'object' ? globals : {};
+            window.localStorage.setItem(GLOBAL_STORAGE_KEY, JSON.stringify(payload));
+        } catch (error) {
+            console.warn('Unable to persist API tester globals.', error);
+        }
+    };
+
+    const createVariableScope = ({ store, onMutate } = {}) => {
+        const scopeStore = store || {};
+        const scope = {
+            get: (key) => {
+                if (!key) {
+                    return undefined;
+                }
+                return scopeStore[key];
+            },
+            set: (key, value) => {
+                if (!key) {
+                    return;
+                }
+                scopeStore[key] = normalizeVariableValue(value);
+                if (onMutate) {
+                    onMutate('set', key, scopeStore[key]);
+                }
+            },
+            unset: (key) => {
+                if (!key) {
+                    return;
+                }
+                if (Object.prototype.hasOwnProperty.call(scopeStore, key)) {
+                    delete scopeStore[key];
+                    if (onMutate) {
+                        onMutate('unset', key);
+                    }
+                }
+            },
+            has: (key) => Object.prototype.hasOwnProperty.call(scopeStore, key || ''),
+            clear: () => {
+                Object.keys(scopeStore).forEach((key) => {
+                    delete scopeStore[key];
+                });
+                if (onMutate) {
+                    onMutate('clear');
+                }
+            },
+        };
+        scope.replaceIn = (template) => resolveTemplateWithLookups(template, [scopeStore]);
+        scope.toObject = () => ({ ...scopeStore });
+        return scope;
+    };
+
+    const tryParseJsonSilent = (text) => {
+        if (typeof text !== 'string' || !text.trim()) {
+            return null;
+        }
+        try {
+            return JSON.parse(text);
+        } catch (error) {
+            return null;
+        }
+    };
 
     const escapeHtml = (value) => {
         if (value === null || value === undefined) {
@@ -195,6 +346,7 @@
             triggerStart: null,
             query: '',
         },
+        globalVariables: loadStoredGlobals(),
     };
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -215,7 +367,6 @@
             runButton: document.getElementById('run-request'),
             runCollectionButton: document.getElementById('run-collection'),
             saveRequestButton: document.getElementById('save-request'),
-            saveRequestModal: document.getElementById('save-request-modal'),
             saveRequestNameInput: document.getElementById('save-request-name'),
             saveRequestCancelButton: document.getElementById('save-request-cancel'),
             saveRequestConfirmButton: document.getElementById('save-request-confirm'),
@@ -225,8 +376,6 @@
             responseBody: document.getElementById('response-body'),
             responseAssertions: document.getElementById('response-assertions'),
             builderMeta: document.getElementById('builder-meta'),
-            form: document.getElementById('api-request-form'),
-            variableSuggest: null,
             tabButtons: Array.from(root.querySelectorAll('[data-tab]')),
             tabPanels: Array.from(root.querySelectorAll('[data-tab-panel]')),
             paramsBody: document.getElementById('params-rows'),
@@ -342,8 +491,8 @@
 
         const tabButtons = elements.tabButtons;
         const tabPanels = elements.tabPanels;
-    const scriptTabButtons = elements.scriptsTabButtons || [];
-    const scriptPanels = elements.scriptsPanels || [];
+        const scriptTabButtons = elements.scriptsTabButtons || [];
+        const scriptPanels = elements.scriptsPanels || [];
         const scriptEditorContainers = {
             pre: elements.scriptEditorPre,
             post: elements.scriptEditorPost,
@@ -757,7 +906,7 @@
                     editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF, () => {
                         const formatAction = editor.getAction('editor.action.formatDocument');
                         if (formatAction && typeof formatAction.run === 'function') {
-                            formatAction.run().catch(() => {});
+                            formatAction.run().catch(() => { });
                         }
                     });
 
@@ -940,7 +1089,7 @@
             if (rawEditor && typeof rawEditor.getAction === 'function') {
                 const formatAction = rawEditor.getAction('editor.action.formatDocument');
                 if (formatAction && typeof formatAction.run === 'function') {
-                    formatAction.run().catch(() => {});
+                    formatAction.run().catch(() => { });
                     handledByEditor = true;
                 }
             }
@@ -1260,6 +1409,7 @@
             }
 
             const requestLabel = `${request.method} ${request.name}`;
+            populateForm(collection, request || null);
             const environmentLabels = (collection.environments || []).map((env) => env.name).join(', ') || 'No linked environments';
             elements.builderMeta.textContent = `${collection.name} · ${requestLabel} · ${environmentLabels}`;
 
@@ -2579,8 +2729,8 @@
                     const isApplied = state.activeEnvironmentId === env.id;
                     const isEditingCurrent = Boolean(
                         state.environmentEditor &&
-                            !state.environmentEditor.isNew &&
-                            state.environmentEditor.environmentId === env.id,
+                        !state.environmentEditor.isNew &&
+                        state.environmentEditor.environmentId === env.id,
                     );
                     const nameSource = isEditingCurrent ? state.environmentEditor.form.name : env.name;
                     const rawName = typeof nameSource === 'string' ? nameSource : '';
@@ -4003,9 +4153,189 @@
             }
         };
 
+        const createScriptConsoleProxy = () => {
+            const buffer = [];
+            const proxy = {};
+            ['log', 'info', 'warn', 'error'].forEach((method) => {
+                proxy[method] = (...args) => {
+                    buffer.push({ level: method, args });
+                    if (typeof console[method] === 'function') {
+                        console[method](...args);
+                    } else {
+                        console.log(...args);
+                    }
+                };
+            });
+            return { proxy, buffer };
+        };
+
+        const runPreRequestScript = (scriptText, { environmentId = null, requestSnapshot }) => {
+            const trimmed = (scriptText || '').trim();
+            if (!trimmed) {
+                return { overrides: { ...state.globalVariables }, logs: [] };
+            }
+
+            const environmentInstance = environmentId !== null ? getEnvironmentById(environmentId) : null;
+            const baseEnvironmentStore = cloneVariableStore(environmentInstance?.variables);
+            const workingEnvironmentStore = { ...baseEnvironmentStore };
+            const localStore = {};
+            const lookups = [localStore, workingEnvironmentStore, state.globalVariables];
+
+            const attachReplaceIn = (scope) => {
+                scope.replaceIn = (template) => resolveTemplateWithLookups(template, lookups);
+                return scope;
+            };
+
+            const globalsScope = attachReplaceIn(
+                createVariableScope({
+                    store: state.globalVariables,
+                    onMutate: () => {
+                        saveStoredGlobals(state.globalVariables);
+                    },
+                }),
+            );
+
+            const environmentScope = attachReplaceIn(
+                createVariableScope({
+                    store: workingEnvironmentStore,
+                }),
+            );
+
+            const variablesScope = attachReplaceIn(
+                createVariableScope({
+                    store: localStore,
+                }),
+            );
+
+            const collectionScope = attachReplaceIn(createVariableScope({ store: {} }));
+
+            const { proxy: consoleProxy, buffer: consoleBuffer } = createScriptConsoleProxy();
+
+            const safeRequestSnapshot = {
+                method: requestSnapshot?.method || 'GET',
+                url: requestSnapshot?.url || '',
+                headers: { ...(requestSnapshot?.headers || {}) },
+                body: { ...(requestSnapshot?.body || {}) },
+            };
+
+            const pm = {
+                globals: globalsScope,
+                environment: environmentScope,
+                variables: variablesScope,
+                collectionVariables: collectionScope,
+                request: safeRequestSnapshot,
+                info: { eventName: 'prerequest' },
+                console: consoleProxy,
+                iterationData: {
+                    get: () => undefined,
+                    toObject: () => ({}),
+                },
+            };
+            const postman = pm;
+
+            try {
+                const scriptFunction = new Function('pm', 'postman', 'console', 'require', 'module', 'exports', 'process', 'global', 'window', 'document', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'XMLHttpRequest', 'fetch', 'FormData', 'Headers', 'Request', 'Response', 'btoa', 'atob', 'URLSearchParams', 'CryptoJS', `"use strict";\n${trimmed}`);
+                scriptFunction(
+                    pm,
+                    postman,
+                    consoleProxy,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    setTimeout,
+                    setInterval,
+                    clearTimeout,
+                    clearInterval,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    typeof btoa === 'function' ? btoa : undefined,
+                    typeof atob === 'function' ? atob : undefined,
+                    typeof URLSearchParams !== 'undefined' ? URLSearchParams : undefined,
+                    typeof window !== 'undefined' ? window.CryptoJS : undefined,
+                );
+            } catch (error) {
+                throw new Error(`Pre-request script error: ${error && error.message ? error.message : String(error)}`);
+            }
+
+            saveStoredGlobals(state.globalVariables);
+
+            if (environmentInstance) {
+                environmentInstance.variables = { ...workingEnvironmentStore };
+            }
+
+            const environmentOverrides = {};
+            const environmentKeys = new Set([
+                ...Object.keys(baseEnvironmentStore),
+                ...Object.keys(workingEnvironmentStore),
+            ]);
+            environmentKeys.forEach((key) => {
+                const nextValue = workingEnvironmentStore[key];
+                const prevValue = baseEnvironmentStore[key];
+                if (nextValue !== prevValue) {
+                    environmentOverrides[key] = nextValue === undefined ? '' : nextValue;
+                }
+            });
+
+            const overrides = {
+                ...state.globalVariables,
+                ...environmentOverrides,
+                ...localStore,
+            };
+            return {
+                overrides,
+                environmentVariables: { ...workingEnvironmentStore },
+                localVariables: { ...localStore },
+                logs: consoleBuffer,
+            };
+        };
+
         const buildPayloadFromBuilder = (collection, request) => {
             const headersPayload = rowsToObject(state.builder.headers);
             const paramsPayload = rowsToObject(state.builder.params);
+
+            const requestSnapshot = {
+                method: elements.method.value,
+                url: getTrimmedUrlValue(),
+                headers: { ...headersPayload },
+                body: {
+                    mode: state.builder.bodyMode,
+                    raw: state.builder.bodyMode === 'raw' ? getRawEditorValue() : '',
+                    rawType: state.builder.bodyRawType,
+                    json: state.builder.bodyMode === 'raw' && state.builder.bodyRawType === 'json'
+                        ? tryParseJsonSilent(getRawEditorValue())
+                        : null,
+                    formData: state.builder.bodyFormData.map((row) => ({
+                        key: row.key,
+                        value: row.value,
+                        type: row.type,
+                        fileName: row.fileName,
+                        fileType: row.fileType,
+                    })),
+                    urlencoded: rowsToObject(state.builder.bodyUrlEncoded),
+                },
+            };
+
+            const selectedEnvironmentId = normalizeEnvironmentId(elements.environmentSelect?.value ?? state.activeEnvironmentId);
+            const scriptResult = runPreRequestScript(state.builder.scripts.pre, {
+                environmentId: selectedEnvironmentId,
+                requestSnapshot,
+            });
+            const scriptOverrides = scriptResult?.overrides ? { ...scriptResult.overrides } : { ...state.globalVariables };
+            const activeStores = [
+                clonePlainObject(scriptResult?.localVariables),
+                clonePlainObject(scriptResult?.environmentVariables),
+                scriptOverrides,
+            ].filter((store) => store && Object.keys(store).length);
+            const resolveStringTemplate = (value) => (typeof value === 'string' ? resolveTemplateWithLookups(value, activeStores) : value);
+            const resolveJsonTemplate = (value) => resolveTemplatesDeep(value, activeStores);
 
             const payload = {
                 method: elements.method.value,
@@ -4016,6 +4346,10 @@
                 timeout: request?.timeout_ms ? request.timeout_ms / 1000 : 30,
             };
             payload.overrides = {};
+            if (scriptOverrides && Object.keys(scriptOverrides).length) {
+                payload.overrides = { ...scriptOverrides };
+            }
+            payload.url = resolveStringTemplate(payload.url);
 
             const authType = state.builder.auth.type;
             if (authType === 'basic') {
@@ -4034,16 +4368,24 @@
                 }
             }
 
+            payload.headers = Object.fromEntries(
+                Object.entries(headersPayload).map(([key, value]) => [key, resolveStringTemplate(value)]),
+            );
+            payload.params = Object.fromEntries(
+                Object.entries(paramsPayload).map(([key, value]) => [key, resolveStringTemplate(value)]),
+            );
+
             const { bodyMode, bodyRawType, bodyRawText, bodyFormData, bodyUrlEncoded, bodyBinary } = state.builder;
             if (bodyMode === 'raw') {
                 if (bodyRawType === 'json') {
                     try {
-                        payload.json = JSON.parse(bodyRawText || '{}');
+                        const parsedJson = JSON.parse(bodyRawText || '{}');
+                        payload.json = resolveJsonTemplate(parsedJson);
                     } catch (error) {
                         throw new Error('Raw body must be valid JSON.');
                     }
                 } else {
-                    payload.body = bodyRawText || '';
+                    payload.body = resolveStringTemplate(bodyRawText || '');
                 }
                 const recommended = RAW_TYPE_CONTENT_TYPES[bodyRawType];
                 if (recommended && !payload.headers['Content-Type']) {
@@ -4070,7 +4412,7 @@
                         return {
                             key,
                             type: 'text',
-                            value: row.value ?? '',
+                            value: resolveStringTemplate(row.value ?? ''),
                         };
                     })
                     .filter(Boolean);
@@ -4078,8 +4420,13 @@
                     payload.form_data = formEntries;
                 }
             } else if (bodyMode === 'urlencoded') {
-                const query = rowsToQueryString(bodyUrlEncoded);
-                payload.body = query;
+                const urlencodedObject = rowsToObject(bodyUrlEncoded);
+                const resolvedUrlencoded = Object.fromEntries(
+                    Object.entries(urlencodedObject).map(([key, value]) => [key, resolveStringTemplate(value)]),
+                );
+                payload.body = rowsToQueryString(
+                    Object.entries(resolvedUrlencoded).map(([key, value]) => ({ key, value })),
+                );
                 if (!payload.headers['Content-Type']) {
                     payload.headers['Content-Type'] = BODY_MODE_CONTENT_TYPES.urlencoded;
                 }
