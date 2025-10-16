@@ -46,7 +46,13 @@
         <header class="api-tester__builder-head">
             <div class="api-tester__builder-title-row">
                 <h2>Request Builder</h2>
-                <button type="button" id="create-request" class="btn btn-secondary" disabled>New Request</button>
+                <div class="api-tester__builder-actions">
+                    <label for="environment-select">Environment</label>
+                    <select id="environment-select" name="environment">
+                        <option value="">No environment</option>
+                    </select>
+                    <button type="button" id="create-request" class="btn btn-secondary" disabled>New Request</button>
+                </div>
             </div>
             <div class="builder-meta" id="builder-meta">Select a request to preview details.</div>
         </header>
@@ -81,16 +87,6 @@
                     </div>
                 </div>
             </div>
-
-            <div class="form-grid form-grid--meta">
-                <div class="form-field">
-                    <label for="environment-select">Environment</label>
-                    <select id="environment-select" name="environment">
-                        <option value="">No environment</option>
-                    </select>
-                </div>
-            </div>
-
         <nav class="builder-tabs" role="tablist" aria-label="Request builder sections">
         <button type="button"
             class="builder-tab is-active"
@@ -126,6 +122,13 @@
             aria-selected="false"
             aria-controls="builder-panel-body-tools"
             tabindex="-1">Body Tools</button>
+        <button type="button"
+            class="builder-tab"
+            data-tab="request"
+            role="tab"
+            aria-selected="false"
+            aria-controls="builder-panel-response"
+            tabindex="-1">Response</button>
         </nav>
 
         <section class="builder-section"
@@ -360,26 +363,34 @@
                 </div>
             </section>
         </form>
-        <div class="api-tester__response-card" aria-live="polite">
-            <header>
-                <h2>Response</h2>
-                <div id="response-summary" class="response-summary">No request executed yet.</div>
-            </header>
-            <div class="response-body">
-                <div class="response-section">
-                    <h3>Headers</h3>
-                    <pre id="response-headers" class="response-pre">{}</pre>
-                </div>
-                <div class="response-section">
-                    <h3>Body</h3>
-                    <pre id="response-body" class="response-pre">{}</pre>
-                </div>
-                <div class="response-section">
-                    <h3>Assertions</h3>
-                    <div id="response-assertions" class="assertions-list"></div>
+        <section class="builder-section"
+                 id="builder-panel-response"
+                 data-tab-panel="request"
+                 aria-labelledby="request-panel-heading"
+                 role="tabpanel"
+                 aria-hidden="true"
+                 hidden>
+            <h3 id="request-panel-heading" class="sr-only">Request Details</h3>
+            <div class="api-tester__response-card" aria-live="polite">
+                <header>
+                    <div id="response-summary" class="response-summary">No request executed yet.</div>
+                </header>
+                <div class="response-body">
+                    <div class="response-section">
+                        <h3>Headers</h3>
+                        <pre id="response-headers" class="response-pre">{}</pre>
+                    </div>
+                    <div class="response-section">
+                        <h3>Body</h3>
+                        <pre id="response-body" class="response-pre">{}</pre>
+                    </div>
+                    <div class="response-section">
+                        <h3>Assertions</h3>
+                        <div id="response-assertions" class="assertions-list"></div>
+                    </div>
                 </div>
             </div>
-        </div>
+        </section>
     </section>
 </div>
 
