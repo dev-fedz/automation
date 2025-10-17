@@ -566,6 +566,54 @@ def automation_data_management(request, section: str | None = None):
     return render(request, "core/automation_data_management.html", context)
 
 
+@login_required
+def automation_data_management_api_environment(request, section: str | None = None):
+    """Render API Environments focused data management page."""
+    data = _prepare_automation_data()
+    context = {
+        "initial_metrics": data["metrics"],
+        "initial_environments": data["environments"],
+        "initial_risks": data["risks"],
+        "initial_mitigation_plans": data["mitigation_plans"],
+        "initial_risk_mitigations": data["risk_mitigations"],
+        "api_endpoints": data["api_endpoints"],
+        "initial_section": section or "environments",
+    }
+    return render(request, "core/automation_data_management_api_environment.html", context)
+
+
+@login_required
+def automation_data_management_mitigation_plan(request, section: str | None = None):
+    """Render mitigation plan focused data management page."""
+    data = _prepare_automation_data()
+    context = {
+        "initial_metrics": data["metrics"],
+        "initial_environments": data["environments"],
+        "initial_risks": data["risks"],
+        "initial_mitigation_plans": data["mitigation_plans"],
+        "initial_risk_mitigations": data["risk_mitigations"],
+        "api_endpoints": data["api_endpoints"],
+        "initial_section": section or "mitigation",
+    }
+    return render(request, "core/automation_data_management_mitigation_plan.html", context)
+
+
+@login_required
+def automation_data_management_risk_registry(request, section: str | None = None):
+    data = _prepare_automation_data()
+    context = {
+        "initial_metrics": data["metrics"],
+        "initial_environments": data["environments"],
+        "initial_risks": data["risks"],
+        "initial_mitigation_plans": data["mitigation_plans"],
+        "initial_risk_mitigations": data["risk_mitigations"],
+        "api_endpoints": data["api_endpoints"],
+        "initial_section": section or "",
+    }
+    return render(request, "core/automation_data_management_risk_registry.html", context)
+
+
+
 class ApiAdhocRequestView(APIView):
     permission_classes = [IsAuthenticated]
 

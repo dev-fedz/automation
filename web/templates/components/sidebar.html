@@ -8,22 +8,27 @@
         </ul>
     </li>
     <li class="menu-item" data-menu="api-tester"><a href="{% url 'api-tester' %}" data-testid="menu-api-tester">API Tester</a></li>
+    <li class="has-submenu" data-menu="projects">
+        <a href="#" data-testid="menu-projects">Projects</a>
+        <ul class="submenu">
+            <li class="menu-item" data-menu="projects-test-plans"><a href="{% url 'automation-test-plans' %}" data-testid="menu-projects-plans">Test Plans</a></li>
+            <li class="menu-item" data-menu="projects-test-scenarios"><a href="{% url 'automation-test-scenarios' %}" data-testid="menu-projects-scenarios">Test Scenarios</a></li>
+            <li class="menu-item" data-menu="projects-test-cases"><a href="{% url 'automation-test-cases' %}" data-testid="menu-projects-cases">Test Case</a></li>
+            <li class="menu-item" data-menu="projects-test-plan-maintenance"><a href="{% url 'automation-test-plan-maintenance' %}" data-testid="menu-projects-maintenance">Test Plan Maintenance</a></li>
+        </ul>
+    </li>
     <li class="has-submenu" data-menu="automation">
         <a href="#" data-testid="menu-automation">Automation</a>
         <ul class="submenu">
             <li class="menu-item" data-menu="automation-overview"><a href="{% url 'automation-overview' %}" data-testid="menu-automation-overview">Overview</a></li>
-            <li class="menu-item" data-menu="automation-test-plans"><a href="{% url 'automation-test-plans' %}" data-testid="menu-automation-plans">Test Plans</a></li>
-            <li class="menu-item" data-menu="automation-test-scenarios"><a href="{% url 'automation-test-scenarios' %}" data-testid="menu-automation-scenarios">Test Scenarios</a></li>
-            <li class="menu-item" data-menu="automation-test-cases"><a href="{% url 'automation-test-cases' %}" data-testid="menu-automation-cases">Test Case</a></li>
-            <li class="menu-item" data-menu="automation-test-plan-maintenance"><a href="{% url 'automation-test-plan-maintenance' %}" data-testid="menu-automation-maintenance">Test Plan Maintenance</a></li>
         </ul>
     </li>
     <li class="has-submenu" data-menu="data-management">
         <a href="#" data-testid="menu-data-management">Data Management</a>
         <ul class="submenu">
+            <li class="menu-item" data-menu="data-management-environments"><a href="{% url 'data-management-environments' %}" data-testid="menu-data-environments">API Environment</a></li>
             <li class="menu-item" data-menu="data-management-risks"><a href="{% url 'data-management-risks' %}" data-testid="menu-data-risks">Risk Register</a></li>
             <li class="menu-item" data-menu="data-management-mitigation"><a href="{% url 'data-management-mitigation' %}" data-testid="menu-data-mitigation">Mitigation Plans</a></li>
-            <li class="menu-item" data-menu="data-management-matrix"><a href="{% url 'data-management' %}?section=matrix" data-testid="menu-data-matrix">Risk &amp; Mitigation Matrix</a></li>
         </ul>
     </li>
 
