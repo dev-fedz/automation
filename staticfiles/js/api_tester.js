@@ -612,6 +612,18 @@
             return `${base}reorder/`;
         };
 
+        const getRequestLastRunEndpoint = (requestId) => {
+            const base = getRequestsEndpointBase();
+            if (!base || requestId === null || requestId === undefined) {
+                return null;
+            }
+            const numericId = Number(requestId);
+            if (!Number.isFinite(numericId)) {
+                return null;
+            }
+            return `${base}${numericId}/last-run/`;
+        };
+
         const reorderDirectories = async ({ collectionId, parentId, orderedIds }) => {
             const endpoint = getDirectoryReorderEndpoint();
             if (!endpoint) {
@@ -652,6 +664,7 @@
         let suppressUrlSync = false;
         let rawEditor = null;
         let rawEditorResizeObserver = null;
+        let lastRunFetchCounter = 0;
         let jsonCompletionDisposable = null;
         let monacoLoaderPromise = null;
         let hasConfiguredJsonDiagnostics = false;
@@ -1619,6 +1632,8 @@
         };
 
         const populateForm = (collection, request) => {
+            lastRunFetchCounter += 1;
+            const populateToken = lastRunFetchCounter;
             persistActiveRequestDraft();
             resetBuilderState();
             if (!request) {
@@ -1694,6 +1709,7 @@
             }
 
             const cachedResponse = getCachedResponseFor(collection?.id ?? null, request.id);
+            const responseCacheKey = state.activeResponseKey;
 
             applyRequestDraft(collection?.id ?? null, request.id);
 
@@ -1705,6 +1721,45 @@
             applyParamsToUrl();
             updateRunButtonState();
             renderResponse(cachedResponse);
+
+            if (!cachedResponse && request.id) {
+                if (state.activeResponseKey === responseCacheKey && elements.responseSummary) {
+                    elements.responseSummary.textContent = 'Loading last run result...';
+                }
+                (async () => {
+                    try {
+                        const result = await fetchLastRunForRequest(request.id);
+                        if (populateToken !== lastRunFetchCounter) {
+                            return;
+                        }
+                        if (state.activeResponseKey !== responseCacheKey) {
+                            return;
+                        }
+                        if (result) {
+                            renderResponse(result);
+                            cacheActiveResponse(result, responseCacheKey);
+                        } else {
+                            renderResponse(null);
+                            cacheActiveResponse(null, responseCacheKey);
+                            if (elements.responseSummary) {
+                                elements.responseSummary.textContent = 'No previous run found.';
+                            }
+                        }
+                    } catch (error) {
+                        if (populateToken !== lastRunFetchCounter) {
+                            return;
+                        }
+                        if (state.activeResponseKey !== responseCacheKey) {
+                            return;
+                        }
+                        console.error('Failed to load last run result:', error);
+                        if (elements.responseSummary) {
+                            elements.responseSummary.textContent = 'Unable to load last run result.';
+                        }
+                        setStatus(error instanceof Error ? error.message : 'Failed to load last run result.', 'error');
+                    }
+                })();
+            }
         };
 
         const startNewRequestDraft = (collection, directoryId = null) => {
@@ -4720,6 +4775,79 @@
             }
         };
 
+        const isPlainRecord = (value) => Boolean(value && typeof value === 'object' && !Array.isArray(value));
+
+        const normalizeRunResultPayload = (payload) => {
+            if (!isPlainRecord(payload)) {
+                return null;
+            }
+
+            const headers = isPlainRecord(payload.response_headers) ? { ...payload.response_headers } : {};
+            const rawBody = typeof payload.response_body === 'string' ? payload.response_body : '';
+            const parsedJson = rawBody ? tryParseJsonSilent(rawBody) : null;
+            const runError = typeof payload.error === 'string' ? payload.error.trim() : '';
+
+            const assertions = [];
+            const appendAssertions = (items, passed) => {
+                if (!Array.isArray(items)) {
+                    return;
+                }
+                items.forEach((item) => {
+                    if (!isPlainRecord(item)) {
+                        return;
+                    }
+                    assertions.push({
+                        passed,
+                        type: item.type || '',
+                        expected: item.expected,
+                        actual: item.actual,
+                        message: item.message || '',
+                    });
+                });
+            };
+
+            appendAssertions(payload.assertions_passed, true);
+            appendAssertions(payload.assertions_failed, false);
+
+            const statusCode = payload.response_status;
+            const normalizedStatus = statusCode !== undefined && statusCode !== null ? statusCode : runError ? 'Error' : 'N/A';
+            const elapsedMs = typeof payload.response_time_ms === 'number' ? payload.response_time_ms : null;
+
+            return {
+                status_code: normalizedStatus,
+                headers,
+                body: rawBody || runError,
+                json: parsedJson,
+                elapsed_ms: elapsedMs,
+                environment: payload.environment_name || null,
+                run_id: payload.run_id ?? null,
+                run_result_id: payload.id ?? null,
+                assertions,
+            };
+        };
+
+        const fetchLastRunForRequest = async (requestId) => {
+            const endpoint = getRequestLastRunEndpoint(requestId);
+            if (!endpoint) {
+                throw new Error('Request endpoint unavailable.');
+            }
+            const response = await fetch(endpoint, {
+                headers: { Accept: 'application/json' },
+                credentials: 'include',
+            });
+            if (response.status === 404) {
+                return null;
+            }
+            if (!response.ok) {
+                throw new Error(`Failed to load last run (status ${response.status})`);
+            }
+            const data = await response.json().catch(() => null);
+            if (!data) {
+                return null;
+            }
+            return normalizeRunResultPayload(data);
+        };
+
         elements.responseBodyViewButtons.forEach((button) => {
             button.addEventListener('click', (event) => {
                 event.preventDefault();
@@ -4942,6 +5070,15 @@
                 payload.overrides = { ...scriptOverrides };
             }
             payload.url = resolveStringTemplate(payload.url);
+
+            if (collection?.id) {
+                payload.collection_id = collection.id;
+            } else if (state.selectedCollectionId) {
+                payload.collection_id = state.selectedCollectionId;
+            }
+            if (request?.id) {
+                payload.request_id = request.id;
+            }
 
             const authType = state.builder.auth.type;
             if (authType === 'basic') {
