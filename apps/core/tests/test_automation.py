@@ -318,3 +318,80 @@ class DataManagementTests(APITestCase):
             reverse("core:core-mitigation-plans-detail", kwargs={"pk": mitigation_id})
         )
         self.assertEqual(delete_mitigation_response.status_code, status.HTTP_204_NO_CONTENT)
+    @mock.patch("apps.core.views.requests.request")
+    def test_adhoc_execute_records_run(self, mock_request: mock.MagicMock) -> None:
+        mock_response = mock.Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.text = "{\"widgets\": []}"
+        mock_response.json.return_value = {"widgets": []}
+        mock_response.ok = True
+        mock_request.return_value = mock_response
+
+        url = reverse("core:core-request-execute")
+        payload = {
+            "method": "GET",
+            "url": "{{ base_url }}/widgets",
+            "headers": {"Accept": "application/json"},
+            "environment": self.environment.pk,
+            "params": {},
+            "overrides": {"base_url": "https://api.local"},
+            "collection_id": self.collection.pk,
+            "request_id": self.request.pk,
+        }
+
+        response = self.client.post(url, data=payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        run = models.ApiRun.objects.get()
+        self.assertEqual(run.collection, self.collection)
+        self.assertEqual(run.environment, self.environment)
+        self.assertEqual(run.triggered_by, self.user)
+        self.assertEqual(run.status, models.ApiRun.Status.PASSED)
+        self.assertEqual(run.summary, {"total_requests": 1, "passed_requests": 1, "failed_requests": 0})
+
+        result = run.results.get()
+        self.assertEqual(result.request, self.request)
+        self.assertEqual(result.status, models.ApiRunResult.Status.PASSED)
+        self.assertEqual(result.response_status, 200)
+        self.assertTrue(result.response_time_ms is not None)
+
+        self.assertEqual(response.data["run_id"], run.id)
+        self.assertEqual(response.data["run_result_id"], result.id)
+        mock_request.assert_called_once()
+
+    @mock.patch("apps.core.views.requests.request")
+    def test_adhoc_execute_records_run_without_collection(self, mock_request: mock.MagicMock) -> None:
+        mock_response = mock.Mock()
+        mock_response.status_code = 204
+        mock_response.headers = {}
+        mock_response.text = ""
+        mock_response.json.side_effect = ValueError()
+        mock_response.ok = True
+        mock_request.return_value = mock_response
+
+        url = reverse("core:core-request-execute")
+        payload = {
+            "method": "DELETE",
+            "url": "https://api.example.com/widgets/1",
+            "headers": {},
+        }
+
+        response = self.client.post(url, data=payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        run = models.ApiRun.objects.get()
+        self.assertIsNone(run.collection)
+        self.assertIsNone(run.environment)
+        self.assertEqual(run.triggered_by, self.user)
+        self.assertEqual(run.status, models.ApiRun.Status.PASSED)
+        self.assertEqual(run.summary, {"total_requests": 1, "passed_requests": 1, "failed_requests": 0})
+
+        result = run.results.get()
+        self.assertIsNone(result.request)
+        self.assertEqual(result.status, models.ApiRunResult.Status.PASSED)
+        self.assertEqual(result.response_status, 204)
+
+        self.assertEqual(response.data["run_id"], run.id)
+        self.assertEqual(response.data["run_result_id"], result.id)
+        mock_request.assert_called_once()
