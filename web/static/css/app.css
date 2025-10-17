@@ -522,6 +522,7 @@ body.auth-layout { background:#f5f7fb; min-height:100dvh; display:flex; justify-
 .builder-section__head h3 {margin:0;font-size:.95rem;letter-spacing:.04em;text-transform:uppercase;color:#6d4f16;}
 .builder-section__head--sub {padding:.35rem .4rem .2rem;border-radius:8px;background:#fff7da;margin:-.25rem -.2rem .35rem;}
 .builder-section__head--sub h4 {margin:0;font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:#775919;}
+.builder-body-tools__group {margin-top:1rem;}
 .btn-tertiary {background:#f4b400;border:none;border-radius:8px;padding:.45rem .95rem;font-weight:700;font-size:.75rem;text-transform:uppercase;color:#3b2a00;box-shadow:0 3px 8px -4px rgba(244,180,0,.55);cursor:pointer;}
 .btn-tertiary:hover {filter:brightness(1.05);}
 .kv-table {border:1px solid #f1e1b5;border-radius:10px;background:#fff;overflow:hidden;}
