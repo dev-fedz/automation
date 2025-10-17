@@ -128,6 +128,20 @@ class ApiRequestViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(collection_id=collection_id)
         return queryset
 
+    @action(detail=True, methods=["get"], url_path="last-run")
+    def last_run(self, request, pk=None):
+        api_request = self.get_object()
+        result = (
+            models.ApiRunResult.objects.filter(request=api_request)
+            .select_related("run__environment", "request")
+            .order_by("-created_at")
+            .first()
+        )
+        if result is None:
+            return Response(None, status=status.HTTP_200_OK)
+        serializer = serializers.ApiRunResultSerializer(result, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
     @action(detail=False, methods=["post"], url_path="reorder")
     def reorder(self, request):
         collection_id = request.data.get("collection")

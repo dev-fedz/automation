@@ -259,6 +259,8 @@ class ApiCollectionSerializer(serializers.ModelSerializer):
 
 class ApiRunResultSerializer(serializers.ModelSerializer):
     request_name = serializers.CharField(source="request.name", read_only=True)
+    run_id = serializers.IntegerField(read_only=True)
+    environment_name = serializers.SerializerMethodField()
 
     class Meta:
         model = models.ApiRunResult
@@ -275,6 +277,8 @@ class ApiRunResultSerializer(serializers.ModelSerializer):
             "assertions_passed",
             "assertions_failed",
             "error",
+            "run_id",
+            "environment_name",
             "created_at",
             "updated_at",
         ]
@@ -291,9 +295,17 @@ class ApiRunResultSerializer(serializers.ModelSerializer):
             "assertions_passed",
             "assertions_failed",
             "error",
+            "run_id",
+            "environment_name",
             "created_at",
             "updated_at",
         ]
+
+    def get_environment_name(self, obj):
+        run = getattr(obj, "run", None)
+        if run and getattr(run, "environment", None):
+            return run.environment.name
+        return None
 
 
 class ApiRunSerializer(serializers.ModelSerializer):
