@@ -29,6 +29,7 @@
         urlencoded: 'application/x-www-form-urlencoded; charset=UTF-8',
         binary: 'application/octet-stream',
     };
+    const VALID_BODY_MODES = new Set(['none', 'raw', 'form-data', 'urlencoded', 'binary']);
     const RESPONSE_BODY_VIEWS = ['json', 'xml', 'html'];
     const RESPONSE_BODY_MODES = ['pretty', 'preview'];
     const SIGNATURE_ALGORITHMS = [
@@ -461,6 +462,10 @@
             overridesIdSeed: 0,
             signaturesIdSeed: 0,
         },
+        requestDrafts: new Map(),
+        activeRequestDraftKey: null,
+        responseCache: new Map(),
+        activeResponseKey: null,
         activeEnvironmentId: null,
         collapsedCollections: new Set(),
         collapsedDirectoryKeys: new Set(),
@@ -1548,9 +1553,77 @@
             updateRunButtonState();
         };
 
+        const getRequestDraftKey = (collectionId, requestId) => {
+            if (collectionId === null || collectionId === undefined || requestId === null || requestId === undefined) {
+                return null;
+            }
+            return `${collectionId}:${requestId}`;
+        };
+
+        const getResponseCacheKey = (collectionId, requestId) => getRequestDraftKey(collectionId, requestId);
+
+        const buildRequestDraftSnapshot = () => ({
+            headers: cloneKeyValueRows(state.builder.headers),
+            bodyMode: state.builder.bodyMode,
+            bodyRawType: state.builder.bodyRawType,
+            bodyRawText: state.builder.bodyRawText,
+            bodyFormData: cloneBodyFormDataRows(state.builder.bodyFormData),
+            bodyUrlEncoded: cloneKeyValueRows(state.builder.bodyUrlEncoded),
+            bodyBinary: cloneBodyBinary(state.builder.bodyBinary),
+        });
+
+        const persistActiveRequestDraft = () => {
+            if (!state.activeRequestDraftKey) {
+                return;
+            }
+            state.requestDrafts.set(state.activeRequestDraftKey, buildRequestDraftSnapshot());
+        };
+
+        const applyRequestDraft = (collectionId, requestId) => {
+            const draftKey = getRequestDraftKey(collectionId, requestId);
+            if (!draftKey) {
+                return false;
+            }
+            const draft = state.requestDrafts.get(draftKey);
+            if (!draft) {
+                return false;
+            }
+            if (Array.isArray(draft.headers)) {
+                state.builder.headers = cloneKeyValueRows(draft.headers);
+                ensureHeadersRendered();
+            }
+            if (typeof draft.bodyMode === 'string') {
+                state.builder.bodyMode = VALID_BODY_MODES.has(draft.bodyMode) ? draft.bodyMode : 'none';
+            }
+            if (typeof draft.bodyRawType === 'string') {
+                const normalizedType = draft.bodyRawType.toLowerCase();
+                if (Object.prototype.hasOwnProperty.call(RAW_TYPE_CONTENT_TYPES, normalizedType)) {
+                    state.builder.bodyRawType = normalizedType;
+                }
+            }
+            if (typeof draft.bodyRawText === 'string') {
+                state.builder.bodyRawText = draft.bodyRawText;
+            }
+            if (Array.isArray(draft.bodyFormData)) {
+                state.builder.bodyFormData = cloneBodyFormDataRows(draft.bodyFormData);
+            }
+            if (Array.isArray(draft.bodyUrlEncoded)) {
+                state.builder.bodyUrlEncoded = cloneKeyValueRows(draft.bodyUrlEncoded);
+            }
+            if (draft.bodyBinary) {
+                state.builder.bodyBinary = cloneBodyBinary(draft.bodyBinary);
+            } else {
+                state.builder.bodyBinary = null;
+            }
+            return true;
+        };
+
         const populateForm = (collection, request) => {
+            persistActiveRequestDraft();
             resetBuilderState();
             if (!request) {
+                state.activeRequestDraftKey = null;
+                state.activeResponseKey = null;
                 setUrlValue('', true);
                 elements.method.value = 'GET';
                 if (elements.runCollectionButton) {
@@ -1559,6 +1632,7 @@
                 elements.builderMeta.textContent = 'Select a request to preview details.';
                 state.builder.params = [];
                 renderBuilder();
+                renderResponse(null);
                 return;
             }
 
@@ -1568,6 +1642,9 @@
             mergeObjectIntoRows(state.builder.params, request.query_params || {}, true);
             state.builder.headers = objectToRows(request.headers || {});
             ensureHeadersRendered();
+
+            const draftKey = getRequestDraftKey(collection?.id ?? null, request.id);
+            state.activeRequestDraftKey = draftKey;
 
             const bodyType = (request.body_type || 'none').toLowerCase();
             const normalizeRawType = (rawType) => {
@@ -1616,6 +1693,10 @@
                 elements.runCollectionButton.disabled = false;
             }
 
+            const cachedResponse = getCachedResponseFor(collection?.id ?? null, request.id);
+
+            applyRequestDraft(collection?.id ?? null, request.id);
+
             const requestLabel = `${request.method} ${request.name}`;
             const environmentLabels = (collection.environments || []).map((env) => env.name).join(', ') || 'No linked environments';
             elements.builderMeta.textContent = `${collection.name} · ${requestLabel} · ${environmentLabels}`;
@@ -1623,6 +1704,7 @@
             renderBuilder();
             applyParamsToUrl();
             updateRunButtonState();
+            renderResponse(cachedResponse);
         };
 
         const startNewRequestDraft = (collection, directoryId = null) => {
@@ -1708,6 +1790,33 @@
             }));
         };
 
+        const cloneBodyFormDataRows = (rows) => {
+            if (!Array.isArray(rows)) {
+                return [];
+            }
+            return rows.map((row) => ({
+                key: row?.key ? String(row.key) : '',
+                value: row?.value === undefined || row?.value === null ? '' : String(row.value),
+                type: row?.type === 'file' ? 'file' : 'text',
+                fileName: row?.fileName || row?.filename || '',
+                fileType: row?.fileType || row?.content_type || '',
+                fileSize: Number.isFinite(row?.fileSize) ? row.fileSize : Number.isFinite(row?.size) ? row.size : null,
+                fileData: row?.fileData || row?.data || null,
+            }));
+        };
+
+        const cloneBodyBinary = (binary) => {
+            if (!binary || typeof binary !== 'object') {
+                return null;
+            }
+            return {
+                name: binary.name || '',
+                size: Number.isFinite(binary.size) ? binary.size : null,
+                type: binary.type || '',
+                dataUrl: typeof binary.dataUrl === 'string' ? binary.dataUrl : null,
+            };
+        };
+
         const rowsToObjectTrimmed = (rows) => {
             const payload = {};
             if (!Array.isArray(rows)) {
@@ -1721,6 +1830,15 @@
                 payload[key] = row?.value === undefined || row?.value === null ? '' : String(row.value);
             });
             return payload;
+        };
+
+        const getCachedResponseFor = (collectionId, requestId) => {
+            const cacheKey = getResponseCacheKey(collectionId, requestId);
+            state.activeResponseKey = cacheKey;
+            if (!cacheKey) {
+                return null;
+            }
+            return state.responseCache.get(cacheKey) || null;
         };
 
         const activateCollection = (collection, { request = null, preserveExistingRequest = true } = {}) => {
@@ -4196,6 +4314,32 @@
                 state.directoryMaps.set(collection.id, directoryMap);
             });
 
+            const validDraftKeys = new Set();
+            state.collections.forEach((collection) => {
+                (collection.requests || []).forEach((request) => {
+                    const draftKey = getRequestDraftKey(collection.id, request.id);
+                    if (draftKey) {
+                        validDraftKeys.add(draftKey);
+                    }
+                });
+            });
+            for (const key of state.requestDrafts.keys()) {
+                if (!validDraftKeys.has(key)) {
+                    state.requestDrafts.delete(key);
+                }
+            }
+            for (const key of state.responseCache.keys()) {
+                if (!validDraftKeys.has(key)) {
+                    state.responseCache.delete(key);
+                }
+            }
+            if (state.activeRequestDraftKey && !validDraftKeys.has(state.activeRequestDraftKey)) {
+                state.activeRequestDraftKey = null;
+            }
+            if (state.activeResponseKey && !validDraftKeys.has(state.activeResponseKey)) {
+                state.activeResponseKey = null;
+            }
+
             if (state.openRequestMenuKey) {
                 const parts = state.openRequestMenuKey.split(':');
                 const collectionId = Number(parts[0]);
@@ -4565,6 +4709,17 @@
             }
         };
 
+        const cacheActiveResponse = (payload, cacheKey = state.activeResponseKey) => {
+            if (!cacheKey) {
+                return;
+            }
+            if (payload) {
+                state.responseCache.set(cacheKey, payload);
+            } else {
+                state.responseCache.delete(cacheKey);
+            }
+        };
+
         elements.responseBodyViewButtons.forEach((button) => {
             button.addEventListener('click', (event) => {
                 event.preventDefault();
@@ -4905,6 +5060,9 @@
             const collection = state.collections.find((item) => item.id === state.selectedCollectionId) || null;
             const request = collection?.requests?.find((item) => item.id === state.selectedRequestId) || null;
 
+            const responseCacheKey = getResponseCacheKey(collection?.id ?? null, request?.id ?? null);
+            state.activeResponseKey = responseCacheKey;
+
             if (!hasRunnableUrl()) {
                 setStatus('Enter a request URL before sending.', 'error');
                 updateRunButtonState();
@@ -4923,6 +5081,7 @@
             }
 
             setStatus('Sending request...', 'loading');
+            activateTab('request');
             isRequestInFlight = true;
             updateRunButtonState();
 
@@ -4942,14 +5101,26 @@
                 if (!response.ok) {
                     const message = data?.error || 'Request failed.';
                     setStatus(message, 'error');
-                    renderResponse(null);
+                    const isActive = state.activeResponseKey === responseCacheKey;
+                    if (isActive) {
+                        renderResponse(null);
+                    }
+                    cacheActiveResponse(null, responseCacheKey);
                 } else {
                     setStatus('Request completed successfully.', 'success');
-                    renderResponse(data);
+                    const isActive = state.activeResponseKey === responseCacheKey;
+                    if (isActive) {
+                        renderResponse(data);
+                    }
+                    cacheActiveResponse(data, responseCacheKey);
                 }
             } catch (error) {
                 setStatus(error instanceof Error ? error.message : 'Unexpected error during request.', 'error');
-                renderResponse(null);
+                const isActive = state.activeResponseKey === responseCacheKey;
+                if (isActive) {
+                    renderResponse(null);
+                }
+                cacheActiveResponse(null, responseCacheKey);
             } finally {
                 isRequestInFlight = false;
                 updateRunButtonState();
