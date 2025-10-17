@@ -1,0 +1,162 @@
+{% extends "base/base.html" %}
+{% load static %}
+
+{% block title %}Automation Workspace{% endblock %}
+
+{% block head_css %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'css/automation.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="automation-dashboard" id="automation-overview">
+    <header class="automation-header">
+        <div class="automation-heading">
+            <h1>Automation Workspace</h1>
+            <p>Stay on top of key automation signals without drilling into individual STLC modules.</p>
+        </div>
+    </header>
+
+    <section class="automation-metrics" aria-label="Automation metrics">
+        <article class="automation-metric">
+            <span class="metric-label">Test Plans</span>
+            <strong class="metric-value" data-count-target="{{ initial_metrics.plans }}">{{ initial_metrics.plans }}</strong>
+        </article>
+        <article class="automation-metric">
+            <span class="metric-label">Scenarios</span>
+            <strong class="metric-value" data-count-target="{{ initial_metrics.scenarios }}">{{ initial_metrics.scenarios }}</strong>
+        </article>
+        <article class="automation-metric">
+            <span class="metric-label">Test Cases</span>
+            <strong class="metric-value" data-count-target="{{ initial_metrics.cases }}">{{ initial_metrics.cases }}</strong>
+        </article>
+        <article class="automation-metric">
+            <span class="metric-label">Collections</span>
+            <strong class="metric-value" data-count-target="{{ initial_metrics.collections }}">{{ initial_metrics.collections }}</strong>
+        </article>
+        <article class="automation-metric">
+            <span class="metric-label">Runs</span>
+            <strong class="metric-value" data-count-target="{{ initial_metrics.runs }}">{{ initial_metrics.runs }}</strong>
+        </article>
+        <article class="automation-metric">
+            <span class="metric-label">Environments</span>
+            <strong class="metric-value" data-count-target="{{ initial_metrics.environments }}">{{ initial_metrics.environments }}</strong>
+        </article>
+    </section>
+
+    <section class="automation-panel wide" data-panel="runs" aria-labelledby="headline-runs">
+        <div class="panel-header">
+            <h2 id="headline-runs">Recent Automation Runs</h2>
+            <p class="panel-meta">Last 5 executions across API collections.</p>
+        </div>
+        <div class="automation-controls" data-role="run-filters" aria-label="Filter runs by status">
+            <span class="control-label">Status:</span>
+            <div class="control-group">
+                <button type="button" class="control-chip is-active" data-filter-status="all">All</button>
+                <button type="button" class="control-chip" data-filter-status="passed">Passed</button>
+                <button type="button" class="control-chip" data-filter-status="failed">Failed</button>
+                <button type="button" class="control-chip" data-filter-status="running">Running</button>
+                <button type="button" class="control-chip" data-filter-status="queued">Queued</button>
+            </div>
+        </div>
+        <div class="table-scroll">
+            <table class="automation-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Run</th>
+                        <th scope="col">Collection</th>
+                        <th scope="col">Environment</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Summary</th>
+                        <th scope="col">Finished</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if recent_runs %}
+                        {% for run in recent_runs %}
+                            <tr data-run-id="{{ run.id }}" data-run-status="{{ run.status }}" data-run-status-label="{{ run.get_status_display }}" data-run-collection="{{ run.collection.name }}" data-run-environment="{{ run.environment.name|default:"—" }}" data-run-total-requests="{{ run.summary.total_requests|default:0 }}" data-run-passed="{{ run.summary.passed|default:0 }}" data-run-failed="{{ run.summary.failed|default:0 }}" data-run-finished="{% if run.finished_at %}{{ run.finished_at|date:'c' }}{% else %}—{% endif %}" data-run-finished-label="{% if run.finished_at %}{{ run.finished_at|date:'Y-m-d H:i' }}{% else %}—{% endif %}" tabindex="0">
+                                <td>#{{ run.id }}</td>
+                                <td>{{ run.collection.name }}</td>
+                                <td>{{ run.environment.name|default:"—" }}</td>
+                                <td><span class="status-chip status-{{ run.status }}">{{ run.get_status_display }}</span></td>
+                                <td>
+                                    {% if run.summary.total_requests %}
+                                        {{ run.summary.total_requests }} req · {{ run.summary.passed|default:0 }} passed
+                                    {% else %}
+                                        —
+                                    {% endif %}
+                                </td>
+                                <td>{% if run.finished_at %}{{ run.finished_at|date:"Y-m-d H:i" }}{% else %}—{% endif %}</td>
+                            </tr>
+                        {% endfor %}
+                        <tr class="empty" data-role="no-filter-results" hidden>
+                            <td colspan="6">No runs match the selected filter.</td>
+                        </tr>
+                    {% else %}
+                        <tr data-role="no-runs"><td colspan="6" class="empty">No runs recorded yet.</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+        <div class="automation-run-detail" data-role="run-detail" hidden>
+            <header class="run-detail-header">
+                <div>
+                    <h3 data-role="detail-title">Run details</h3>
+                    <p data-role="detail-subtitle">Select a run above to view more context.</p>
+                </div>
+                <span class="status-chip" data-role="detail-status"></span>
+            </header>
+            <div class="run-detail-body">
+                <div class="run-detail-stat">
+                    <span class="run-detail-label">Collection</span>
+                    <span class="run-detail-value" data-role="detail-collection">—</span>
+                </div>
+                <div class="run-detail-stat">
+                    <span class="run-detail-label">Environment</span>
+                    <span class="run-detail-value" data-role="detail-environment">—</span>
+                </div>
+                <div class="run-detail-grid">
+                    <div class="run-detail-stat">
+                        <span class="run-detail-label">Total Requests</span>
+                        <span class="run-detail-value" data-role="detail-total">0</span>
+                    </div>
+                    <div class="run-detail-stat">
+                        <span class="run-detail-label">Passed</span>
+                        <span class="run-detail-value" data-role="detail-passed">0</span>
+                    </div>
+                    <div class="run-detail-stat">
+                        <span class="run-detail-label">Failed</span>
+                        <span class="run-detail-value" data-role="detail-failed">0</span>
+                    </div>
+                    <div class="run-detail-stat">
+                        <span class="run-detail-label">Finished</span>
+                        <span class="run-detail-value" data-role="detail-finished">—</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="automation-panel" data-panel="collections" aria-labelledby="headline-collections">
+        <div class="panel-header">
+            <h2 id="headline-collections">Highlighted Collections</h2>
+            <p class="panel-meta">Collections linked to automated test suites.</p>
+        </div>
+        <ul class="collection-list">
+            {% for collection in highlighted_collections %}
+                <li>
+                    <strong>{{ collection.name }}</strong>
+                    {% if collection.description %}<span>{{ collection.description|truncatewords:16 }}</span>{% endif %}
+                </li>
+            {% empty %}
+                <li class="empty">No collections available.</li>
+            {% endfor %}
+        </ul>
+    </section>
+</div>
+{% endblock %}
+
+{% block body_js %}
+    {{ block.super }}
+    <script src="{% static 'js/automation_overview.js' %}"></script>
+{% endblock %}

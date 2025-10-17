@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import time
 from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Tuple
-
-import json
 
 import requests
 from django.db import transaction
@@ -31,6 +31,121 @@ def _resolve_variables(value: Any, variables: Dict[str, Any]) -> Any:
     if isinstance(value, list):
         return [_resolve_variables(item, variables) for item in value]
     return value
+
+
+def _split_path(path: str) -> list[str]:
+    return [segment.strip() for segment in (path or "").split(".") if segment and segment.strip()]
+
+
+def _get_nested_value(data: Any, path: str) -> Any:
+    segments = _split_path(path)
+    current = data
+    for segment in segments:
+        if isinstance(current, dict):
+            current = current.get(segment)
+        else:
+            return None
+    return current
+
+
+def _ensure_nested_dict(data: dict[str, Any], path: list[str]) -> dict[str, Any]:
+    current = data
+    for segment in path:
+        if segment not in current or not isinstance(current[segment], dict):
+            current[segment] = {}
+        current = current[segment]
+    return current
+
+
+def _set_nested_value(data: dict[str, Any], path: str, value: Any) -> None:
+    segments = _split_path(path)
+    if not segments:
+        return
+    *parents, leaf = segments
+    target = _ensure_nested_dict(data, parents)
+    target[leaf] = value
+
+
+def _compute_hash_hex(algorithm: str, message: str) -> str:
+    normalized = (algorithm or "sha512").lower()
+    hash_functions = {
+        "sha256": hashlib.sha256,
+        "sha384": hashlib.sha384,
+        "sha512": hashlib.sha512,
+    }
+    func = hash_functions.get(normalized)
+    if func is None:
+        raise ValueError(f"Unsupported hash algorithm: {algorithm}")
+    return func(message.encode("utf-8")).hexdigest()
+
+
+def _parse_signature_components(raw_text: str) -> list[dict[str, str]]:
+    lines = [line.strip() for line in (raw_text or "").splitlines() if line.strip()]
+    components: list[dict[str, str]] = []
+    for entry in lines:
+        if entry.startswith("literal:"):
+            components.append({"type": "literal", "value": entry[len("literal:"):]})
+        elif entry.startswith("path:"):
+            components.append({"type": "path", "value": entry[len("path:"):]})
+        elif (entry.startswith('"') and entry.endswith('"')) or (entry.startswith("'") and entry.endswith("'")):
+            components.append({"type": "literal", "value": entry[1:-1]})
+        else:
+            components.append({"type": "path", "value": entry})
+    return components
+
+
+def _apply_body_transforms(
+    json_payload: Any,
+    transforms: Dict[str, Any] | None,
+    variables: Dict[str, Any],
+) -> Dict[str, str]:
+    if not isinstance(json_payload, dict):
+        return {}
+    overrides: Dict[str, str] = {}
+    config = transforms or {}
+
+    for override in config.get("overrides", []) or []:
+        path = str(override.get("path", "")).strip()
+        if not path:
+            continue
+        raw_value = override.get("value", "")
+        resolved_value = _resolve_variables(str(raw_value), variables)
+        _set_nested_value(json_payload, path, resolved_value)
+
+    for signature in config.get("signatures", []) or []:
+        target_path = (
+            signature.get("target_path")
+            or signature.get("targetPath")
+            or signature.get("target")
+            or ""
+        )
+        target_path = str(target_path).strip()
+        if not target_path:
+            continue
+        algorithm = str(signature.get("algorithm", "sha512")).lower()
+        components = _parse_signature_components(str(signature.get("components", "")))
+        if not components:
+            continue
+        parts: list[str] = []
+        for component in components:
+            if component.get("type") == "literal":
+                literal_raw = component.get("value", "")
+                parts.append(_resolve_variables(str(literal_raw), variables))
+            else:
+                value = _get_nested_value(json_payload, component.get("value", ""))
+                parts.append("" if value is None else str(value))
+        try:
+            signature_value = _compute_hash_hex(algorithm, "".join(parts))
+        except ValueError as error:  # pragma: no cover - configuration error path
+            raise ValueError(f"Unable to compute signature for '{target_path}': {error}") from error
+        _set_nested_value(json_payload, target_path, signature_value)
+        store_name = signature.get("store_as") or signature.get("storeAs")
+        if store_name:
+            normalized = str(store_name).strip()
+            if normalized:
+                overrides[normalized] = signature_value
+                variables[normalized] = signature_value
+    return overrides
 
 
 def _extract_json_path(data: Any, path: str) -> Any:
@@ -153,6 +268,8 @@ def _build_request_payload(
 
     if api_request.body_type == models.ApiRequest.BodyTypes.JSON:
         json_payload = _resolve_variables(deepcopy(api_request.body_json), variables)
+        if isinstance(json_payload, dict):
+            _apply_body_transforms(json_payload, api_request.body_transforms, variables)
     elif api_request.body_type == models.ApiRequest.BodyTypes.FORM:
         data = _resolve_variables(deepcopy(api_request.body_form), variables)
     elif api_request.body_type == models.ApiRequest.BodyTypes.RAW:
@@ -393,13 +510,18 @@ def run_collection(
 
     for order, api_request in enumerate(collection.requests.all(), start=1):
         total_requests += 1
-        payload = _build_request_payload(api_request, variables, environment)
         result = models.ApiRunResult.objects.create(
             run=run,
             request=api_request,
             order=order,
             status=models.ApiRunResult.Status.ERROR,
         )
+        try:
+            payload = _build_request_payload(api_request, variables, environment)
+        except ValueError as exc:
+            result.error = str(exc)
+            result.save(update_fields=["error", "updated_at"])
+            continue
         try:
             start = time.perf_counter()
             response = requests.request(

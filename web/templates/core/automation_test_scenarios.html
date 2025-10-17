@@ -1,0 +1,146 @@
+{% extends "base/base.html" %}
+{% load static %}
+
+{% block title %}Automation · Test Scenarios{% endblock %}
+
+{% block head_css %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'css/automation.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="automation-dashboard" id="automation-app">
+    <header class="automation-header">
+        <div class="automation-heading">
+            <h1>Test Scenarios</h1>
+            <p>Outline end-to-end flows that each automation cycle must validate. Select a plan to manage its scenarios.</p>
+        </div>
+        <div class="automation-status" data-role="status" aria-live="polite" hidden></div>
+    </header>
+
+    <section class="automation-metrics" aria-label="Automation metrics">
+        <article class="automation-metric" data-metric-key="plans">
+            <span class="metric-label">Test Plans</span>
+            <strong class="metric-value">{{ initial_metrics.plans }}</strong>
+        </article>
+        <article class="automation-metric" data-metric-key="scenarios">
+            <span class="metric-label">Scenarios</span>
+            <strong class="metric-value">{{ initial_metrics.scenarios }}</strong>
+        </article>
+        <article class="automation-metric" data-metric-key="cases">
+            <span class="metric-label">Test Cases</span>
+            <strong class="metric-value">{{ initial_metrics.cases }}</strong>
+        </article>
+        <article class="automation-metric" data-metric-key="collections">
+            <span class="metric-label">Collections</span>
+            <strong class="metric-value">{{ initial_metrics.collections }}</strong>
+        </article>
+        <article class="automation-metric" data-metric-key="runs">
+            <span class="metric-label">Runs</span>
+            <strong class="metric-value">{{ initial_metrics.runs }}</strong>
+        </article>
+        <article class="automation-metric" data-metric-key="environments">
+            <span class="metric-label">Environments</span>
+            <strong class="metric-value">{{ initial_metrics.environments }}</strong>
+        </article>
+    </section>
+
+    <div class="automation-grid">
+        <section class="automation-panel" data-panel="plans" aria-labelledby="headline-plans">
+            <div class="panel-header">
+                <h2 id="headline-plans">Select Plan</h2>
+                <button type="button" class="automation-refresh" data-action="refresh-plans">Refresh</button>
+            </div>
+            <div class="automation-list" data-role="plan-list" aria-live="polite">
+                {% if initial_plans %}
+                    <ul class="automation-items">
+                        {% for plan in initial_plans %}
+                            <li class="automation-item{% if initial_selected_plan and plan.id == initial_selected_plan.id %} is-active{% endif %}">
+                                <strong>{{ plan.name|default:"Untitled plan" }}</strong>
+                                <span>{{ plan.scenarios|length }} scenario{% if plan.scenarios|length != 1 %}s{% endif %}</span>
+                                {% if plan.objective %}<small>{{ plan.objective }}</small>{% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="empty">No plans available. Create one from the Test Plans module first.</p>
+                {% endif %}
+            </div>
+        </section>
+
+        <section class="automation-panel" data-panel="scenarios" aria-labelledby="headline-scenarios">
+            <div class="panel-header">
+                <h2 id="headline-scenarios">Scenarios</h2>
+                <p class="panel-meta">Linked to: <span data-role="selected-plan-name">{{ initial_selected_plan.name|default:"—" }}</span></p>
+            </div>
+            <div class="automation-list" data-role="scenario-list" aria-live="polite">
+                {% if initial_selected_plan and initial_selected_plan.scenarios %}
+                    <ul class="automation-items">
+                        {% for scenario in initial_selected_plan.scenarios %}
+                            <li class="automation-item{% if initial_selected_scenario and scenario.id == initial_selected_scenario.id %} is-active{% endif %}">
+                                <strong>{{ scenario.title|default:"Scenario" }}</strong>
+                                <span>{{ scenario.cases|length }} test case{% if scenario.cases|length != 1 %}s{% endif %}</span>
+                                {% if scenario.tags %}
+                                    <div class="automation-item-tags">
+                                        {% for tag in scenario.tags %}
+                                            <span class="automation-tag">{{ tag }}</span>
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                                {% if scenario.description %}<small>{{ scenario.description }}</small>{% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% elif initial_selected_plan %}
+                    <p class="empty">No scenarios created yet for this plan.</p>
+                {% else %}
+                    <p class="empty">Select a plan to view scenarios.</p>
+                {% endif %}
+            </div>
+            <details class="automation-form-group">
+                <summary>Create Scenario</summary>
+                <form id="automation-scenario-form" class="automation-form" autocomplete="off">
+                    <fieldset>
+                        <legend class="sr-only">New scenario</legend>
+                        <div class="form-row">
+                            <label for="scenario-title">Title<span aria-hidden="true">*</span></label>
+                            <input type="text" id="scenario-title" name="title" required maxlength="150" placeholder="Upgrade subscription">
+                        </div>
+                        <div class="form-row">
+                            <label for="scenario-description">Description</label>
+                            <textarea id="scenario-description" name="description" rows="3" placeholder="Short summary of scenario coverage"></textarea>
+                        </div>
+                        <div class="form-row inline">
+                            <div>
+                                <label for="scenario-preconditions">Preconditions</label>
+                                <textarea id="scenario-preconditions" name="preconditions" rows="2" placeholder="User exists, has active session..."></textarea>
+                            </div>
+                            <div>
+                                <label for="scenario-postconditions">Postconditions</label>
+                                <textarea id="scenario-postconditions" name="postconditions" rows="2" placeholder="Subscription upgraded, entitlements refreshed..."></textarea>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <label for="scenario-tags">Tags</label>
+                            <input type="text" id="scenario-tags" name="tags" placeholder="billing,critical">
+                        </div>
+                    </fieldset>
+                    <div class="form-actions">
+                        <button type="submit" class="btn-primary">Save Scenario</button>
+                        <button type="reset" class="btn-secondary" data-action="reset-scenario-form">Clear</button>
+                    </div>
+                </form>
+            </details>
+        </section>
+    </div>
+
+    {{ initial_plans|json_script:"automation-initial-plans" }}
+    {{ api_endpoints|json_script:"automation-api-endpoints" }}
+    {{ initial_metrics|json_script:"automation-initial-metrics" }}
+</div>
+{% endblock %}
+
+{% block body_js %}
+    {{ block.super }}
+    <script src="{% static 'js/automation.js' %}"></script>
+{% endblock %}

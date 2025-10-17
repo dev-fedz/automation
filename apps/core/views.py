@@ -7,16 +7,18 @@ from typing import Any
 import base64
 import binascii
 import io
-import time
-
 import json
+import logging
+import time
 
 import requests
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
+from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import render
+from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -26,6 +28,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import models, selectors, serializers, services
+
+
+logger = logging.getLogger(__name__)
 
 
 class ApiEnvironmentViewSet(viewsets.ModelViewSet):
@@ -248,6 +253,305 @@ class ApiRunViewSet(viewsets.ReadOnlyModelViewSet):
         return instance
 
 
+class TestPlanViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.TestPlanSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return selectors.test_plan_list()
+
+    def get_object(self):
+        instance = selectors.test_plan_get(self.kwargs["pk"])
+        if instance is None:
+            raise Http404
+        return instance
+
+
+class TestPlanScopeViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.TestPlanScopeSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = models.TestPlanScope.objects.select_related("plan").order_by("plan", "category", "order", "id")
+        plan_id = self.request.query_params.get("plan")
+        if plan_id:
+            try:
+                queryset = queryset.filter(plan_id=int(plan_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"plan": "Plan must be an integer."}) from exc
+        category = self.request.query_params.get("category")
+        if category:
+            queryset = queryset.filter(category=category)
+        return queryset
+
+
+class TestPlanMaintenanceViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.TestPlanMaintenanceSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = selectors.test_plan_maintenance_list()
+        plan_id = self.request.query_params.get("plan")
+        if plan_id:
+            try:
+                queryset = queryset.filter(plan_id=int(plan_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"plan": "Plan must be an integer."}) from exc
+        return queryset
+
+
+class TestScenarioViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.TestScenarioSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = selectors.test_scenario_list()
+        plan_id = self.request.query_params.get("plan")
+        if plan_id:
+            try:
+                queryset = queryset.filter(plan_id=int(plan_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"plan": "Plan must be an integer."}) from exc
+        return queryset
+
+
+class TestCaseViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.TestCaseSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = selectors.test_case_list()
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(testcase_id__icontains=search)
+                | Q(description__icontains=search)
+                | Q(precondition__icontains=search)
+                | Q(requirements__icontains=search)
+            )
+        scenario_id = self.request.query_params.get("scenario")
+        if scenario_id:
+            try:
+                queryset = queryset.filter(scenario_id=int(scenario_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"scenario": "Scenario must be an integer."}) from exc
+        plan_id = self.request.query_params.get("plan")
+        if plan_id:
+            try:
+                queryset = queryset.filter(scenario__plan_id=int(plan_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"plan": "Plan must be an integer."}) from exc
+        return queryset
+
+
+class RiskViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.RiskSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = selectors.risk_list()
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(Q(title__icontains=search) | Q(description__icontains=search))
+        return queryset
+
+
+class MitigationPlanViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.MitigationPlanSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = selectors.mitigation_plan_list()
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(Q(title__icontains=search) | Q(description__icontains=search))
+        return queryset
+
+
+class RiskAndMitigationPlanViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.RiskAndMitigationPlanSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = selectors.risk_and_mitigation_list()
+        risk_id = self.request.query_params.get("risk")
+        if risk_id not in (None, ""):
+            try:
+                queryset = queryset.filter(risk_id=int(risk_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"risk": "Risk must be an integer."}) from exc
+        mitigation_plan_id = self.request.query_params.get("mitigation_plan")
+        if mitigation_plan_id not in (None, ""):
+            try:
+                queryset = queryset.filter(mitigation_plan_id=int(mitigation_plan_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"mitigation_plan": "Mitigation plan must be an integer."}) from exc
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(risk__title__icontains=search)
+                | Q(risk__description__icontains=search)
+                | Q(mitigation_plan__title__icontains=search)
+                | Q(mitigation_plan__description__icontains=search)
+                | Q(impact__icontains=search)
+            )
+        return queryset
+
+
+def _prepare_automation_data() -> dict[str, Any]:
+    plans_qs = selectors.test_plan_list()
+    plans_payload = serializers.TestPlanSerializer(plans_qs, many=True).data
+    environments_qs = selectors.api_environment_list()
+    environments_payload = serializers.ApiEnvironmentSerializer(environments_qs, many=True).data
+    risks_qs = selectors.risk_list()
+    risks_payload = serializers.RiskSerializer(risks_qs, many=True).data
+    mitigation_plans_qs = selectors.mitigation_plan_list()
+    mitigation_plans_payload = serializers.MitigationPlanSerializer(mitigation_plans_qs, many=True).data
+    risk_mitigations_qs = selectors.risk_and_mitigation_list()
+    risk_mitigations_payload = serializers.RiskAndMitigationPlanSerializer(risk_mitigations_qs, many=True).data
+
+    scenario_count = sum(len(plan.get("scenarios", [])) for plan in plans_payload)
+    case_count = sum(
+        len(scenario.get("cases", []))
+        for plan in plans_payload
+        for scenario in plan.get("scenarios", [])
+    )
+
+    metrics = {
+        "plans": len(plans_payload),
+        "scenarios": scenario_count,
+        "cases": case_count,
+        "collections": models.ApiCollection.objects.count(),
+        "runs": models.ApiRun.objects.count(),
+        "environments": len(environments_payload),
+        "risks": len(risks_payload),
+        "mitigation_plans": len(mitigation_plans_payload),
+        "risk_mitigations": len(risk_mitigations_payload),
+    }
+
+    recent_runs = (
+        models.ApiRun.objects.select_related("collection", "environment", "triggered_by")
+        .order_by("-created_at")[:5]
+    )
+    highlighted_collections = models.ApiCollection.objects.order_by("name")[:6]
+
+    api_endpoints = {
+        "plans": reverse("core:core-test-plans-list"),
+        "maintenances": reverse("core:core-test-plan-maintenances-list"),
+        "scenarios": reverse("core:core-test-scenarios-list"),
+        "cases": reverse("core:core-test-cases-list"),
+        "scopes": reverse("core:core-test-plan-scopes-list"),
+        "collections": reverse("core:core-collections-list"),
+        "environments": reverse("core:core-environments-list"),
+        "runs": reverse("core:core-runs-list"),
+        "risks": reverse("core:core-risks-list"),
+        "mitigation_plans": reverse("core:core-mitigation-plans-list"),
+        "risk_mitigations": reverse("core:core-risk-mitigation-plans-list"),
+    }
+
+    selected_plan = plans_payload[0] if plans_payload else None
+    selected_scenario = None
+    if selected_plan:
+        scenarios = selected_plan.get("scenarios", [])
+        if scenarios:
+            selected_scenario = scenarios[0]
+
+    return {
+        "plans": plans_payload,
+        "metrics": metrics,
+        "recent_runs": recent_runs,
+        "highlighted_collections": highlighted_collections,
+        "api_endpoints": api_endpoints,
+        "selected_plan": selected_plan,
+        "selected_scenario": selected_scenario,
+        "environments": environments_payload,
+        "risks": risks_payload,
+        "mitigation_plans": mitigation_plans_payload,
+        "risk_mitigations": risk_mitigations_payload,
+    }
+
+
+@login_required
+def automation_overview(request):
+    """Render top-level Automation overview content."""
+
+    data = _prepare_automation_data()
+    context = {
+        "initial_metrics": data["metrics"],
+        "recent_runs": data["recent_runs"],
+        "highlighted_collections": data["highlighted_collections"],
+    }
+    return render(request, "core/automation_overview.html", context)
+
+
+@login_required
+def automation_test_plans(request):
+    data = _prepare_automation_data()
+    context = {
+        "initial_plans": data["plans"],
+        "initial_metrics": data["metrics"],
+        "api_endpoints": data["api_endpoints"],
+        "initial_selected_plan": data["selected_plan"],
+        "initial_selected_scenario": data["selected_scenario"],
+        "risk_mitigations": data["risk_mitigations"],
+    }
+    return render(request, "core/automation_test_plans.html", context)
+
+
+@login_required
+def automation_test_scenarios(request):
+    data = _prepare_automation_data()
+    context = {
+        "initial_plans": data["plans"],
+        "initial_metrics": data["metrics"],
+        "api_endpoints": data["api_endpoints"],
+        "initial_selected_plan": data["selected_plan"],
+        "initial_selected_scenario": data["selected_scenario"],
+    }
+    return render(request, "core/automation_test_scenarios.html", context)
+
+
+@login_required
+def automation_test_cases(request):
+    data = _prepare_automation_data()
+    context = {
+        "initial_plans": data["plans"],
+        "initial_metrics": data["metrics"],
+        "api_endpoints": data["api_endpoints"],
+        "initial_selected_plan": data["selected_plan"],
+        "initial_selected_scenario": data["selected_scenario"],
+    }
+    return render(request, "core/automation_test_cases.html", context)
+
+
+@login_required
+def automation_test_plan_maintenance(request):
+    data = _prepare_automation_data()
+    context = {
+        "initial_plans": data["plans"],
+        "initial_metrics": data["metrics"],
+        "api_endpoints": data["api_endpoints"],
+        "initial_selected_plan": data["selected_plan"],
+        "initial_selected_scenario": data["selected_scenario"],
+    }
+    return render(request, "core/automation_test_plan_maintenance.html", context)
+
+
+@login_required
+def automation_data_management(request, section: str | None = None):
+    data = _prepare_automation_data()
+    context = {
+        "initial_metrics": data["metrics"],
+        "initial_environments": data["environments"],
+        "initial_risks": data["risks"],
+        "initial_mitigation_plans": data["mitigation_plans"],
+        "initial_risk_mitigations": data["risk_mitigations"],
+        "api_endpoints": data["api_endpoints"],
+        "initial_section": section or "",
+    }
+    return render(request, "core/automation_data_management.html", context)
+
+
 class ApiAdhocRequestView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -406,6 +710,22 @@ class ApiAdhocRequestView(APIView):
                 resolved_json = services._resolve_variables(body, variables)  # type: ignore[attr-defined]
             else:
                 resolved_body = services._resolve_variables(str(body), variables)  # type: ignore[attr-defined]
+
+        signature_value = None
+        if isinstance(resolved_json, dict):
+            signature_value = resolved_json.get("signature")
+        elif isinstance(resolved_body, dict):
+            signature_value = resolved_body.get("signature")
+        elif isinstance(resolved_body, str):
+            try:
+                parsed_body = json.loads(resolved_body)
+                if isinstance(parsed_body, dict):
+                    signature_value = parsed_body.get("signature")
+            except (TypeError, ValueError):
+                pass
+
+        if signature_value not in (None, ""):
+            logger.info("API tester resolved signature: %s", signature_value)
 
         run = models.ApiRun.objects.create(
             collection=collection,

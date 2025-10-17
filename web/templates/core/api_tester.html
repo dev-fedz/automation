@@ -42,24 +42,18 @@
         </header>
         <div class="api-tester__collections-list" aria-live="polite"></div>
     </section>
-    <section class="api-tester__panel api-tester__environments">
-        <header>
-            <div class="api-tester__environments-title">
-                <h2>Environments</h2>
-                <button type="button" id="environment-create" class="btn btn-secondary">New Environment</button>
-            </div>
-            <p class="environment-hint">Define reusable variables and headers. Insert them into the builder as <code>{% templatetag openvariable %}variable{% templatetag closevariable %}</code>.</p>
-        </header>
-        <div class="environment-layout">
-            <div id="environment-list" class="environment-list" aria-live="polite"></div>
-            <div id="environment-editor" class="environment-editor" aria-live="polite"></div>
-        </div>
-    </section>
     <section class="api-tester__panel api-tester__builder">
         <header class="api-tester__builder-head">
             <div class="api-tester__builder-title-row">
                 <h2>Request Builder</h2>
-                <button type="button" id="create-request" class="btn btn-secondary" disabled>New Request</button>
+                <div class="api-tester__builder-actions">
+                    <label for="environment-select">Environment</label>
+                    <select id="environment-select" name="environment">
+                        <option value="">No environment</option>
+                    </select>
+                    <button type="button" id="create-request" class="btn btn-secondary" disabled>New Request</button>
+                    <button type="button" id="save-request" class="btn btn-secondary">Save</button>
+                </div>
             </div>
             <div class="builder-meta" id="builder-meta">Select a request to preview details.</div>
         </header>
@@ -89,21 +83,10 @@
                 </div>
                 <div class="form-field form-field--actions">
                     <div class="form-actions">
-                        <button type="button" id="save-request" class="btn btn-secondary">Save</button>
                         <button type="submit" id="run-request" class="btn btn-primary" disabled>SEND</button>
                     </div>
                 </div>
             </div>
-
-            <div class="form-grid form-grid--meta">
-                <div class="form-field">
-                    <label for="environment-select">Environment</label>
-                    <select id="environment-select" name="environment">
-                        <option value="">No environment</option>
-                    </select>
-                </div>
-            </div>
-
         <nav class="builder-tabs" role="tablist" aria-label="Request builder sections">
         <button type="button"
             class="builder-tab is-active"
@@ -134,11 +117,18 @@
             tabindex="-1">Body</button>
         <button type="button"
             class="builder-tab"
-            data-tab="scripts"
+            data-tab="body-tools"
             role="tab"
             aria-selected="false"
-            aria-controls="builder-panel-scripts"
-            tabindex="-1">Scripts</button>
+            aria-controls="builder-panel-body-tools"
+            tabindex="-1">Body Tools</button>
+        <button type="button"
+            class="builder-tab"
+            data-tab="request"
+            role="tab"
+            aria-selected="false"
+            aria-controls="builder-panel-response"
+            tabindex="-1">Response</button>
         </nav>
 
         <section class="builder-section"
@@ -200,7 +190,7 @@
                         </div>
                         <div class="auth-basic__field form-field">
                             <label for="auth-basic-password">Password</label>
-                            <input type="password" id="auth-basic-password" autocomplete="new-password" />
+                            <input type="text" id="auth-basic-password" autocomplete="off" />
                         </div>
                     </div>
                     <div class="auth-bearer" data-auth-section="bearer" hidden aria-hidden="true">
@@ -317,88 +307,106 @@
             </section>
 
             <section class="builder-section"
-                     id="builder-panel-scripts"
-                     data-tab-panel="scripts"
-                     aria-labelledby="scripts-heading"
+                     id="builder-panel-body-tools"
+                     data-tab-panel="body-tools"
+                     aria-labelledby="body-tools-heading"
                      role="tabpanel"
                      aria-hidden="true"
                      hidden>
-                <div class="scripts-wrapper">
-                    <div class="scripts-tabs" role="tablist" aria-label="Script editors">
-            <button type="button"
-                class="scripts-tab is-active"
-                id="scripts-tab-pre"
-                data-script-tab="pre"
-                                role="tab"
-                                aria-selected="true"
-                                aria-controls="scripts-panel-pre">
-                            Pre-request
-                        </button>
-                        <button type="button"
-                                class="scripts-tab"
-                id="scripts-tab-post"
-                                data-script-tab="post"
-                                role="tab"
-                                aria-selected="false"
-                                aria-controls="scripts-panel-post"
-                                tabindex="-1">
-                            Post-request
-                        </button>
+                <h3 id="body-tools-heading" class="sr-only">Body Tools</h3>
+                <div class="builder-body-tools">
+                    <div class="builder-body-tools__group">
+                        <header class="builder-section__head builder-section__head--sub builder-section__head--centered">
+                            <h3>Field Overrides</h3>
+                            <button type="button" id="add-body-override" class="btn btn-tertiary">Add Override</button>
+                        </header>
+                        <p class="builder-hint">Set a JSON path and replacement value. Paths use dot notation, e.g. <code>transaction.request_id</code>.</p>
+                        <div class="kv-table">
+                            <div class="kv-table__scroll">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">Path</th>
+                                            <th scope="col">Value</th>
+                                            <th scope="col" aria-hidden="true"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="body-overrides-rows"></tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
-                    <div class="scripts-panels">
-                    <div class="scripts-panel"
-                             id="scripts-panel-pre"
-                             data-script-panel="pre"
-                             role="tabpanel"
-                             aria-labelledby="scripts-tab-pre"
-                        aria-hidden="false">
-                            <span id="scripts-pre-label" class="sr-only">Pre-request Script</span>
-                            <div id="script-pre-editor"
-                                 class="code-editor script-editor is-empty"
-                                 data-script-editor="pre"
-                                 data-placeholder="// Runs before the request"
-                                 role="region"
-                                 aria-labelledby="scripts-pre-label"></div>
+                    <div class="builder-body-tools__group">
+                        <header class="builder-section__head builder-section__head--sub builder-section__head--centered">
+                            <h3>Signature Builders</h3>
+                            <button type="button" id="add-body-signature" class="btn btn-tertiary">Add Signature</button>
+                        </header>
+                        <p class="builder-hint">Generate hashes by combining body fields and literals. Prefix literals with <code>literal:</code> or wrap in quotes.</p>
+                        <div class="kv-table">
+                            <div class="kv-table__scroll">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">Target Path</th>
+                                            <th scope="col">Algorithm</th>
+                                            <th scope="col">Components</th>
+                                            <th scope="col">Store As</th>
+                                            <th scope="col" aria-hidden="true"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="body-signatures-rows"></tbody>
+                                </table>
+                            </div>
                         </div>
-                        <div class="scripts-panel"
-                             id="scripts-panel-post"
-                             data-script-panel="post"
-                             role="tabpanel"
-                             aria-labelledby="scripts-tab-post"
-                             aria-hidden="true"
-                             hidden>
-                            <span id="scripts-post-label" class="sr-only">Post-request Script</span>
-                            <div id="script-post-editor"
-                                 class="code-editor script-editor is-empty"
-                                 data-script-editor="post"
-                                 data-placeholder="// Runs after the response"
-                                 role="region"
-                                 aria-labelledby="scripts-post-label"></div>
-                        </div>
+                        <p class="builder-hint">One component per line. Use <code>path:customer.email</code> for body fields or <code>literal:SECRET</code> for constants.</p>
                     </div>
                 </div>
             </section>
         </form>
-        <div class="api-tester__response-card" aria-live="polite">
-            <header>
-                <h2>Response</h2>
-                <div id="response-summary" class="response-summary">No request executed yet.</div>
-            </header>
-            <div class="response-body">
-                <div class="response-section">
-                    <h3>Headers</h3>
-                    <pre id="response-headers" class="response-pre">{}</pre>
-                </div>
-                <div class="response-section">
-                    <h3>Body</h3>
-                    <pre id="response-body" class="response-pre">{}</pre>
-                </div>
-                <div class="response-section">
-                    <h3>Assertions</h3>
-                    <div id="response-assertions" class="assertions-list"></div>
+        <section class="builder-section"
+                 id="builder-panel-response"
+                 data-tab-panel="request"
+                 aria-labelledby="request-panel-heading"
+                 role="tabpanel"
+                 aria-hidden="true"
+                 hidden>
+            <h3 id="request-panel-heading" class="sr-only">Request Details</h3>
+            <div class="api-tester__response-card" aria-live="polite">
+                <header>
+                    <div id="response-summary" class="response-summary">No request executed yet.</div>
+                </header>
+                <div class="response-body">
+                    <div class="response-section">
+                        <h3>Headers</h3>
+                        <pre id="response-headers" class="response-pre">{}</pre>
+                    </div>
+                    <div class="response-section">
+                        <div class="response-section__header">
+                            <h3>Body</h3>
+                            <div class="response-body__controls" role="group" aria-label="Response body view options">
+                                <div class="response-body__views" role="group" aria-label="Format type">
+                                    <button type="button" class="response-body__view-button is-active" data-response-body-view="json" aria-pressed="true">JSON</button>
+                                    <button type="button" class="response-body__view-button" data-response-body-view="xml" aria-pressed="false">XML</button>
+                                    <button type="button" class="response-body__view-button" data-response-body-view="html" aria-pressed="false">HTML</button>
+                                </div>
+                                <div class="response-body__modes" role="group" aria-label="Display mode">
+                                    <button type="button" class="response-body__mode-button is-active" data-response-body-mode="pretty" aria-pressed="true">Pretty</button>
+                                    <button type="button" class="response-body__mode-button" data-response-body-mode="preview" aria-pressed="false">Preview</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="response-body__content">
+                            <pre id="response-body-pretty" class="response-pre">{}</pre>
+                            <iframe id="response-body-preview" class="response-preview" title="Response body preview" hidden></iframe>
+                        </div>
+                    </div>
+                    <div class="response-section">
+                        <h3>Assertions</h3>
+                        <div id="response-assertions" class="assertions-list"></div>
+                    </div>
                 </div>
             </div>
-        </div>
+        </section>
     </section>
 </div>
 
@@ -438,5 +446,6 @@
         },
     };
 </script>
-<script src="{% static 'js/api_tester.js' %}"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+<script src="{% static 'js/api_tester.js' %}?v=20251016"></script>
 {% endblock %}

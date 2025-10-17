@@ -27,6 +27,7 @@ env = environ.Env(
     EMAIL_USE_SSL=(bool, False),
     DEFAULT_FROM_EMAIL=(str, "dev@example.com"),
     CORS_ALLOW_ALL_ORIGINS=(bool, True),
+    DJANGO_LOG_LEVEL=(str, "INFO"),
 )
 
 env_file = BASE_DIR / ".env"
@@ -40,6 +41,7 @@ ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
 SERVICE = env("SERVICE").strip().lower()
 SERVICE_NAME = SERVICE or "accounts"
+DJANGO_LOG_LEVEL = env("DJANGO_LOG_LEVEL").upper()
 
 
 DJANGO_APPS = [
@@ -70,6 +72,7 @@ THIRD_PARTY_APPS = [
     "corsheaders",
     "polymorphic",
     "storages",
+    "tinymce",
 ]
 
 PROJECT_APPS = [
@@ -220,4 +223,36 @@ else:
         "default": {
             "BACKEND": "channels.layers.InMemoryChannelLayer",
         }
+    }
+
+
+    LOGGING = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "console": {
+                "format": "[%(asctime)s] %(levelname)s %(name)s: %(message)s",
+            }
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "formatter": "console",
+            }
+        },
+        "loggers": {
+            "apps.core": {
+                "handlers": ["console"],
+                "level": DJANGO_LOG_LEVEL,
+                "propagate": False,
+            },
+            "django": {
+                "handlers": ["console"],
+                "level": "WARNING",
+            },
+        },
+        "root": {
+            "handlers": ["console"],
+            "level": DJANGO_LOG_LEVEL,
+        },
     }

@@ -1,0 +1,223 @@
+{% extends "base/base.html" %}
+{% load static %}
+
+{% block title %}Automation · Test Cases{% endblock %}
+
+{% block head_css %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'css/automation.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="automation-dashboard" id="automation-app">
+    <header class="automation-header">
+        <div class="automation-heading">
+            <h1>Test Cases</h1>
+            <p>Create detailed automation steps, expectations, and dynamic data bindings for each scenario.</p>
+        </div>
+        <div class="automation-status" data-role="status" aria-live="polite" hidden></div>
+    </header>
+
+    <section class="automation-metrics" aria-label="Automation metrics">
+        <article class="automation-metric" data-metric-key="plans">
+            <span class="metric-label">Test Plans</span>
+            <strong class="metric-value">{{ initial_metrics.plans }}</strong>
+        </article>
+        <article class="automation-metric" data-metric-key="scenarios">
+            <span class="metric-label">Scenarios</span>
+            <strong class="metric-value">{{ initial_metrics.scenarios }}</strong>
+        </article>
+        <article class="automation-metric" data-metric-key="cases">
+            <span class="metric-label">Test Cases</span>
+            <strong class="metric-value">{{ initial_metrics.cases }}</strong>
+        </article>
+        <article class="automation-metric" data-metric-key="collections">
+            <span class="metric-label">Collections</span>
+            <strong class="metric-value">{{ initial_metrics.collections }}</strong>
+        </article>
+        <article class="automation-metric" data-metric-key="runs">
+            <span class="metric-label">Runs</span>
+            <strong class="metric-value">{{ initial_metrics.runs }}</strong>
+        </article>
+        <article class="automation-metric" data-metric-key="environments">
+            <span class="metric-label">Environments</span>
+            <strong class="metric-value">{{ initial_metrics.environments }}</strong>
+        </article>
+    </section>
+
+    <div class="automation-grid">
+        <section class="automation-panel" data-panel="plans" aria-labelledby="headline-plans">
+            <div class="panel-header">
+                <h2 id="headline-plans">Select Plan</h2>
+                <button type="button" class="automation-refresh" data-action="refresh-plans">Refresh</button>
+            </div>
+            <div class="automation-list" data-role="plan-list" aria-live="polite">
+                {% if initial_plans %}
+                    <ul class="automation-items">
+                        {% for plan in initial_plans %}
+                            <li class="automation-item{% if initial_selected_plan and plan.id == initial_selected_plan.id %} is-active{% endif %}">
+                                <strong>{{ plan.name|default:"Untitled plan" }}</strong>
+                                <span>{{ plan.scenarios|length }} scenario{% if plan.scenarios|length != 1 %}s{% endif %}</span>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="empty">No plans available. Create one from the Test Plans module first.</p>
+                {% endif %}
+            </div>
+        </section>
+
+        <section class="automation-panel" data-panel="scenarios" aria-labelledby="headline-scenarios">
+            <div class="panel-header">
+                <h2 id="headline-scenarios">Select Scenario</h2>
+                <p class="panel-meta">Plan: <span data-role="selected-plan-name">{{ initial_selected_plan.name|default:"—" }}</span></p>
+            </div>
+            <div class="automation-list" data-role="scenario-list" aria-live="polite">
+                {% if initial_selected_plan and initial_selected_plan.scenarios %}
+                    <ul class="automation-items">
+                        {% for scenario in initial_selected_plan.scenarios %}
+                            <li class="automation-item{% if initial_selected_scenario and scenario.id == initial_selected_scenario.id %} is-active{% endif %}">
+                                <strong>{{ scenario.title|default:"Scenario" }}</strong>
+                                <span>{{ scenario.cases|length }} test case{% if scenario.cases|length != 1 %}s{% endif %}</span>
+                                {% if scenario.description %}<small>{{ scenario.description }}</small>{% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% elif initial_selected_plan %}
+                    <p class="empty">No scenarios available. Create one from the Test Scenarios module.</p>
+                {% else %}
+                    <p class="empty">Select a plan to view scenarios.</p>
+                {% endif %}
+            </div>
+        </section>
+
+        <section class="automation-panel" data-panel="cases" aria-labelledby="headline-cases">
+            <div class="panel-header">
+                <h2 id="headline-cases">Test Cases</h2>
+                <p class="panel-meta">Scenario: <span data-role="selected-scenario-name">{{ initial_selected_scenario.title|default:"—" }}</span></p>
+            </div>
+            <div class="automation-case-summary" data-role="case-summary">
+                {% if initial_selected_scenario %}
+                    <strong>{{ initial_selected_scenario.cases|length }} test case{% if initial_selected_scenario.cases|length != 1 %}s{% endif %} in scope.</strong>
+                    <div>Preconditions: {{ initial_selected_scenario.preconditions|default:"—" }}</div>
+                    <div>Postconditions: {{ initial_selected_scenario.postconditions|default:"—" }}</div>
+                {% else %}
+                    <p class="empty">Choose a scenario to inspect detailed test cases.</p>
+                {% endif %}
+            </div>
+            <div class="automation-list" data-role="case-list" aria-live="polite">
+                {% if initial_selected_scenario and initial_selected_scenario.cases %}
+                    <div class="automation-case-list">
+                        {% for test_case in initial_selected_scenario.cases %}
+                            <article class="automation-case-card">
+                                <header>
+                                    <h3>{{ test_case.title|default:"Untitled case" }}</h3>
+                                    <div class="case-meta">Priority: {{ test_case.priority|default:"—" }} · Owner: {{ test_case.owner|default:"—" }}</div>
+                                </header>
+                                {% if test_case.description %}<p>{{ test_case.description }}</p>{% endif %}
+                                {% if test_case.steps %}
+                                    <div>
+                                        <strong>Steps</strong>
+                                        <ol class="case-detail-list">
+                                            {% for step in test_case.steps %}
+                                                <li>Step {{ forloop.counter }}: {{ step.action|default:step }}</li>
+                                            {% endfor %}
+                                        </ol>
+                                    </div>
+                                {% endif %}
+                                {% if test_case.expected_results %}
+                                    <div>
+                                        <strong>Expected</strong>
+                                        <ul class="case-detail-list">
+                                            {% for expect in test_case.expected_results %}
+                                                <li>{{ expect.note|default:expect }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+                                {% endif %}
+                                {% if test_case.dynamic_variables %}
+                                    <div>
+                                        <strong>Dynamic variables</strong>
+                                        <ul class="case-detail-list">
+                                            {% for key, value in test_case.dynamic_variables.items %}
+                                                <li>{{ key }}: {{ value }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+                                {% endif %}
+                                {% if test_case.related_api_request %}
+                                    <div><small>Linked request: #{{ test_case.related_api_request }}</small></div>
+                                {% endif %}
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% elif initial_selected_scenario %}
+                    <p class="empty">No test cases found. Capture one using the form below.</p>
+                {% else %}
+                    <p class="empty">Select a scenario to view its test cases.</p>
+                {% endif %}
+            </div>
+            <details class="automation-form-group">
+                <summary>Create Test Case</summary>
+                <form id="automation-case-form" class="automation-form" autocomplete="off">
+                    <fieldset>
+                        <legend class="sr-only">New test case</legend>
+                        <div class="form-row">
+                            <label for="case-title">Title<span aria-hidden="true">*</span></label>
+                            <input type="text" id="case-title" name="title" required maxlength="150" placeholder="Upgrade via API">
+                        </div>
+                        <div class="form-row">
+                            <label for="case-description">Description</label>
+                            <textarea id="case-description" name="description" rows="3" placeholder="Outline the path exercised by this test case."></textarea>
+                        </div>
+                        <div class="form-row inline">
+                            <div>
+                                <label for="case-steps">Steps (one per line)</label>
+                                <textarea id="case-steps" name="steps" rows="4" placeholder="POST /subscriptions
+Verify response status"></textarea>
+                            </div>
+                            <div>
+                                <label for="case-expected">Expected results (one per line)</label>
+                                <textarea id="case-expected" name="expected" rows="4" placeholder="Status=200
+payload.plan=premium"></textarea>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <label for="case-dynamic">Dynamic variables (JSON)</label>
+                            <textarea id="case-dynamic" name="dynamic" rows="3" placeholder='{"expected_status": 200, "expected_plan": "premium"}'></textarea>
+                            <p class="form-hint">Provide key-value pairs used during API validation. Must be valid JSON.</p>
+                        </div>
+                        <div class="form-row inline">
+                            <div>
+                                <label for="case-priority">Priority</label>
+                                <input type="text" id="case-priority" name="priority" placeholder="P1">
+                            </div>
+                            <div>
+                                <label for="case-owner">Owner</label>
+                                <input type="text" id="case-owner" name="owner" placeholder="planner@example.com">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <label for="case-request">Related API Request ID (optional)</label>
+                            <input type="number" id="case-request" name="request" min="1" step="1" placeholder="123">
+                        </div>
+                    </fieldset>
+                    <div class="form-actions">
+                        <button type="submit" class="btn-primary">Save Test Case</button>
+                        <button type="reset" class="btn-secondary" data-action="reset-case-form">Clear</button>
+                    </div>
+                </form>
+            </details>
+        </section>
+    </div>
+
+    {{ initial_plans|json_script:"automation-initial-plans" }}
+    {{ api_endpoints|json_script:"automation-api-endpoints" }}
+    {{ initial_metrics|json_script:"automation-initial-metrics" }}
+</div>
+{% endblock %}
+
+{% block body_js %}
+    {{ block.super }}
+    <script src="{% static 'js/automation.js' %}"></script>
+{% endblock %}

@@ -8,6 +8,24 @@
         </ul>
     </li>
     <li class="menu-item" data-menu="api-tester"><a href="{% url 'api-tester' %}" data-testid="menu-api-tester">API Tester</a></li>
+    <li class="has-submenu" data-menu="automation">
+        <a href="#" data-testid="menu-automation">Automation</a>
+        <ul class="submenu">
+            <li class="menu-item" data-menu="automation-overview"><a href="{% url 'automation-overview' %}" data-testid="menu-automation-overview">Overview</a></li>
+            <li class="menu-item" data-menu="automation-test-plans"><a href="{% url 'automation-test-plans' %}" data-testid="menu-automation-plans">Test Plans</a></li>
+            <li class="menu-item" data-menu="automation-test-scenarios"><a href="{% url 'automation-test-scenarios' %}" data-testid="menu-automation-scenarios">Test Scenarios</a></li>
+            <li class="menu-item" data-menu="automation-test-cases"><a href="{% url 'automation-test-cases' %}" data-testid="menu-automation-cases">Test Case</a></li>
+            <li class="menu-item" data-menu="automation-test-plan-maintenance"><a href="{% url 'automation-test-plan-maintenance' %}" data-testid="menu-automation-maintenance">Test Plan Maintenance</a></li>
+        </ul>
+    </li>
+    <li class="has-submenu" data-menu="data-management">
+        <a href="#" data-testid="menu-data-management">Data Management</a>
+        <ul class="submenu">
+            <li class="menu-item" data-menu="data-management-risks"><a href="{% url 'data-management-risks' %}" data-testid="menu-data-risks">Risk Register</a></li>
+            <li class="menu-item" data-menu="data-management-mitigation"><a href="{% url 'data-management-mitigation' %}" data-testid="menu-data-mitigation">Mitigation Plans</a></li>
+            <li class="menu-item" data-menu="data-management-matrix"><a href="{% url 'data-management' %}?section=matrix" data-testid="menu-data-matrix">Risk &amp; Mitigation Matrix</a></li>
+        </ul>
+    </li>
 
 </ul>
 <script>
@@ -15,19 +33,32 @@ document.addEventListener('DOMContentLoaded', function(){
         // submenu toggle
         document.querySelectorAll('.sidebar-menu .has-submenu > a').forEach(function(a){
             a.addEventListener('click', function(e){
-                e.preventDefault();
+                const href = this.getAttribute('href');
+                if(!href || href === '#'){
+                    e.preventDefault();
+                }
                 const li = this.parentElement;
                 li.classList.toggle('open');
             });
         });
         const path = window.location.pathname.replace(/\/$/, '');
+        const currentHash = window.location.hash;
         const items = document.querySelectorAll('.sidebar-menu .menu-item');
         let matched = false;
         items.forEach(function(li){
             const link = li.querySelector('a');
             if(!link) return;
-            const href = link.getAttribute('href').replace(/\/$/, '');
-            if(href && href !== '' && href === path){
+            const rawHref = link.getAttribute('href') || '';
+            const parts = rawHref.split('#');
+            const hrefPath = parts[0] ? parts[0].replace(/\/$/, '') : '';
+            const hrefHash = parts.length > 1 ? '#' + parts[1] : '';
+            if(hrefPath && hrefPath === path){
+                if(hrefHash && currentHash && hrefHash !== currentHash){
+                    return;
+                }
+                if(!hrefHash && currentHash){
+                    return;
+                }
                 li.classList.add('active');
                 matched = true;
                 // open & highlight parent submenu if nested

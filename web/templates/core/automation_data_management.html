@@ -1,0 +1,382 @@
+{% extends "base/base.html" %}
+{% load static %}
+
+{% block title %}Automation · Data Management{% endblock %}
+
+{% block head_css %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'css/automation.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="automation-dashboard" id="data-management-app">
+    <section class="automation-panel" data-panel="data-management" aria-labelledby="headline-data-management">
+        <div class="panel-header">
+            <div>
+                <h2 id="headline-data-management">Data Management</h2>
+                <p class="panel-subtitle">Maintain the risks and mitigation strategies that frame every automation plan.</p>
+            </div>
+            <div class="panel-actions">
+                <button type="button" class="btn-secondary" data-action="refresh-data">Refresh</button>
+            </div>
+        </div>
+        <div class="automation-status" data-role="status" hidden></div>
+    </section>
+
+    <div class="metric-tiles" aria-label="Data management metrics">
+        <div class="metric-tile">
+            <span class="label">Environments</span>
+            <span class="val" data-role="metric-environments">{{ initial_metrics.environments }}</span>
+        </div>
+        <div class="metric-tile">
+            <span class="label">Risks</span>
+            <span class="val" data-role="metric-risks">{{ initial_metrics.risks }}</span>
+        </div>
+        <div class="metric-tile">
+            <span class="label">Mitigation Plans</span>
+            <span class="val" data-role="metric-mitigations">{{ initial_metrics.mitigation_plans }}</span>
+        </div>
+        <div class="metric-tile">
+            <span class="label">Risk Links</span>
+            <span class="val" data-role="metric-mappings">{{ initial_metrics.risk_mitigations }}</span>
+        </div>
+    </div>
+
+    <div class="automation-grid data-management-grid">
+    <section class="automation-panel data-card wide" data-entity="environments" data-section="environments" aria-labelledby="headline-environments" id="environments">
+            <div class="panel-header">
+                <div>
+                    <h3 id="headline-environments">API Environments</h3>
+                    <p class="panel-subtitle">Define shared variables and headers for collections and tests.</p>
+                </div>
+                <div class="panel-actions">
+                    <input type="search" class="automation-search" placeholder="Search environments" data-role="environment-search" aria-label="Search environments">
+                    <button type="button" class="btn-primary" data-action="open-environment-modal">New Environment</button>
+                </div>
+            </div>
+            <div class="card table-card automation-table-card" aria-live="polite">
+                <table class="table-modern automation-table" aria-label="API environments">
+                    <thead>
+                        <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col">Description</th>
+                            <th scope="col">Variables</th>
+                            <th scope="col">Headers</th>
+                            <th scope="col">Updated</th>
+                            <th scope="col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody data-role="environment-list">
+                        <tr>
+                            <td colspan="6" class="empty">No environments defined yet. Add one to centralise variables.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="automation-panel data-card" data-entity="risks" data-section="risks" aria-labelledby="headline-risk" id="section-risks">
+            <div class="panel-header">
+                <div>
+                    <h3 id="headline-risk">Risk Register</h3>
+                    <p class="panel-subtitle">Capture and monitor project threats with clear descriptions.</p>
+                </div>
+                <div class="panel-actions">
+                    <input type="search" class="automation-search" placeholder="Search risks" data-role="risk-search" aria-label="Search risks">
+                    <button type="button" class="btn-primary" data-action="open-risk-modal">New Risk</button>
+                </div>
+            </div>
+            <div class="card table-card automation-table-card" aria-live="polite">
+                <table class="table-modern automation-table" aria-label="Risk register">
+                    <thead>
+                        <tr>
+                            <th scope="col">Title</th>
+                            <th scope="col">Description</th>
+                            <th scope="col">Created</th>
+                            <th scope="col">Updated</th>
+                            <th scope="col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody data-role="risk-list">
+                        <tr>
+                            <td colspan="5" class="empty">No risks captured yet. Create one to start the registry.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="automation-panel data-card" data-entity="mitigation-plans" data-section="mitigation" aria-labelledby="headline-mitigation" id="section-mitigation">
+            <div class="panel-header">
+                <div>
+                    <h3 id="headline-mitigation">Mitigation Plans</h3>
+                    <p class="panel-subtitle">Document responses that reduce or eliminate identified risks.</p>
+                </div>
+                <div class="panel-actions">
+                    <input type="search" class="automation-search" placeholder="Search mitigation plans" data-role="mitigation-search" aria-label="Search mitigation plans">
+                    <button type="button" class="btn-primary" data-action="open-mitigation-modal">New Mitigation</button>
+                </div>
+            </div>
+            <div class="card table-card automation-table-card" aria-live="polite">
+                <table class="table-modern automation-table" aria-label="Mitigation plans">
+                    <thead>
+                        <tr>
+                            <th scope="col">Title</th>
+                            <th scope="col">Description</th>
+                            <th scope="col">Created</th>
+                            <th scope="col">Updated</th>
+                            <th scope="col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody data-role="mitigation-list">
+                        <tr>
+                            <td colspan="5" class="empty">Mitigation plans will appear here once added.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="automation-panel data-card wide" data-entity="risk-mitigations" data-section="matrix" aria-labelledby="headline-risk-mitigation" id="section-matrix">
+            <div class="panel-header">
+                <div>
+                    <h3 id="headline-risk-mitigation">Risk &amp; Mitigation Matrix</h3>
+                    <p class="panel-subtitle">Link risks to mitigation plans and describe expected impact.</p>
+                </div>
+                <div class="panel-actions">
+                    <input type="search" class="automation-search" placeholder="Search matrix" data-role="mapping-search" aria-label="Search risk and mitigation matrix">
+                    <button type="button" class="btn-primary" data-action="open-mapping-modal">Link Risk</button>
+                </div>
+            </div>
+            <div class="card table-card automation-table-card" aria-live="polite">
+                <table class="table-modern automation-table" aria-label="Risk and mitigation mapping">
+                    <thead>
+                        <tr>
+                            <th scope="col">#</th>
+                            <th scope="col">Risk</th>
+                            <th scope="col">Mitigation Plan</th>
+                            <th scope="col">Impact</th>
+                            <th scope="col">Linked</th>
+                            <th scope="col">Updated</th>
+                            <th scope="col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody data-role="mapping-list">
+                        <tr>
+                            <td colspan="7" class="empty">Create a link to see the mitigation matrix populate.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <div class="automation-modal" data-role="environment-modal" hidden>
+        <div class="automation-modal__backdrop" data-action="close-environment-modal"></div>
+        <div class="automation-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="environment-modal-title">
+            <header class="automation-modal__header">
+                <h2 id="environment-modal-title">New Environment</h2>
+                <button type="button" class="automation-modal__close" data-action="close-environment-modal" aria-label="Close environment modal">&times;</button>
+            </header>
+            <form id="environment-form" class="automation-form" autocomplete="off">
+                <fieldset>
+                    <legend class="sr-only">Environment details</legend>
+                    <div class="form-row">
+                        <label for="environment-name">Name<span aria-hidden="true">*</span></label>
+                        <input type="text" id="environment-name" name="name" required maxlength="255" placeholder="Staging">
+                    </div>
+                    <div class="form-row">
+                        <label for="environment-description">Description</label>
+                        <textarea id="environment-description" name="description" rows="3" placeholder="Describe where this environment is used."></textarea>
+                    </div>
+                    <div class="form-row">
+                        <label>Variables</label>
+                        <div class="kv-table">
+                            <div class="kv-table__scroll">
+                                <table aria-label="Environment variables">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">Key</th>
+                                            <th scope="col">Value</th>
+                                            <th scope="col" aria-hidden="true"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody data-role="environment-variable-rows">
+                                        <tr>
+                                            <td colspan="3" class="empty">No variables defined.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <button type="button" class="btn-tertiary" data-role="environment-add-variable" data-action="environment-add-variable">Add Variable</button>
+                    </div>
+                    <div class="form-row">
+                        <label>Default Headers</label>
+                        <div class="kv-table">
+                            <div class="kv-table__scroll">
+                                <table aria-label="Environment default headers">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">Key</th>
+                                            <th scope="col">Value</th>
+                                            <th scope="col" aria-hidden="true"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody data-role="environment-header-rows">
+                                        <tr>
+                                            <td colspan="3" class="empty">No headers defined.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <button type="button" class="btn-tertiary" data-role="environment-add-header" data-action="environment-add-header">Add Header</button>
+                    </div>
+                </fieldset>
+                <div class="form-meta" data-role="environment-meta" hidden>
+                    <div class="form-meta__entry">
+                        <span class="form-meta__label">Created</span>
+                        <span class="form-meta__value"><time data-role="environment-created">&mdash;</time></span>
+                    </div>
+                    <div class="form-meta__entry">
+                        <span class="form-meta__label">Updated</span>
+                        <span class="form-meta__value"><time data-role="environment-updated">&mdash;</time></span>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary" data-role="environment-submit">Save</button>
+                    <button type="button" class="btn-secondary" data-action="close-environment-modal">Close</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="automation-modal" data-role="risk-modal" hidden>
+        <div class="automation-modal__backdrop" data-action="close-risk-modal"></div>
+        <div class="automation-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="risk-modal-title">
+            <header class="automation-modal__header">
+                <h2 id="risk-modal-title">New Risk</h2>
+                <button type="button" class="automation-modal__close" data-action="close-risk-modal" aria-label="Close risk modal">&times;</button>
+            </header>
+            <form id="risk-form" class="automation-form" autocomplete="off">
+                <fieldset>
+                    <legend class="sr-only">Risk details</legend>
+                    <div class="form-row">
+                        <label for="risk-title">Title<span aria-hidden="true">*</span></label>
+                        <input type="text" id="risk-title" name="title" required maxlength="255" placeholder="Payment gateway outage">
+                    </div>
+                    <div class="form-row">
+                        <label for="risk-description">Description</label>
+                        <textarea id="risk-description" name="description" rows="4" placeholder="Describe the risk factors, triggers, or conditions."></textarea>
+                    </div>
+                </fieldset>
+                <div class="form-meta" data-role="risk-meta" hidden>
+                    <div class="form-meta__entry">
+                        <span class="form-meta__label">Created</span>
+                        <span class="form-meta__value"><time data-role="risk-created">—</time></span>
+                    </div>
+                    <div class="form-meta__entry">
+                        <span class="form-meta__label">Updated</span>
+                        <span class="form-meta__value"><time data-role="risk-updated">—</time></span>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary" data-role="risk-submit">Save</button>
+                    <button type="button" class="btn-secondary" data-action="close-risk-modal">Close</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="automation-modal" data-role="mitigation-modal" hidden>
+        <div class="automation-modal__backdrop" data-action="close-mitigation-modal"></div>
+        <div class="automation-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="mitigation-modal-title">
+            <header class="automation-modal__header">
+                <h2 id="mitigation-modal-title">New Mitigation Plan</h2>
+                <button type="button" class="automation-modal__close" data-action="close-mitigation-modal" aria-label="Close mitigation modal">&times;</button>
+            </header>
+            <form id="mitigation-form" class="automation-form" autocomplete="off">
+                <fieldset>
+                    <legend class="sr-only">Mitigation plan details</legend>
+                    <div class="form-row">
+                        <label for="mitigation-title">Title<span aria-hidden="true">*</span></label>
+                        <input type="text" id="mitigation-title" name="title" required maxlength="255" placeholder="Introduce redundant payment processor">
+                    </div>
+                    <div class="form-row">
+                        <label for="mitigation-description">Description</label>
+                        <textarea id="mitigation-description" name="description" rows="4" placeholder="Outline ownership, steps, and timelines."></textarea>
+                    </div>
+                </fieldset>
+                <div class="form-meta" data-role="mitigation-meta" hidden>
+                    <div class="form-meta__entry">
+                        <span class="form-meta__label">Created</span>
+                        <span class="form-meta__value"><time data-role="mitigation-created">—</time></span>
+                    </div>
+                    <div class="form-meta__entry">
+                        <span class="form-meta__label">Updated</span>
+                        <span class="form-meta__value"><time data-role="mitigation-updated">—</time></span>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary" data-role="mitigation-submit">Save</button>
+                    <button type="button" class="btn-secondary" data-action="close-mitigation-modal">Close</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="automation-modal" data-role="mapping-modal" hidden>
+        <div class="automation-modal__backdrop" data-action="close-mapping-modal"></div>
+        <div class="automation-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="mapping-modal-title">
+            <header class="automation-modal__header">
+                <h2 id="mapping-modal-title">Link Risk to Mitigation</h2>
+                <button type="button" class="automation-modal__close" data-action="close-mapping-modal" aria-label="Close risk mapping modal">&times;</button>
+            </header>
+            <form id="mapping-form" class="automation-form" autocomplete="off">
+                <fieldset>
+                    <legend class="sr-only">Risk to mitigation linkage</legend>
+                    <div class="form-row">
+                        <label for="mapping-risk">Risk<span aria-hidden="true">*</span></label>
+                        <select id="mapping-risk" name="risk" required data-role="mapping-risk-select"></select>
+                    </div>
+                    <div class="form-row">
+                        <label for="mapping-mitigation">Mitigation Plan<span aria-hidden="true">*</span></label>
+                        <select id="mapping-mitigation" name="mitigation_plan" required data-role="mapping-mitigation-select"></select>
+                    </div>
+                    <div class="form-row">
+                        <label for="mapping-impact">Impact</label>
+                        <textarea id="mapping-impact" name="impact" rows="4" placeholder="Summarize the impact if the risk materializes."></textarea>
+                    </div>
+                </fieldset>
+                <div class="form-meta" data-role="mapping-meta" hidden>
+                    <div class="form-meta__entry">
+                        <span class="form-meta__label">Linked</span>
+                        <span class="form-meta__value"><time data-role="mapping-created">—</time></span>
+                    </div>
+                    <div class="form-meta__entry">
+                        <span class="form-meta__label">Updated</span>
+                        <span class="form-meta__value"><time data-role="mapping-updated">—</time></span>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary" data-role="mapping-submit">Save</button>
+                    <button type="button" class="btn-secondary" data-action="close-mapping-modal">Close</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {{ initial_environments|json_script:"automation-initial-environments" }}
+    {{ initial_risks|json_script:"automation-initial-risks" }}
+    {{ initial_mitigation_plans|json_script:"automation-initial-mitigation-plans" }}
+    {{ initial_risk_mitigations|json_script:"automation-initial-risk-mitigations" }}
+    {{ api_endpoints|json_script:"automation-api-endpoints" }}
+    {{ initial_section|json_script:"data-management-initial-section" }}
+</div>
+{% endblock %}
+
+{% block body_js %}
+    {{ block.super }}
+    <script src="{% static 'js/data_management.js' %}"></script>
+{% endblock %}

@@ -28,3 +28,25 @@ https://github.com/adamchainz/django-cors-headers
 
 # Celery
 http://docs.celeryproject.org/en/latest/userguide/configuration.html
+
+
+## Creds:
+```bash
+admin@example.com
+password
+```
+## Run Init User Modules for Admin
+```bash
+docker compose run automation python manage.py makemigrations
+docker compose run automation python manage.py migrate
+docker compose run automation pip install -r requirements.txt
+docker compose run automation python manage.py collectstatic --noinput
+docker compose run automation python manage.py createsuperuser
+docker compose run automation python manage.py check
+docker compose run automation python manage.py test
+docker compose up --build automation
+docker compose exec automation  python manage.py init_modules
+docker compose exec automation python manage.py init_module_permissions
+docker compose exec automation python manage.py  init_superuser_role
+docker compose exec automation python manage.py  seed_accounts
+```

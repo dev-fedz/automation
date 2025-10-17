@@ -56,3 +56,50 @@ class ApiAssertionAdmin(admin.ModelAdmin):
     list_display = ("request", "type", "field", "comparator")
     list_filter = ("type", "comparator")
     search_fields = ("request__name", "field")
+
+
+@admin.register(models.TestPlan)
+class TestPlanAdmin(admin.ModelAdmin):
+    list_display = ("name", "approver", "created_at", "updated_at")
+    search_fields = ("name", "objective", "approver")
+    ordering = ("name",)
+
+
+@admin.register(models.TestPlanMaintenance)
+class TestPlanMaintenanceAdmin(admin.ModelAdmin):
+    list_display = ("plan", "version", "effective_date", "updated_by", "approved_by")
+    search_fields = ("plan__name", "version", "summary")
+    list_filter = ("effective_date", "plan")
+
+
+@admin.register(models.TestScenario)
+class TestScenarioAdmin(admin.ModelAdmin):
+    list_display = ("title", "plan", "created_at")
+    search_fields = ("title", "description", "plan__name")
+    list_filter = ("plan",)
+
+
+@admin.register(models.TestCase)
+class TestCaseAdmin(admin.ModelAdmin):
+    list_display = ("testcase_id", "scenario", "related_api_request", "created_at")
+    search_fields = ("testcase_id", "description", "scenario__title", "related_api_request__name")
+    list_filter = ("scenario__plan", "scenario")
+
+
+@admin.register(models.Risk)
+class RiskAdmin(admin.ModelAdmin):
+    list_display = ("title", "created_at", "updated_at")
+    search_fields = ("title", "description")
+
+
+@admin.register(models.MitigationPlan)
+class MitigationPlanAdmin(admin.ModelAdmin):
+    list_display = ("title", "created_at", "updated_at")
+    search_fields = ("title", "description")
+
+
+@admin.register(models.RiskAndMitigationPlan)
+class RiskAndMitigationPlanAdmin(admin.ModelAdmin):
+    list_display = ("risk", "mitigation_plan", "impact", "created_at")
+    search_fields = ("risk__title", "mitigation_plan__title", "impact")
+    list_filter = ("risk", "mitigation_plan")

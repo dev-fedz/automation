@@ -104,6 +104,8 @@ class ApiRequestSerializer(serializers.ModelSerializer):
             "body_json",
             "body_form",
             "body_raw",
+            "body_raw_type",
+            "body_transforms",
             "auth_type",
             "auth_basic",
             "auth_bearer",
@@ -316,3 +318,263 @@ class ApiRunSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = fields
+
+
+class TestCaseSerializer(serializers.ModelSerializer):
+    title = serializers.CharField(source="testcase_id", read_only=True)
+    expected_results = serializers.ListField(child=serializers.JSONField(), required=False)
+
+    class Meta:
+        model = models.TestCase
+        fields = [
+            "id",
+            "scenario",
+            "testcase_id",
+            "title",
+            "description",
+            "precondition",
+            "requirements",
+            "expected_results",
+            "related_api_request",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at", "title"]
+        validators = [
+            serializers.UniqueTogetherValidator(
+                queryset=models.TestCase.objects.all(),
+                fields=["scenario", "testcase_id"],
+                message="Test case ID must be unique per scenario.",
+            )
+        ]
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        testcase_id = attrs.get("testcase_id")
+        if testcase_id:
+            attrs["testcase_id"] = str(testcase_id).strip()
+        return attrs
+
+
+class TestScenarioSerializer(serializers.ModelSerializer):
+    cases = TestCaseSerializer(many=True, read_only=True)
+    tags = serializers.ListField(child=serializers.CharField(), required=False)
+
+    class Meta:
+        model = models.TestScenario
+        fields = [
+            "id",
+            "plan",
+            "title",
+            "description",
+            "preconditions",
+            "postconditions",
+            "tags",
+            "cases",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "cases", "created_at", "updated_at"]
+
+
+class TestPlanScopeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = models.TestPlanScope
+        fields = [
+            "id",
+            "category",
+            "item",
+            "order",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "order", "created_at", "updated_at"]
+
+
+class TestPlanMaintenanceSerializer(serializers.ModelSerializer):
+    updates = serializers.DictField(child=serializers.JSONField(), required=False)
+
+    class Meta:
+        model = models.TestPlanMaintenance
+        fields = [
+            "id",
+            "plan",
+            "version",
+            "summary",
+            "updates",
+            "effective_date",
+            "updated_by",
+            "approved_by",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class RiskSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = models.Risk
+        fields = ["id", "title", "description", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class MitigationPlanSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = models.MitigationPlan
+        fields = ["id", "title", "description", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class RiskAndMitigationPlanSerializer(serializers.ModelSerializer):
+    risk = serializers.PrimaryKeyRelatedField(queryset=models.Risk.objects.all())
+    mitigation_plan = serializers.PrimaryKeyRelatedField(queryset=models.MitigationPlan.objects.all())
+    risk_title = serializers.CharField(source="risk.title", read_only=True)
+    risk_description = serializers.CharField(source="risk.description", read_only=True)
+    mitigation_plan_title = serializers.CharField(source="mitigation_plan.title", read_only=True)
+    mitigation_plan_description = serializers.CharField(source="mitigation_plan.description", read_only=True)
+
+    class Meta:
+        model = models.RiskAndMitigationPlan
+        fields = [
+            "id",
+            "risk",
+            "risk_title",
+            "risk_description",
+            "mitigation_plan",
+            "mitigation_plan_title",
+            "mitigation_plan_description",
+            "impact",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "risk_title",
+            "risk_description",
+            "mitigation_plan_title",
+            "mitigation_plan_description",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class TestPlanSerializer(serializers.ModelSerializer):
+    modules_under_test = serializers.ListField(child=serializers.CharField(), required=False)
+    testing_types = serializers.DictField(child=serializers.ListField(child=serializers.CharField()), required=False)
+    tools = serializers.ListField(child=serializers.CharField(), required=False)
+    testing_timeline = serializers.DictField(child=serializers.JSONField(), required=False)
+    testers = serializers.ListField(child=serializers.CharField(), required=False)
+    scopes = TestPlanScopeSerializer(many=True, required=False)
+    maintenances = TestPlanMaintenanceSerializer(many=True, read_only=True)
+    scenarios = TestScenarioSerializer(many=True, read_only=True)
+    risk_mitigations = serializers.PrimaryKeyRelatedField(
+        queryset=models.RiskAndMitigationPlan.objects.all(),
+        many=True,
+        required=False,
+    )
+    risk_mitigation_details = RiskAndMitigationPlanSerializer(
+        source="risk_mitigations",
+        many=True,
+        read_only=True,
+    )
+
+    class Meta:
+        model = models.TestPlan
+        fields = [
+            "id",
+            "name",
+            "objective",
+            "objectives",
+            "description",
+            "modules_under_test",
+            "testing_types",
+            "tools",
+            "testing_timeline",
+            "testers",
+            "approver",
+            "scopes",
+            "risk_mitigations",
+            "risk_mitigation_details",
+            "maintenances",
+            "scenarios",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "maintenances", "scenarios", "created_at", "updated_at"]
+
+    def validate_testing_types(self, value: dict[str, list[str]]) -> dict[str, list[str]]:
+        if not isinstance(value, dict):
+            raise ValidationError({"testing_types": "Testing types must be an object with functional categories."})
+        allowed_keys = {"functional", "non_functional"}
+        for key, tests in value.items():
+            if key not in allowed_keys:
+                raise ValidationError({"testing_types": f"Unsupported category '{key}'."})
+            if not isinstance(tests, list):
+                raise ValidationError({"testing_types": f"Category '{key}' must be a list."})
+        return value
+
+    def validate_objectives(self, value: Any) -> list[dict[str, str]]:
+        if value in (None, serializers.empty):
+            if self.instance is not None:
+                return self.instance.objectives
+
+            raise ValidationError({"objectives": "At least one objective/goal pair is required."})
+        if not isinstance(value, list):
+            raise ValidationError({"objectives": "Objectives must be a list of entries."})
+
+        normalized: list[dict[str, str]] = []
+        for index, entry in enumerate(value, start=1):
+            if not isinstance(entry, dict):
+                raise ValidationError({"objectives": f"Entry {index} must be an object."})
+            title = str(entry.get("title", "")).strip()
+            objective_text = str(entry.get("objective", "")).strip()
+            goal = str(entry.get("goal", "")).strip()
+            if not title or not objective_text or not goal:
+                raise ValidationError(
+                    {
+                        "objectives": f"Entry {index} requires title, objective, and goal values.",
+                    }
+                )
+            normalized.append({
+                "title": title,
+                "objective": objective_text,
+                "goal": goal,
+            })
+
+        if not normalized:
+            raise ValidationError({"objectives": "At least one objective/goal pair is required."})
+
+        return normalized
+
+    @transaction.atomic
+    def create(self, validated_data: dict[str, Any]) -> models.TestPlan:
+        scopes_data = validated_data.pop("scopes", [])
+        risk_mitigations = validated_data.pop("risk_mitigations", [])
+        plan = models.TestPlan.objects.create(**validated_data)
+        self._replace_scopes(plan, scopes_data)
+        if risk_mitigations:
+            plan.risk_mitigations.set(risk_mitigations)
+        return plan
+
+    @transaction.atomic
+    def update(self, instance: models.TestPlan, validated_data: dict[str, Any]) -> models.TestPlan:
+        scopes_data = validated_data.pop("scopes", None)
+        risk_mitigations = validated_data.pop("risk_mitigations", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if scopes_data is not None:
+            self._replace_scopes(instance, scopes_data)
+        if risk_mitigations is not None:
+            instance.risk_mitigations.set(risk_mitigations)
+        return instance
+
+    def _replace_scopes(self, plan: models.TestPlan, scopes_data: list[dict[str, Any]]) -> None:
+        plan.scopes.all().delete()
+        if not scopes_data:
+            return
+        for index, entry in enumerate(scopes_data):
+            models.TestPlanScope.objects.create(
+                plan=plan,
+                order=index,
+                **entry,
+            )

@@ -42,3 +42,57 @@ def api_run_list() -> QuerySet[models.ApiRun]:
 
 def api_run_get(pk: int) -> models.ApiRun | None:
     return api_run_list().filter(pk=pk).first()
+
+
+def test_plan_list() -> QuerySet[models.TestPlan]:
+    scenario_qs = models.TestScenario.objects.prefetch_related(
+            Prefetch("cases", queryset=models.TestCase.objects.order_by("testcase_id", "id"))
+    ).order_by("title", "id")
+    maintenance_qs = models.TestPlanMaintenance.objects.order_by("-effective_date", "-created_at", "id")
+    scope_qs = models.TestPlanScope.objects.order_by("category", "order", "id")
+    risk_mitigation_qs = models.RiskAndMitigationPlan.objects.select_related("risk", "mitigation_plan").order_by(
+        "risk__title",
+        "mitigation_plan__title",
+        "id",
+    )
+    return (
+        models.TestPlan.objects.order_by("name", "id")
+        .prefetch_related(
+            Prefetch("scenarios", queryset=scenario_qs),
+            Prefetch("maintenances", queryset=maintenance_qs),
+            Prefetch("scopes", queryset=scope_qs),
+            Prefetch("risk_mitigations", queryset=risk_mitigation_qs),
+        )
+    )
+
+
+def test_plan_get(pk: int) -> models.TestPlan | None:
+    return test_plan_list().filter(pk=pk).first()
+
+
+def test_scenario_list() -> QuerySet[models.TestScenario]:
+    return models.TestScenario.objects.select_related("plan").prefetch_related("cases").order_by("plan", "title", "id")
+
+
+def test_case_list() -> QuerySet[models.TestCase]:
+    return models.TestCase.objects.select_related("scenario", "scenario__plan", "related_api_request").order_by("scenario", "testcase_id", "id")
+
+
+def test_plan_maintenance_list() -> QuerySet[models.TestPlanMaintenance]:
+    return models.TestPlanMaintenance.objects.select_related("plan").order_by("-effective_date", "-created_at", "id")
+
+
+def risk_list() -> QuerySet[models.Risk]:
+    return models.Risk.objects.order_by("title", "id")
+
+
+def mitigation_plan_list() -> QuerySet[models.MitigationPlan]:
+    return models.MitigationPlan.objects.order_by("title", "id")
+
+
+def risk_and_mitigation_list() -> QuerySet[models.RiskAndMitigationPlan]:
+    return models.RiskAndMitigationPlan.objects.select_related("risk", "mitigation_plan").order_by(
+        "risk__title",
+        "mitigation_plan__title",
+        "id",
+    )
