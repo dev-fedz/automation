@@ -29,6 +29,8 @@
         urlencoded: 'application/x-www-form-urlencoded; charset=UTF-8',
         binary: 'application/octet-stream',
     };
+    const RESPONSE_BODY_VIEWS = ['json', 'xml', 'html'];
+    const RESPONSE_BODY_MODES = ['pretty', 'preview'];
     const SIGNATURE_ALGORITHMS = [
         { key: 'sha256', label: 'SHA-256' },
         { key: 'sha384', label: 'SHA-384' },
@@ -482,6 +484,15 @@
             query: '',
         },
         globalVariables: loadStoredGlobals(),
+        responseBodyContent: {
+            jsonText: '',
+            xmlText: '',
+            htmlText: '',
+            rawText: '',
+        },
+        responseBodyView: 'json',
+        responseBodyMode: 'pretty',
+        responseBodyManualView: false,
     };
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -510,7 +521,10 @@
             status: document.getElementById('run-status'),
             responseSummary: document.getElementById('response-summary'),
             responseHeaders: document.getElementById('response-headers'),
-            responseBody: document.getElementById('response-body'),
+            responseBodyPretty: document.getElementById('response-body-pretty'),
+            responseBodyPreview: document.getElementById('response-body-preview'),
+            responseBodyViewButtons: Array.from(root.querySelectorAll('[data-response-body-view]')),
+            responseBodyModeButtons: Array.from(root.querySelectorAll('[data-response-body-mode]')),
             responseAssertions: document.getElementById('response-assertions'),
             builderMeta: document.getElementById('builder-meta'),
             tabButtons: Array.from(root.querySelectorAll('[data-tab]')),
@@ -1541,7 +1555,11 @@
             ensureHeadersRendered();
 
             const bodyType = (request.body_type || 'none').toLowerCase();
-            state.builder.bodyMode = bodyType;
+            const normalizeRawType = (rawType) => {
+                const candidate = (rawType || '').toLowerCase();
+                return Object.prototype.hasOwnProperty.call(RAW_TYPE_CONTENT_TYPES, candidate) ? candidate : 'text';
+            };
+
             if (bodyType === 'json') {
                 state.builder.bodyMode = 'raw';
                 state.builder.bodyRawType = 'json';
@@ -1551,10 +1569,12 @@
                 state.builder.bodyFormData = normalizeFormDataRows(request.body_form);
             } else if (bodyType === 'raw') {
                 state.builder.bodyMode = 'raw';
-                state.builder.bodyRawType = 'text';
+                state.builder.bodyRawType = normalizeRawType(request.body_raw_type || 'text');
                 state.builder.bodyRawText = request.body_raw || '';
             } else {
                 state.builder.bodyMode = 'none';
+                state.builder.bodyRawType = DEFAULT_BODY_RAW_TYPE;
+                state.builder.bodyRawText = '';
             }
 
             const authType = (request.auth_type || 'none').toLowerCase();
@@ -1622,14 +1642,11 @@
                 body.hidden = collapsed;
                 body.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
             }
-            const toggle = card.querySelector('.collection-toggle');
+            const toggle = card.querySelector('.collection-header-button');
             if (toggle) {
                 toggle.setAttribute('aria-expanded', String(!collapsed));
             }
-            const indicator = card.querySelector('.collection-toggle-indicator');
-            if (indicator) {
-                indicator.textContent = '>';
-            }
+            // No arrow icon; state change is communicated via expanded attribute.
         };
 
         const updateCollectionActionState = () => {
@@ -1867,17 +1884,25 @@
             state.dragState = null;
         };
 
-        const applyDirectoryCollapse = (directoryItem, toggleButton, collapsed) => {
-            if (!directoryItem || !toggleButton) {
+        const applyDirectoryCollapse = (directoryItem, collapsed) => {
+            if (!directoryItem) {
                 return;
             }
+
             directoryItem.classList.toggle('is-collapsed', collapsed);
-            toggleButton.setAttribute('aria-expanded', String(!collapsed));
-            const icon = collapsed ? '>' : 'v';
-            toggleButton.innerHTML = `<span aria-hidden="true">${icon}</span>`;
-            const name = directoryItem.dataset.directoryName || 'folder';
-            toggleButton.setAttribute('title', `${collapsed ? 'Expand' : 'Collapse'} ${name}`);
-            toggleButton.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} ${name}`);
+
+            const button = directoryItem.querySelector('.directory-button');
+            if (button) {
+                button.setAttribute('aria-expanded', String(!collapsed));
+            }
+
+            const branch = Array.from(directoryItem.children).find(
+                (child) => child instanceof HTMLElement && child.classList.contains('request-tree'),
+            );
+            if (branch instanceof HTMLElement) {
+                branch.hidden = collapsed;
+                branch.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
+            }
         };
 
         const createDragPlaceholder = (type) => {
@@ -2288,7 +2313,7 @@
             });
         };
 
-        const setupDirectoryDrag = (directoryItem, headerRow, directory, parentId, collection, container, toggleButton, directoryKey) => {
+        const setupDirectoryDrag = (directoryItem, headerRow, directory, parentId, collection, container, directoryKey) => {
             directoryItem.dataset.directoryId = directory.id;
             directoryItem.dataset.collectionId = collection.id;
             directoryItem.dataset.parentId = parentId ?? '';
@@ -2318,9 +2343,9 @@
                 if (drag.type === 'directory') {
                     handleDirectoryDragOver(event, directoryItem, collection.id);
                 } else if (drag.type === 'request') {
-                    if (directoryKey && toggleButton && state.collapsedDirectoryKeys.has(directoryKey)) {
+                    if (directoryKey && state.collapsedDirectoryKeys.has(directoryKey)) {
                         state.collapsedDirectoryKeys.delete(directoryKey);
-                        applyDirectoryCollapse(directoryItem, toggleButton, false);
+                        applyDirectoryCollapse(directoryItem, false);
                     }
                     const requestList = directoryItem.querySelector('.request-list');
                     if (requestList) {
@@ -2380,10 +2405,9 @@
                     if (directoryCollectionId !== null && dirId !== null) {
                         const key = buildDirectoryMenuKey(directoryCollectionId, dirId);
                         const directoryItem = button.closest('.directory-item');
-                        const toggle = directoryItem?.querySelector('.directory-toggle');
-                        if (directoryItem && toggle) {
+                        if (directoryItem) {
                             const collapsed = state.collapsedDirectoryKeys.has(key);
-                            applyDirectoryCollapse(directoryItem, toggle, collapsed);
+                            applyDirectoryCollapse(directoryItem, collapsed);
                         }
                     }
                 });
@@ -3502,36 +3526,42 @@
                 const header = document.createElement('div');
                 header.className = 'collection-card__header';
 
-                const toggleButton = document.createElement('button');
-                toggleButton.type = 'button';
-                toggleButton.className = 'collection-toggle';
-                toggleButton.id = `collection-toggle-${collection.id}`;
-                toggleButton.setAttribute('aria-expanded', String(!collapsed));
-                toggleButton.innerHTML = `
-                    <span class="collection-toggle-indicator" aria-hidden="true">></span>
-                    <span class="collection-name">
-                        <span class="collection-name-text">${escapeHtml(collection.name)}</span>
-                        <span class="request-count">${(collection.requests || []).length} requests</span>
-                    </span>
-                `;
-                toggleButton.addEventListener('click', (event) => {
-                    event.stopPropagation();
+                const headerButton = document.createElement('button');
+                headerButton.type = 'button';
+                headerButton.className = 'collection-header-button';
+                headerButton.id = `collection-header-${collection.id}`;
+                headerButton.setAttribute('aria-expanded', String(!collapsed));
+
+                const headerText = document.createElement('span');
+                headerText.className = 'collection-header-text collection-name';
+
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'collection-name-text';
+                nameSpan.textContent = collection.name;
+
+                headerText.appendChild(nameSpan);
+
+                headerButton.appendChild(headerText);
+
+                headerButton.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    const currentlyCollapsed = state.collapsedCollections.has(collection.id);
                     closeCollectionMenu();
                     closeDirectoryMenu();
                     closeRequestMenu();
                     state.openCollectionMenuId = null;
-                    const currentlyCollapsed = state.collapsedCollections.has(collection.id);
-                    if (currentlyCollapsed) {
-                        state.openRequestMenuKey = null;
-                        activateCollection(collection, { preserveExistingRequest: true });
-                    } else {
+                    if (!currentlyCollapsed) {
+                        event.stopPropagation();
                         state.collapsedCollections.add(collection.id);
                         updateCardCollapseState(card, true);
                         highlightSelection();
+                        return;
                     }
+                    state.openRequestMenuKey = null;
+                    // Allow card click handler to activate and expand the collection
                 });
 
-                header.appendChild(toggleButton);
+                header.appendChild(headerButton);
 
                 const menuWrapper = document.createElement('div');
                 menuWrapper.className = 'collection-menu-wrapper';
@@ -3589,8 +3619,8 @@
                 body.id = `collection-body-${collection.id}`;
                 body.className = 'collection-body';
                 body.setAttribute('role', 'region');
-                body.setAttribute('aria-labelledby', toggleButton.id);
-                toggleButton.setAttribute('aria-controls', body.id);
+                body.setAttribute('aria-labelledby', headerButton.id);
+                headerButton.setAttribute('aria-controls', body.id);
 
                 const desc = document.createElement('div');
                 desc.className = 'collection-desc';
@@ -3873,11 +3903,20 @@
                             const directoryKey = buildDirectoryMenuKey(collection.id, directory.id);
                             const isCollapsed = state.collapsedDirectoryKeys.has(directoryKey);
 
-                            const toggleButton = document.createElement('button');
-                            toggleButton.type = 'button';
-                            toggleButton.className = 'directory-toggle';
-                            toggleButton.addEventListener('click', (event) => {
+                            const button = document.createElement('button');
+                            button.type = 'button';
+                            button.className = 'directory-button';
+                            button.dataset.collectionId = collection.id;
+                            button.dataset.directoryId = directory.id;
+                            button.setAttribute('aria-expanded', String(!isCollapsed));
+
+                            button.textContent = directory.name;
+
+                            button.addEventListener('click', (event) => {
+                                event.preventDefault();
                                 event.stopPropagation();
+                                closeCollectionMenu();
+                                closeDirectoryMenu();
                                 const currentlyCollapsed = state.collapsedDirectoryKeys.has(directoryKey);
                                 const nextCollapsed = !currentlyCollapsed;
                                 if (nextCollapsed) {
@@ -3885,20 +3924,8 @@
                                 } else {
                                     state.collapsedDirectoryKeys.delete(directoryKey);
                                 }
-                                applyDirectoryCollapse(directoryItem, toggleButton, nextCollapsed);
-                            });
-                            headerRow.appendChild(toggleButton);
+                                applyDirectoryCollapse(directoryItem, nextCollapsed);
 
-                            const button = document.createElement('button');
-                            button.type = 'button';
-                            button.className = 'directory-button';
-                            button.dataset.collectionId = collection.id;
-                            button.dataset.directoryId = directory.id;
-                            button.textContent = directory.name;
-                            button.addEventListener('click', (event) => {
-                                event.stopPropagation();
-                                closeCollectionMenu();
-                                closeDirectoryMenu();
                                 state.selectedCollectionId = collection.id;
                                 state.selectedDirectoryId = directory.id;
                                 let nextRequest = null;
@@ -4054,19 +4081,39 @@
                                 directoryItem.appendChild(childBranch);
                             }
 
-                            setupDirectoryDrag(directoryItem, headerRow, directory, directory.parent_id ?? null, collection, directoriesContainer, toggleButton, directoryKey);
-                            applyDirectoryCollapse(directoryItem, toggleButton, isCollapsed);
+                            setupDirectoryDrag(
+                                directoryItem,
+                                headerRow,
+                                directory,
+                                directory.parent_id ?? null,
+                                collection,
+                                directoriesContainer,
+                                directoryKey,
+                            );
+                            applyDirectoryCollapse(directoryItem, isCollapsed);
                             directoriesContainer.appendChild(directoryItem);
                         });
 
                         container.appendChild(directoriesContainer);
                     }
 
+                    const hasRequestItems = Boolean(requestList && requestList.children.length);
+                    const hasDirectoryItems = Boolean(children.length);
+                    if (!hasRequestItems && !hasDirectoryItems) {
+                        container.hidden = true;
+                        container.classList.add('request-tree--empty');
+                    } else {
+                        container.hidden = false;
+                        container.classList.remove('request-tree--empty');
+                    }
+
                     return container;
                 };
 
                 const tree = buildDirectoryBranch(null);
-                body.appendChild(tree);
+                if (tree) {
+                    body.appendChild(tree);
+                }
                 if (!requests.length && !directories.length) {
                     const empty = document.createElement('p');
                     empty.className = 'muted';
@@ -4283,11 +4330,168 @@
             }
         };
 
+        const getHeaderValueCaseInsensitive = (headers, key) => {
+            if (!headers || typeof headers !== 'object') {
+                return '';
+            }
+            const lowerKey = key.toLowerCase();
+            const entry = Object.entries(headers).find(([name]) => name.toLowerCase() === lowerKey);
+            return entry ? String(entry[1]) : '';
+        };
+
+        const buildResponsePreviewHtml = (view) => {
+            const baseStyle = 'body{margin:0;padding:0;background:#ffffff;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;font-size:14px;color:#111;}pre{margin:0;padding:16px;font-family:ui-monospace,Consolas,Menlo,monospace;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-word;}';
+            if (view === 'html') {
+                const htmlMarkup = state.responseBodyContent.htmlText || state.responseBodyContent.rawText || '';
+                if (!htmlMarkup || !htmlMarkup.trim()) {
+                    return `<!doctype html><html><head><meta charset="utf-8"><style>${baseStyle}</style></head><body><pre>No body content.</pre></body></html>`;
+                }
+                return htmlMarkup;
+            }
+            const textContent = view === 'json'
+                ? state.responseBodyContent.jsonText || state.responseBodyContent.rawText
+                : state.responseBodyContent.xmlText || state.responseBodyContent.rawText;
+            const safe = escapeHtml(textContent && textContent.trim() ? textContent : 'No body content.');
+            return `<!doctype html><html><head><meta charset="utf-8"><style>${baseStyle}</style></head><body><pre>${safe}</pre></body></html>`;
+        };
+
+        const getAvailableResponseViews = () => {
+            const available = [];
+            if (state.responseBodyContent.jsonText && state.responseBodyContent.jsonText.trim()) {
+                available.push('json');
+            }
+            if (state.responseBodyContent.xmlText && state.responseBodyContent.xmlText.trim()) {
+                available.push('xml');
+            }
+            if (state.responseBodyContent.htmlText && state.responseBodyContent.htmlText.trim()) {
+                available.push('html');
+            }
+            return available;
+        };
+
+        const ensureResponseBodySelection = (availableViews) => {
+            if (availableViews.length && !availableViews.includes(state.responseBodyView) && !state.responseBodyManualView) {
+                state.responseBodyView = availableViews[0];
+            }
+            if (!availableViews.length && !state.responseBodyManualView) {
+                state.responseBodyView = 'json';
+            }
+            if (!RESPONSE_BODY_MODES.includes(state.responseBodyMode)) {
+                state.responseBodyMode = 'pretty';
+            }
+            if (!availableViews.length && state.responseBodyMode === 'preview') {
+                state.responseBodyMode = 'pretty';
+            }
+        };
+
+        const updateResponseBodyUI = () => {
+            const viewButtons = elements.responseBodyViewButtons || [];
+            const modeButtons = elements.responseBodyModeButtons || [];
+            const prettyEl = elements.responseBodyPretty;
+            const previewEl = elements.responseBodyPreview;
+            if (!prettyEl || !previewEl) {
+                return;
+            }
+            const availableViews = getAvailableResponseViews();
+            const hasAny = availableViews.length > 0;
+            ensureResponseBodySelection(availableViews);
+
+            viewButtons.forEach((button) => {
+                const buttonView = button.dataset.responseBodyView;
+                if (!buttonView) {
+                    button.classList.remove('is-active');
+                    button.classList.remove('is-muted');
+                    button.setAttribute('aria-pressed', 'false');
+                    return;
+                }
+                const isAvailable = availableViews.includes(buttonView);
+                button.classList.toggle('is-muted', !isAvailable);
+                if (!isAvailable) {
+                    button.setAttribute('title', 'Auto-formatting not available for this body type. Showing raw content.');
+                } else {
+                    button.removeAttribute('title');
+                }
+                const isActive = buttonView === state.responseBodyView;
+                button.classList.toggle('is-active', isActive);
+                button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+            });
+
+            modeButtons.forEach((button) => {
+                const buttonMode = button.dataset.responseBodyMode;
+                const shouldDisable = buttonMode === 'preview' && !hasAny;
+                button.disabled = shouldDisable;
+                if (shouldDisable) {
+                    button.setAttribute('title', 'Preview is available for JSON, XML, or HTML bodies.');
+                } else {
+                    button.removeAttribute('title');
+                }
+                const isActive = buttonMode === state.responseBodyMode;
+                button.classList.toggle('is-active', isActive);
+                button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+            });
+
+            const fallbackPrettyText = hasAny ? 'No body content.' : '{}';
+            let prettyText = '';
+            if (state.responseBodyView === 'json') {
+                prettyText = state.responseBodyContent.jsonText || state.responseBodyContent.rawText;
+            } else if (state.responseBodyView === 'xml') {
+                prettyText = state.responseBodyContent.xmlText || state.responseBodyContent.rawText;
+            } else if (state.responseBodyView === 'html') {
+                prettyText = state.responseBodyContent.htmlText || state.responseBodyContent.rawText;
+            }
+            prettyEl.textContent = prettyText && prettyText.trim() ? prettyText : fallbackPrettyText;
+
+            if (state.responseBodyMode === 'preview' && hasAny) {
+                prettyEl.hidden = true;
+                previewEl.hidden = false;
+                previewEl.srcdoc = buildResponsePreviewHtml(state.responseBodyView);
+            } else {
+                prettyEl.hidden = false;
+                previewEl.hidden = true;
+                previewEl.srcdoc = '';
+            }
+        };
+
+        const setResponseBodyView = (view) => {
+            if (!RESPONSE_BODY_VIEWS.includes(view)) {
+                return;
+            }
+            state.responseBodyManualView = true;
+            if (state.responseBodyView !== view) {
+                state.responseBodyView = view;
+            }
+            updateResponseBodyUI();
+        };
+
+        const setResponseBodyMode = (mode) => {
+            if (!RESPONSE_BODY_MODES.includes(mode)) {
+                return;
+            }
+            if (state.responseBodyMode === mode) {
+                return;
+            }
+            state.responseBodyMode = mode;
+            updateResponseBodyUI();
+        };
+
+        const resetResponseBodyState = () => {
+            state.responseBodyContent = {
+                jsonText: '',
+                xmlText: '',
+                htmlText: '',
+                rawText: '',
+            };
+            state.responseBodyView = 'json';
+            state.responseBodyMode = 'pretty';
+            state.responseBodyManualView = false;
+            updateResponseBodyUI();
+        };
+
         const renderResponse = (payload) => {
             if (!payload) {
                 elements.responseSummary.textContent = 'No request executed yet.';
                 elements.responseHeaders.textContent = '{}';
-                elements.responseBody.textContent = '{}';
+                resetResponseBodyState();
                 elements.responseAssertions.innerHTML = '<p class="muted">No assertions evaluated.</p>';
                 return;
             }
@@ -4301,11 +4505,32 @@
             }
             elements.responseSummary.textContent = statusLine.join(' · ');
             elements.responseHeaders.textContent = prettyJson(payload.headers || {});
+            const rawBody = typeof payload.body === 'string' ? payload.body : '';
+            const trimmedBody = rawBody.trim();
+            let jsonText = '';
             if (payload.json !== null && payload.json !== undefined) {
-                elements.responseBody.textContent = prettyJson(payload.json);
-            } else {
-                elements.responseBody.textContent = payload.body || '';
+                jsonText = prettyJson(payload.json);
+            } else if (trimmedBody) {
+                const parsed = tryParseJsonSilent(trimmedBody);
+                if (parsed !== null) {
+                    jsonText = prettyJson(parsed);
+                }
             }
+
+            const contentType = getHeaderValueCaseInsensitive(payload.headers || {}, 'Content-Type').toLowerCase();
+            const looksHtml = !!trimmedBody && (contentType.includes('html') || /<!doctype\s+html/i.test(trimmedBody) || /<html/i.test(trimmedBody));
+            const looksXml = !!trimmedBody && !looksHtml && (contentType.includes('xml') || /^<\?xml/i.test(trimmedBody) || (/^</.test(trimmedBody) && trimmedBody.endsWith('>')));
+            const htmlText = looksHtml ? rawBody : '';
+            const xmlText = looksXml ? rawBody : '';
+
+            state.responseBodyContent = {
+                jsonText,
+                xmlText,
+                htmlText,
+                rawText: rawBody || jsonText || xmlText || htmlText || '',
+            };
+            state.responseBodyManualView = false;
+            updateResponseBodyUI();
 
             if (payload.assertions?.length) {
                 const assertionItems = payload.assertions.map((item) => {
@@ -4324,6 +4549,32 @@
                 elements.responseAssertions.innerHTML = '<p class="muted">No assertions evaluated for this request.</p>';
             }
         };
+
+        elements.responseBodyViewButtons.forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                if (button.disabled) {
+                    return;
+                }
+                const view = button.dataset.responseBodyView;
+                if (view) {
+                    setResponseBodyView(view);
+                }
+            });
+        });
+
+        elements.responseBodyModeButtons.forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                if (button.disabled) {
+                    return;
+                }
+                const mode = button.dataset.responseBodyMode;
+                if (mode) {
+                    setResponseBodyMode(mode);
+                }
+            });
+        });
 
         const createScriptConsoleProxy = () => {
             const buffer = [];
@@ -4708,6 +4959,7 @@
                 body_json: {},
                 body_form: {},
                 body_raw: '',
+                body_raw_type: 'text',
                 auth_type: state.builder.auth.type || 'none',
                 auth_basic: {},
                 auth_bearer: '',
@@ -4730,6 +4982,10 @@
             }
 
             const { bodyMode, bodyRawType, bodyRawText, bodyFormData, bodyUrlEncoded, bodyBinary } = state.builder;
+            const normalizedRawType = Object.prototype.hasOwnProperty.call(RAW_TYPE_CONTENT_TYPES, bodyRawType)
+                ? bodyRawType
+                : 'text';
+            definition.body_raw_type = normalizedRawType;
             if (bodyMode === 'raw') {
                 if (bodyRawType === 'json') {
                     try {

@@ -120,6 +120,7 @@ class ApiRequest(TimeStampedModel):
     body_json = models.JSONField(default=dict, blank=True)
     body_form = models.JSONField(default=dict, blank=True)
     body_raw = models.TextField(blank=True)
+    body_raw_type = models.CharField(max_length=20, default="text")
     body_transforms = models.JSONField(default=dict, blank=True)
 
     auth_type = models.CharField(max_length=10, choices=AuthTypes.choices, default=AuthTypes.NONE)

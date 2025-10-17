@@ -52,6 +52,7 @@
                         <option value="">No environment</option>
                     </select>
                     <button type="button" id="create-request" class="btn btn-secondary" disabled>New Request</button>
+                    <button type="button" id="save-request" class="btn btn-secondary">Save</button>
                 </div>
             </div>
             <div class="builder-meta" id="builder-meta">Select a request to preview details.</div>
@@ -82,7 +83,6 @@
                 </div>
                 <div class="form-field form-field--actions">
                     <div class="form-actions">
-                        <button type="button" id="save-request" class="btn btn-secondary">Save</button>
                         <button type="submit" id="run-request" class="btn btn-primary" disabled>SEND</button>
                     </div>
                 </div>
@@ -316,7 +316,7 @@
                 <h3 id="body-tools-heading" class="sr-only">Body Tools</h3>
                 <div class="builder-body-tools">
                     <div class="builder-body-tools__group">
-                        <header class="builder-section__head builder-section__head--sub builder-section__head--right">
+                        <header class="builder-section__head builder-section__head--sub builder-section__head--centered">
                             <h3>Field Overrides</h3>
                             <button type="button" id="add-body-override" class="btn btn-tertiary">Add Override</button>
                         </header>
@@ -337,7 +337,7 @@
                         </div>
                     </div>
                     <div class="builder-body-tools__group">
-                        <header class="builder-section__head builder-section__head--sub builder-section__head--right">
+                        <header class="builder-section__head builder-section__head--sub builder-section__head--centered">
                             <h3>Signature Builders</h3>
                             <button type="button" id="add-body-signature" class="btn btn-tertiary">Add Signature</button>
                         </header>
@@ -381,8 +381,24 @@
                         <pre id="response-headers" class="response-pre">{}</pre>
                     </div>
                     <div class="response-section">
-                        <h3>Body</h3>
-                        <pre id="response-body" class="response-pre">{}</pre>
+                        <div class="response-section__header">
+                            <h3>Body</h3>
+                            <div class="response-body__controls" role="group" aria-label="Response body view options">
+                                <div class="response-body__views" role="group" aria-label="Format type">
+                                    <button type="button" class="response-body__view-button is-active" data-response-body-view="json" aria-pressed="true">JSON</button>
+                                    <button type="button" class="response-body__view-button" data-response-body-view="xml" aria-pressed="false">XML</button>
+                                    <button type="button" class="response-body__view-button" data-response-body-view="html" aria-pressed="false">HTML</button>
+                                </div>
+                                <div class="response-body__modes" role="group" aria-label="Display mode">
+                                    <button type="button" class="response-body__mode-button is-active" data-response-body-mode="pretty" aria-pressed="true">Pretty</button>
+                                    <button type="button" class="response-body__mode-button" data-response-body-mode="preview" aria-pressed="false">Preview</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="response-body__content">
+                            <pre id="response-body-pretty" class="response-pre">{}</pre>
+                            <iframe id="response-body-preview" class="response-preview" title="Response body preview" hidden></iframe>
+                        </div>
                     </div>
                     <div class="response-section">
                         <h3>Assertions</h3>
