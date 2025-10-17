@@ -17,31 +17,31 @@
         </div>
     </header>
 
-    <section class="automation-metrics" aria-label="Automation metrics">
-        <article class="automation-metric">
-            <span class="metric-label">Test Plans</span>
-            <strong class="metric-value" data-count-target="{{ initial_metrics.plans }}">{{ initial_metrics.plans }}</strong>
-        </article>
-        <article class="automation-metric">
-            <span class="metric-label">Scenarios</span>
-            <strong class="metric-value" data-count-target="{{ initial_metrics.scenarios }}">{{ initial_metrics.scenarios }}</strong>
-        </article>
-        <article class="automation-metric">
-            <span class="metric-label">Test Cases</span>
-            <strong class="metric-value" data-count-target="{{ initial_metrics.cases }}">{{ initial_metrics.cases }}</strong>
-        </article>
-        <article class="automation-metric">
-            <span class="metric-label">Collections</span>
-            <strong class="metric-value" data-count-target="{{ initial_metrics.collections }}">{{ initial_metrics.collections }}</strong>
-        </article>
-        <article class="automation-metric">
-            <span class="metric-label">Runs</span>
-            <strong class="metric-value" data-count-target="{{ initial_metrics.runs }}">{{ initial_metrics.runs }}</strong>
-        </article>
-        <article class="automation-metric">
-            <span class="metric-label">Environments</span>
-            <strong class="metric-value" data-count-target="{{ initial_metrics.environments }}">{{ initial_metrics.environments }}</strong>
-        </article>
+    <section class="automation-metrics-widgets" aria-label="Automation metrics">
+        <div class="metrics-widget">
+            <div class="widget-title">Test Plans</div>
+            <div class="widget-value" data-count-target="{{ initial_metrics.plans }}">{{ initial_metrics.plans }}</div>
+        </div>
+        <div class="metrics-widget">
+            <div class="widget-title">Scenarios</div>
+            <div class="widget-value" data-count-target="{{ initial_metrics.scenarios }}">{{ initial_metrics.scenarios }}</div>
+        </div>
+        <div class="metrics-widget">
+            <div class="widget-title">Test Cases</div>
+            <div class="widget-value" data-count-target="{{ initial_metrics.cases }}">{{ initial_metrics.cases }}</div>
+        </div>
+        <div class="metrics-widget">
+            <div class="widget-title">Collections</div>
+            <div class="widget-value" data-count-target="{{ initial_metrics.collections }}">{{ initial_metrics.collections }}</div>
+        </div>
+        <div class="metrics-widget">
+            <div class="widget-title">Runs</div>
+            <div class="widget-value" data-count-target="{{ initial_metrics.runs }}">{{ initial_metrics.runs }}</div>
+        </div>
+        <div class="metrics-widget">
+            <div class="widget-title">Environments</div>
+            <div class="widget-value" data-count-target="{{ initial_metrics.environments }}">{{ initial_metrics.environments }}</div>
+        </div>
     </section>
 
     <section class="automation-panel wide" data-panel="runs" aria-labelledby="headline-runs">
