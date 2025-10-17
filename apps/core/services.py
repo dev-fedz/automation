@@ -8,6 +8,7 @@ import re
 import time
 from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Tuple
+from xml.etree import ElementTree as ET
 
 import requests
 from django.db import transaction
@@ -94,6 +95,72 @@ def _parse_signature_components(raw_text: str) -> list[dict[str, str]]:
     return components
 
 
+def _split_xml_path(path: str) -> list[str]:
+    normalized = (path or "").replace("/", ".")
+    return _split_path(normalized)
+
+
+def _xml_local_name(tag: str) -> str:
+    if not isinstance(tag, str):
+        return ""
+    if "}" in tag:
+        return tag.split("}", 1)[1]
+    if ":" in tag:
+        return tag.split(":", 1)[1]
+    return tag
+
+
+def _parse_xml_segment(segment: str) -> tuple[str, int]:
+    name = (segment or "").strip()
+    index = 0
+    if "[" in name and name.endswith("]"):
+        base, bracket = name.split("[", 1)
+        name = base.strip()
+        try:
+            index = int(bracket[:-1])
+        except ValueError:
+            index = 0
+    if ":" in name:
+        name = name.split(":", 1)[1]
+    return name, index
+
+
+def _find_xml_child(parent: ET.Element, segment: str) -> ET.Element | None:
+    name, index = _parse_xml_segment(segment)
+    if not name:
+        return None
+    matches = [child for child in list(parent) if _xml_local_name(child.tag) == name]
+    if not matches:
+        return None
+    if index < 0 or index >= len(matches):
+        return None
+    return matches[index]
+
+
+def _locate_xml_node(root: ET.Element, path: str) -> ET.Element | None:
+    if root is None:
+        return None
+    segments = _split_xml_path(path)
+    if not segments:
+        return root
+    first_name, first_index = _parse_xml_segment(segments[0])
+    current = root
+    if first_name and _xml_local_name(current.tag) == first_name and first_index in (0,):
+        segments = segments[1:]
+    for segment in segments:
+        current = _find_xml_child(current, segment)
+        if current is None:
+            return None
+    return current
+
+
+def _get_xml_node_text(root: ET.Element, path: str) -> str | None:
+    node = _locate_xml_node(root, path)
+    if node is None:
+        return None
+    return node.text
+
+
 def _apply_body_transforms(
     json_payload: Any,
     transforms: Dict[str, Any] | None,
@@ -146,6 +213,72 @@ def _apply_body_transforms(
                 overrides[normalized] = signature_value
                 variables[normalized] = signature_value
     return overrides
+
+
+def _apply_xml_body_transforms(
+    xml_text: str,
+    transforms: Dict[str, Any] | None,
+    variables: Dict[str, Any],
+) -> str:
+    if not isinstance(xml_text, str) or not xml_text.strip():
+        return xml_text
+    if not transforms:
+        return xml_text
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return xml_text
+
+    config = transforms or {}
+
+    for override in config.get("overrides", []) or []:
+        path = str(override.get("path", "")).strip()
+        if not path:
+            continue
+        raw_value = override.get("value", "")
+        resolved_value = _resolve_variables(str(raw_value), variables)
+        target = _locate_xml_node(root, path)
+        if target is None:
+            continue
+        target.text = resolved_value
+
+    for signature in config.get("signatures", []) or []:
+        target_path = (
+            signature.get("target_path")
+            or signature.get("targetPath")
+            or signature.get("target")
+            or ""
+        )
+        target_path = str(target_path).strip()
+        if not target_path:
+            continue
+        algorithm = str(signature.get("algorithm", "sha512")).lower()
+        components = _parse_signature_components(str(signature.get("components", "")))
+        if not components:
+            continue
+        parts: list[str] = []
+        for component in components:
+            if component.get("type") == "literal":
+                literal_raw = component.get("value", "")
+                parts.append(_resolve_variables(str(literal_raw), variables))
+            else:
+                value = _get_xml_node_text(root, component.get("value", ""))
+                parts.append("" if value is None else str(value))
+        try:
+            signature_value = _compute_hash_hex(algorithm, "".join(parts))
+        except ValueError as error:  # pragma: no cover - configuration error path
+            raise ValueError(f"Unable to compute signature for '{target_path}': {error}") from error
+        target_node = _locate_xml_node(root, target_path)
+        if target_node is None:
+            continue
+        target_node.text = signature_value
+        store_name = signature.get("store_as") or signature.get("storeAs")
+        if store_name:
+            normalized = str(store_name).strip()
+            if normalized:
+                variables[normalized] = signature_value
+
+    return ET.tostring(root, encoding="unicode")
 
 
 def _extract_json_path(data: Any, path: str) -> Any:
@@ -273,7 +406,12 @@ def _build_request_payload(
     elif api_request.body_type == models.ApiRequest.BodyTypes.FORM:
         data = _resolve_variables(deepcopy(api_request.body_form), variables)
     elif api_request.body_type == models.ApiRequest.BodyTypes.RAW:
-        data = _resolve_variables(api_request.body_raw, variables)
+        raw_body = _resolve_variables(api_request.body_raw, variables)
+        if isinstance(raw_body, str):
+            raw_type = (api_request.body_raw_type or "").lower()
+            if raw_type == "xml":
+                raw_body = _apply_xml_body_transforms(raw_body, api_request.body_transforms, variables)
+        data = raw_body
 
     auth = None
     if api_request.auth_type == models.ApiRequest.AuthTypes.BASIC:
