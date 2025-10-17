@@ -646,6 +646,7 @@
         const signaturesTable = elements.bodySignaturesBody;
         let suppressUrlSync = false;
         let rawEditor = null;
+        let rawEditorResizeObserver = null;
         let jsonCompletionDisposable = null;
         let monacoLoaderPromise = null;
         let hasConfiguredJsonDiagnostics = false;
@@ -1333,6 +1334,20 @@
                         insertSpaces: true,
                         smoothScrolling: true,
                     });
+
+                    if (typeof ResizeObserver !== 'undefined') {
+                        if (!rawEditorResizeObserver) {
+                            rawEditorResizeObserver = new ResizeObserver(() => {
+                                if (rawEditor) {
+                                    rawEditor.layout();
+                                }
+                            });
+                        } else {
+                            rawEditorResizeObserver.disconnect();
+                        }
+                        rawEditorResizeObserver.observe(elements.bodyRawContainer);
+                        rawEditor.layout();
+                    }
 
                     const togglePlaceholder = () => {
                         const content = rawEditor.getValue();
