@@ -80,6 +80,35 @@
         return date.toLocaleString();
     };
 
+    // Normalize scenario objects from the API so `module` and `plan` are ids
+    // (some API responses may return nested objects for these fields).
+    const normalizeScenario = (s) => {
+        if (!s || typeof s !== 'object') return s;
+        const next = { ...s };
+        try {
+            if (next.module && typeof next.module === 'object') {
+                next.module = next.module.id || next.module.pk || null;
+            }
+        } catch (e) { /* ignore */ }
+        try {
+            if (next.plan && typeof next.plan === 'object') {
+                next.plan = next.plan.id || next.plan.pk || null;
+            }
+        } catch (e) { /* ignore */ }
+        // support module_id / plan_id fields
+        try {
+            if ((next.module === undefined || next.module === null) && (next.module_id !== undefined)) {
+                next.module = next.module_id;
+            }
+        } catch (e) { }
+        try {
+            if ((next.plan === undefined || next.plan === null) && (next.plan_id !== undefined)) {
+                next.plan = next.plan_id;
+            }
+        } catch (e) { }
+        return next;
+    };
+
     const toKeyValueRows = (source) => {
         if (!source || typeof source !== "object") {
             return [{ key: "", value: "" }];
@@ -160,6 +189,7 @@
     };
 
     document.addEventListener("DOMContentLoaded", () => {
+        try { console.info('[data-management] data_management.js DOMContentLoaded handler running'); } catch (e) { /* ignore */ }
         // support mounting the same module on both the dedicated Data Management
         // page (`data-management-app`) and the Test Plans page (`automation-app`).
         const root = document.getElementById("data-management-app") || document.getElementById("automation-app");
@@ -554,7 +584,7 @@
                         setStatus('Loading scenarios…', 'info');
                         const url = endpoints.scenarios || (apiEndpoints.scenarios ? ensureTrailingSlash(apiEndpoints.scenarios) : '/api/core/test-scenarios/');
                         const data = await request(buildUrl(url, { module: moduleId }), { method: 'GET' });
-                        moduleObj.scenarios = Array.isArray(data) ? data : [];
+                        moduleObj.scenarios = Array.isArray(data) ? data.map(normalizeScenario) : [];
                         moduleObj._scenarios_loaded = true;
                         // re-render list so scenarios appear in the DOM
                         renderTestModulesList();
@@ -648,6 +678,31 @@
             if (!readOnly && titleInput) titleInput.focus();
         };
 
+        // expose for other modules (e.g., automation.js) to reuse
+        try {
+            window.openModuleScenarioModal = openModuleScenarioModal;
+        } catch (e) {
+            // ignore if window not available
+        }
+
+        // Listen for a custom event so other scripts can request the modal
+        // without depending on global function timing.
+        try {
+            document.addEventListener('open-module-scenario', (ev) => {
+                try {
+                    const detail = ev && ev.detail ? ev.detail : {};
+                    const mode = detail.mode || 'create';
+                    const moduleId = typeof detail.moduleId !== 'undefined' ? detail.moduleId : null;
+                    try { console.info('[data-management] received open-module-scenario', { mode, moduleId }); } catch (e) { /* ignore */ }
+                    openModuleScenarioModal(mode, moduleId || null);
+                } catch (err) {
+                    // ignore errors from handler
+                }
+            });
+        } catch (err) {
+            // ignore if document not available
+        }
+
         const closeModuleAddScenarioModal = () => {
             const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
             if (!modal) return;
@@ -664,6 +719,7 @@
         };
 
         const handleModuleAddScenarioSubmit = async (event) => {
+            console.debug('[data-management] handleModuleAddScenarioSubmit fired', { mode: state.moduleScenarioModalMode, currentId: state.moduleScenarioCurrentId });
             event.preventDefault();
             const form = document.getElementById('module-add-scenario-form');
             if (!form) return;
@@ -674,8 +730,10 @@
             const postInput = document.getElementById('module-add-scenario-postconditions');
             const tagsInput = document.getElementById('module-add-scenario-tags');
             const moduleId = moduleInput && moduleInput.value ? Number(moduleInput.value) : null;
+            // Require module selection: New Scenario must be opened with a
+            // module selected. If missing, surface an error and abort save.
             if (!moduleId) {
-                setStatus('Module id missing for scenario.', 'error');
+                setStatus('Please select a module before creating a scenario.', 'error');
                 return;
             }
             const payload = {
@@ -688,8 +746,10 @@
                 plan: null,
             };
             // try to infer plan from module if available
-            const moduleObj = state.testModules.find((m) => Number(m.id) === Number(moduleId));
-            if (moduleObj && moduleObj.plan_id) payload.plan = moduleObj.plan_id;
+            const moduleObj = moduleId ? state.testModules.find((m) => Number(m.id) === Number(moduleId)) : null;
+            if (moduleObj && moduleObj.plan_id) {
+                payload.plan = moduleObj.plan_id;
+            }
             try {
                 setStatus('Saving scenario…', 'info');
                 const urlBase = endpoints.scenarios || (apiEndpoints.scenarios ? ensureTrailingSlash(apiEndpoints.scenarios) : '/api/core/test-scenarios/');
@@ -699,11 +759,12 @@
                     const updated = await request(editUrl, { method: 'PATCH', body: JSON.stringify(payload) });
                     // update in state
                     if (moduleObj && Array.isArray(moduleObj.scenarios)) {
-                        const idx = moduleObj.scenarios.findIndex((s) => Number(s.id) === Number(updated.id));
+                        const normalizedUpdated = normalizeScenario(updated);
+                        const idx = moduleObj.scenarios.findIndex((s) => Number(s.id) === Number(normalizedUpdated.id));
                         if (idx > -1) {
-                            moduleObj.scenarios[idx] = updated;
+                            moduleObj.scenarios[idx] = normalizedUpdated;
                         } else {
-                            moduleObj.scenarios.unshift(updated);
+                            moduleObj.scenarios.unshift(normalizedUpdated);
                         }
                         renderTestModulesList();
                         ensureModuleExpanded(moduleId);
@@ -716,8 +777,9 @@
                     const created = await request(urlBase, { method: 'POST', body: JSON.stringify(payload) });
                     // insert scenario into module's sublist in state and DOM
                     if (moduleObj) {
+                        const normalizedCreated = normalizeScenario(created);
                         moduleObj.scenarios = moduleObj.scenarios || [];
-                        moduleObj.scenarios.unshift(created);
+                        moduleObj.scenarios.unshift(normalizedCreated);
                         // re-render modules list to reflect changes
                         renderTestModulesList();
                         // keep this module expanded so the new scenario is visible
@@ -734,6 +796,32 @@
                 setStatus(message, 'error');
             }
         };
+
+        // Wire module add scenario form submit once during initialization.
+        // Previously this was incorrectly attached inside the keydown handler,
+        // which meant the handler wasn't always registered when the user clicked
+        // the Save button. Attach it once here so the form always works.
+        try {
+            const moduleAddScenarioFormInit = document.getElementById('module-add-scenario-form');
+            if (moduleAddScenarioFormInit) {
+                moduleAddScenarioFormInit.addEventListener('submit', handleModuleAddScenarioSubmit);
+            }
+        } catch (err) {
+            // ignore if DOM not ready or element missing
+        }
+        // Delegated submit handler: ensures the submit event is captured even if
+        // the form element is re-rendered or replaced. This supports the New
+        // Scenario flow where the modal may be opened from another page context.
+        document.addEventListener('submit', (ev) => {
+            const form = ev.target;
+            if (!form || form.id !== 'module-add-scenario-form') return;
+            try {
+                handleModuleAddScenarioSubmit(ev);
+            } catch (err) {
+                // let other handlers run; surface error in UI
+                setStatus(err instanceof Error ? err.message : 'Error saving scenario.', 'error');
+            }
+        });
 
         const loadTestTools = async () => {
             try {
@@ -2179,11 +2267,8 @@
                 }
             }
 
-            // wire module add scenario form submit (used by Test Modules rows)
-            const moduleAddScenarioForm = document.getElementById('module-add-scenario-form');
-            if (moduleAddScenarioForm) {
-                moduleAddScenarioForm.addEventListener('submit', handleModuleAddScenarioSubmit);
-            }
+            // other Escape key handling (module add scenario form wiring moved
+            // to initialization to avoid relying on keydown events)
         });
 
         // Test tools form wiring - initialize on DOMContentLoaded so buttons work immediately

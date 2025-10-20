@@ -16,79 +16,83 @@
         <section class="automation-panel" data-panel="scenarios" aria-labelledby="headline-scenarios">
             <div class="panel-header">
                 <h2 id="headline-scenarios">Scenarios</h2>
-                <p class="panel-meta">Linked to: <span data-role="selected-plan-name">{{ initial_selected_plan.name|default:"—" }}</span></p>
                 <div class="panel-controls">
+                    <input type="search" id="scenario-search" class="automation-search" placeholder="Search scenarios" aria-label="Search scenarios">
+                    <label for="scenario-plan" class="sr-only">Filter by plan</label>
+                    <select id="scenario-plan" class="inline-select" aria-label="Filter by plan">
+                        <option value="">— Select plan —</option>
+                    </select>
                     <label for="module-filter" class="sr-only">Filter by module</label>
-                    <select id="module-filter" class="inline-select" data-action="module-filter">
+                    <select id="module-filter" class="inline-select" data-action="module-filter" disabled>
                         <option value="">All modules</option>
                     </select>
+                    <button type="button" class="btn-primary" id="open-new-scenario" data-action="open-new-scenario">New Scenario</button>
                 </div>
             </div>
-            <div class="automation-list" data-role="scenario-list" aria-live="polite">
-                {% if initial_selected_plan and initial_selected_plan.scenarios %}
-                    <ul class="automation-items">
-                        {% for scenario in initial_selected_plan.scenarios %}
-                            <li class="automation-item{% if initial_selected_scenario and scenario.id == initial_selected_scenario.id %} is-active{% endif %}">
-                                <strong>{{ scenario.title|default:"Scenario" }}</strong>
-                                <span>{{ scenario.cases|length }} test case{% if scenario.cases|length != 1 %}s{% endif %}</span>
-                                {% if scenario.tags %}
-                                    <div class="automation-item-tags">
-                                        {% for tag in scenario.tags %}
-                                            <span class="automation-tag">{{ tag }}</span>
-                                        {% endfor %}
-                                    </div>
-                                {% endif %}
-                                {% if scenario.description %}<small>{{ scenario.description }}</small>{% endif %}
-                            </li>
-                        {% endfor %}
-                    </ul>
-                {% elif initial_selected_plan %}
-                    <p class="empty">No scenarios created yet for this plan.</p>
-                {% else %}
-                    <p class="empty">Select a plan to view scenarios.</p>
-                {% endif %}
+            <div class="card table-card automation-table-card" aria-live="polite">
+                <table class="table-modern automation-table" aria-label="Test scenarios">
+                    <thead>
+                        <tr>
+                            <th scope="col">Title</th>
+                            <th scope="col">Description</th>
+                            <th scope="col">Module</th>
+                            <th scope="col">Created</th>
+                            <th scope="col">Updated</th>
+                            <th scope="col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody data-role="scenario-table-body">
+                        <tr>
+                            <td colspan="6" class="empty">Select a plan to view scenarios.</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
-            <details class="automation-form-group">
-                <summary>Create Scenario</summary>
-                <form id="automation-scenario-form" class="automation-form" autocomplete="off">
-                    <fieldset>
-                        <legend class="sr-only">New scenario</legend>
-                        <div class="form-row">
-                            <label for="scenario-title">Title<span aria-hidden="true">*</span></label>
-                            <input type="text" id="scenario-title" name="title" required maxlength="150" placeholder="Upgrade subscription">
-                        </div>
-                        <div class="form-row">
-                            <label for="scenario-description">Description</label>
-                            <textarea id="scenario-description" name="description" rows="3" placeholder="Short summary of scenario coverage"></textarea>
-                        </div>
-                        <div class="form-row inline">
-                            <div>
-                                <label for="scenario-preconditions">Preconditions</label>
-                                <textarea id="scenario-preconditions" name="preconditions" rows="2" placeholder="User exists, has active session..."></textarea>
-                            </div>
-                            <div>
-                                <label for="scenario-postconditions">Postconditions</label>
-                                <textarea id="scenario-postconditions" name="postconditions" rows="2" placeholder="Subscription upgraded, entitlements refreshed..."></textarea>
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <label for="scenario-tags">Tags</label>
-                            <input type="text" id="scenario-tags" name="tags" placeholder="billing,critical">
-                        </div>
-                        <div class="form-row">
-                            <label for="scenario-module">Test Module</label>
-                            <select id="scenario-module" name="module">
-                                <option value="">(none)</option>
-                            </select>
-                        </div>
-                    </fieldset>
-                    <div class="form-actions">
-                        <button type="submit" class="btn-primary">Save Scenario</button>
-                        <button type="reset" class="btn-secondary" data-action="reset-scenario-form">Clear</button>
-                    </div>
-                </form>
-            </details>
+            <!-- Create Scenario UI removed in favor of modal-driven flow -->
         </section>
+    </div>
+
+    <!-- Module Add Scenario modal (same as Data Management) -->
+    <div class="automation-modal" data-role="module-add-scenario-modal" hidden>
+        <div class="automation-modal__backdrop" data-action="close-module-add-scenario-modal"></div>
+        <div class="automation-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="module-add-scenario-modal-title">
+            <header class="automation-modal__header">
+                <h2 id="module-add-scenario-modal-title">Add Scenario to Module</h2>
+                <button type="button" class="automation-modal__close" data-action="close-module-add-scenario-modal" aria-label="Close">&times;</button>
+            </header>
+            <form id="module-add-scenario-form" class="automation-form" autocomplete="off">
+                <fieldset>
+                    <legend class="sr-only">New scenario</legend>
+                    <input type="hidden" id="module-add-scenario-module-id" name="module">
+                    <div class="form-row">
+                        <label for="module-add-scenario-title">Title<span aria-hidden="true">*</span></label>
+                        <input type="text" id="module-add-scenario-title" name="title" required maxlength="150" placeholder="Scenario title">
+                    </div>
+                    <div class="form-row">
+                        <label for="module-add-scenario-description">Description</label>
+                        <textarea id="module-add-scenario-description" name="description" rows="3" placeholder="Short summary"></textarea>
+                    </div>
+                    <div class="form-row inline">
+                        <div>
+                            <label for="module-add-scenario-preconditions">Preconditions</label>
+                            <textarea id="module-add-scenario-preconditions" name="preconditions" rows="2"></textarea>
+                        </div>
+                        <div>
+                            <label for="module-add-scenario-postconditions">Postconditions</label>
+                            <textarea id="module-add-scenario-postconditions" name="postconditions" rows="2"></textarea>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <label for="module-add-scenario-tags">Tags</label>
+                        <input type="text" id="module-add-scenario-tags" name="tags" placeholder="comma,separated">
+                    </div>
+                </fieldset>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">Save Scenario</button>
+                    <button type="button" class="btn-secondary" data-action="close-module-add-scenario-modal">Cancel</button>
+                </div>
+            </form>
+        </div>
     </div>
 
     {{ initial_plans|json_script:"automation-initial-plans" }}
@@ -100,5 +104,6 @@
 
 {% block body_js %}
     {{ block.super }}
+    <script src="{% static 'js/data_management.js' %}"></script>
     <script src="{% static 'js/automation.js' %}"></script>
 {% endblock %}

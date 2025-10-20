@@ -107,7 +107,27 @@
         }
     };
 
+    const debounce = (fn, delay) => {
+        let timeoutId;
+        return (...args) => {
+            window.clearTimeout(timeoutId);
+            timeoutId = window.setTimeout(() => fn(...args), delay);
+        };
+    };
+
+    const formatDateTime = (value) => {
+        if (!value) {
+            return "--";
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return "--";
+        }
+        return date.toLocaleString();
+    };
+
     document.addEventListener('DOMContentLoaded', () => {
+        try { console.info('[automation] automation.js DOMContentLoaded handler running'); } catch (e) { /* ignore */ }
         const root = document.getElementById('automation-app');
         if (!root) {
             return;
@@ -135,6 +155,7 @@
             status: root.querySelector('[data-role="status"]'),
             planList: root.querySelector('[data-role="plan-list"]'),
             scenarioList: root.querySelector('[data-role="scenario-list"]'),
+            scenarioTableBody: root.querySelector('[data-role="scenario-table-body"]'),
             caseList: root.querySelector('[data-role="case-list"]'),
             maintenanceList: root.querySelector('[data-role="maintenance-list"]'),
             planName: root.querySelector('[data-role="selected-plan-name"]'),
@@ -142,6 +163,8 @@
             caseSummary: root.querySelector('[data-role="case-summary"]'),
             planForm: document.getElementById('automation-plan-form'),
             scenarioForm: document.getElementById('automation-scenario-form'),
+            scenarioSearch: document.getElementById('scenario-search'),
+            scenarioPlan: document.getElementById('scenario-plan'),
             caseForm: document.getElementById('automation-case-form'),
             maintenanceForm: document.getElementById('automation-maintenance-form'),
             planModal: root.querySelector('[data-role="plan-modal"]'),
@@ -198,6 +221,54 @@
                 approvedBy: document.getElementById('maintenance-approved'),
                 updates: document.getElementById('maintenance-updates'),
             },
+        };
+
+        // populate plan and module selects for scenarios panel
+        const populateScenarioPlanAndModule = () => {
+            try {
+                const planSelect = els.scenarioPlan;
+                const moduleFilter = document.getElementById('module-filter');
+                const moduleSelect = document.getElementById('scenario-module');
+                // populate plans
+                if (planSelect) {
+                    planSelect.innerHTML = '';
+                    const placeholder = document.createElement('option');
+                    placeholder.value = '';
+                    placeholder.textContent = '— Select plan —';
+                    planSelect.appendChild(placeholder);
+                    state.plans.forEach((p) => {
+                        const opt = document.createElement('option');
+                        opt.value = p.id;
+                        opt.textContent = p.name || `Plan ${p.id}`;
+                        planSelect.appendChild(opt);
+                    });
+                }
+                // populate module filter with initialModules (keep disabled until plan selected)
+                if (moduleFilter) {
+                    // leave first placeholder option intact, then append modules
+                    const first = moduleFilter.querySelector('option');
+                    moduleFilter.innerHTML = '';
+                    if (first) moduleFilter.appendChild(first);
+                    const allOpt = document.createElement('option'); allOpt.value = ''; allOpt.textContent = 'All modules'; moduleFilter.appendChild(allOpt);
+                    if (Array.isArray(initialModules)) {
+                        initialModules.forEach((m) => {
+                            const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.title || `Module ${m.id}`;
+                            moduleFilter.appendChild(opt);
+                        });
+                    }
+                }
+                // populate scenario module select in the create form
+                if (moduleSelect) {
+                    moduleSelect.innerHTML = '';
+                    const none = document.createElement('option'); none.value = ''; none.textContent = '(none)'; moduleSelect.appendChild(none);
+                    if (Array.isArray(initialModules)) {
+                        initialModules.forEach((m) => {
+                            const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.title || `Module ${m.id}`;
+                            moduleSelect.appendChild(opt);
+                        });
+                    }
+                }
+            } catch (e) { /* ignore */ }
         };
 
         // Stepper state for multi-step plan creation
@@ -400,7 +471,41 @@
             return next;
         };
 
+        // Normalize scenario shape returned by the API so client-side code can
+        // reliably compare module and plan ids. Some API responses include
+        // nested objects for `module` or `plan` (e.g. { module: { id: 1, title: '...' } })
+        // which breaks equality checks like `String(s.module) === moduleFilterVal`.
+        const normalizeScenario = (s) => {
+            if (!s || typeof s !== 'object') return s;
+            const next = { ...s };
+            try {
+                if (next.module && typeof next.module === 'object') {
+                    // prefer id, fallback to pk
+                    next.module = next.module.id || next.module.pk || null;
+                }
+            } catch (e) { /* ignore */ }
+            try {
+                if (next.plan && typeof next.plan === 'object') {
+                    next.plan = next.plan.id || next.plan.pk || null;
+                }
+            } catch (e) { /* ignore */ }
+            // Support APIs that return module_id / plan_id instead of module/plan
+            try {
+                if ((next.module === undefined || next.module === null) && (next.module_id !== undefined)) {
+                    next.module = next.module_id;
+                }
+            } catch (e) { /* ignore */ }
+            try {
+                if ((next.plan === undefined || next.plan === null) && (next.plan_id !== undefined)) {
+                    next.plan = next.plan_id;
+                }
+            } catch (e) { /* ignore */ }
+            return next;
+        };
+
         const normalizePlans = (plans) => (Array.isArray(plans) ? plans.map(normalizePlan) : []);
+
+        const initialModules = readScriptJson('automation-initial-modules') || [];
 
         const state = {
             plans: normalizePlans(initialPlans),
@@ -409,14 +514,14 @@
             editingPlan: false,
         };
 
-        const getSelectedPlan = () => state.plans.find((plan) => plan.id === state.selectedPlanId) || null;
+        const getSelectedPlan = () => state.plans.find((plan) => Number(plan.id) === Number(state.selectedPlanId)) || null;
 
         const getSelectedScenario = () => {
             const plan = getSelectedPlan();
             if (!plan || !Array.isArray(plan.scenarios)) {
                 return null;
             }
-            return plan.scenarios.find((scenario) => scenario.id === state.selectedScenarioId) || null;
+            return plan.scenarios.find((scenario) => Number(scenario.id) === Number(state.selectedScenarioId)) || null;
         };
 
         const setStatus = (message, variant = 'info') => {
@@ -433,6 +538,67 @@
             els.status.textContent = message;
         };
 
+        // Lightweight toast helper for transient messages
+        const showToast = (message, timeout = 3000) => {
+            try {
+                let container = document.getElementById('automation-toast-container');
+                if (!container) {
+                    container = document.createElement('div');
+                    container.id = 'automation-toast-container';
+                    container.style.position = 'fixed';
+                    container.style.right = '16px';
+                    container.style.bottom = '16px';
+                    container.style.zIndex = 99999;
+                    document.body.appendChild(container);
+                }
+                const node = document.createElement('div');
+                node.className = 'automation-toast';
+                node.style.background = 'rgba(0,0,0,0.8)';
+                node.style.color = '#fff';
+                node.style.padding = '8px 12px';
+                node.style.marginTop = '8px';
+                node.style.borderRadius = '4px';
+                node.style.fontSize = '13px';
+                node.textContent = message;
+                container.appendChild(node);
+                window.setTimeout(() => {
+                    try { container.removeChild(node); } catch (e) { /* ignore */ }
+                }, timeout);
+            } catch (e) { /* ignore */ }
+        };
+
+        // populate module filter and scenario form module select
+        const populateModuleSelects = () => {
+            try {
+                const filter = document.getElementById('module-filter');
+                const select = document.getElementById('scenario-module');
+                if (!Array.isArray(initialModules)) return;
+                // clear existing options except the placeholder
+                if (filter) {
+                    // keep first option (All modules)
+                    const first = filter.querySelector('option');
+                    filter.innerHTML = '';
+                    if (first) filter.appendChild(first);
+                    const opt = document.createElement('option'); opt.value = ''; opt.textContent = 'All modules'; filter.appendChild(opt); // ensure placeholder
+                }
+                if (select) {
+                    select.innerHTML = '';
+                    const none = document.createElement('option'); none.value = ''; none.textContent = '(none)'; select.appendChild(none);
+                }
+                initialModules.forEach((m) => {
+                    const option = document.createElement('option');
+                    option.value = m.id;
+                    option.textContent = m.title || `Module ${m.id}`;
+                    if (filter) filter.appendChild(option.cloneNode(true));
+                    if (select) select.appendChild(option.cloneNode(true));
+                });
+            } catch (e) { /* ignore */ }
+        };
+
+        // call once on init
+        populateModuleSelects();
+        populateScenarioPlanAndModule();
+
         const focusPlanRow = (planId) => {
             if (!els.planList || typeof planId === 'undefined' || planId === null) {
                 return;
@@ -443,6 +609,133 @@
                 row.focus();
             }
         };
+
+        // handle scenario plan selection enabling module filter
+        if (els.scenarioPlan) {
+            els.scenarioPlan.addEventListener('change', (ev) => {
+                const val = els.scenarioPlan.value;
+                const moduleFilter = document.getElementById('module-filter');
+                if (!val) {
+                    // no plan selected -> disable module filter
+                    if (moduleFilter) moduleFilter.disabled = true;
+                    // clear scenario list message
+                    state.selectedPlanId = null;
+                } else {
+                    if (moduleFilter) moduleFilter.disabled = false;
+                    // select plan in state and re-render
+                    state.selectedPlanId = Number(val);
+                    // when selecting a plan, choose first scenario if present
+                    const plan = state.plans.find(p => Number(p.id) === Number(val));
+                    state.selectedScenarioId = plan && Array.isArray(plan.scenarios) && plan.scenarios.length ? plan.scenarios[0].id : null;
+                }
+                console.debug('[automation] plan changed', { selectedPlanId: state.selectedPlanId, selectedScenarioId: state.selectedScenarioId });
+                // load scenarios for this plan from the API and attach them to the
+                // selected plan so the table shows up-to-date data for the plan.
+                (async () => {
+                    const pid = state.selectedPlanId;
+                    if (!pid) {
+                        renderAll();
+                        return;
+                    }
+                    try {
+                        setStatus('Loading scenarios for selected plan…', 'info');
+                        const base = apiEndpoints.scenarios || '/api/core/test-scenarios/';
+                        const url = `${base}?plan=${encodeURIComponent(pid)}`;
+                        const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                        if (!resp.ok) throw new Error(`Failed to fetch scenarios: ${resp.status}`);
+                        const data = await resp.json();
+                        // normalize scenarios so module/plan are ids (not nested objects)
+                        const normalized = Array.isArray(data) ? data.map(normalizeScenario) : [];
+                        // attach to the plan in state
+                        const planObj = state.plans.find((p) => Number(p.id) === Number(pid));
+                        if (planObj) {
+                            planObj.scenarios = normalized;
+                            state.selectedScenarioId = planObj.scenarios.length ? planObj.scenarios[0].id : null;
+                        }
+                        renderAll();
+                        setStatus('', 'info');
+                    } catch (err) {
+                        setStatus(err instanceof Error ? err.message : 'Unable to load scenarios for plan.', 'error');
+                        // still render whatever we have
+                        renderAll();
+                    }
+                    // update New Scenario button state when plan changes
+                    try { syncNewScenarioButtonState(); } catch (e) { }
+                })();
+            });
+        }
+
+        // wire scenario search input
+        if (els.scenarioSearch) {
+            els.scenarioSearch.addEventListener('input', debounce((ev) => {
+                // simple client-side filter; store in a temp and re-render
+                const q = (els.scenarioSearch.value || '').trim().toLowerCase();
+                // apply filter by adjusting rendering: set a temporary property
+                state._scenarioSearch = q;
+                renderScenarioList();
+            }, 200));
+        }
+
+        // New Scenario button should use the same modal flow as Add Scenario in Data Management
+        const openNewScenarioButton = document.getElementById('open-new-scenario');
+        if (openNewScenarioButton) {
+            openNewScenarioButton.addEventListener('click', (ev) => {
+                // ensure a plan and module are selected
+                const planId = state.selectedPlanId || (els.scenarioPlan && els.scenarioPlan.value ? Number(els.scenarioPlan.value) : null);
+                const moduleFilter = document.getElementById('module-filter');
+                const mid = moduleFilter && moduleFilter.value ? Number(moduleFilter.value) : null;
+                // Debug: log the user click and current selection so it's visible in Console
+                try { console.info('[automation] open-new-scenario clicked', { planIdCandidate: planId, moduleFilterValue: mid }); } catch (e) { /* ignore */ }
+                if (!planId) {
+                    setStatus('Please select a plan before creating a scenario.', 'error');
+                    showToast('Please select a plan before creating a scenario.');
+                    return;
+                }
+                if (!mid) {
+                    setStatus('Please select a module before creating a scenario.', 'error');
+                    showToast('Please select a module before creating a scenario.');
+                    return;
+                }
+                // Dispatch a custom event which data_management.js listens for.
+                try {
+                    const ev = new CustomEvent('open-module-scenario', { detail: { mode: 'create', moduleId: mid } });
+                    document.dispatchEvent(ev);
+                    try { console.info('[automation] dispatched open-module-scenario', { detail: ev.detail }); } catch (e) { /* ignore */ }
+                } catch (e) {
+                    // fallback to direct open if event fails
+                    try {
+                        if (typeof window.openModuleScenarioModal === 'function') {
+                            window.openModuleScenarioModal('create', mid);
+                        } else {
+                            const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
+                            if (modal) {
+                                const moduleInput = document.getElementById('module-add-scenario-module-id'); if (moduleInput) moduleInput.value = mid || '';
+                                modal.hidden = false; body.classList.add('automation-modal-open');
+                                const titleInput = document.getElementById('module-add-scenario-title'); if (titleInput) titleInput.focus();
+                            }
+                        }
+                        try { console.info('[automation] fallback opened modal directly', { moduleId: mid }); } catch (er) { /* ignore */ }
+                    } catch (err) { /* ignore */ }
+                }
+            });
+        }
+
+        // Keep New Scenario button enabled only when both plan and module are selected
+        const syncNewScenarioButtonState = () => {
+            try {
+                const btn = document.getElementById('open-new-scenario');
+                if (!btn) return;
+                const planSelected = (els.scenarioPlan && els.scenarioPlan.value) ? Boolean(els.scenarioPlan.value) : Boolean(state.selectedPlanId);
+                const moduleSelected = (() => {
+                    const m = document.getElementById('module-filter');
+                    return m && m.value ? Boolean(m.value) : false;
+                })();
+                btn.disabled = !(planSelected && moduleSelected);
+            } catch (e) { /* ignore */ }
+        };
+
+        // call on init and when plan/module changes
+        syncNewScenarioButtonState();
 
         const openPlanModal = () => {
             if (!els.planModal) {
@@ -624,6 +917,9 @@
                         const resp = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
                         if (resp) {
                             if (resp.status === 401) {
+                                // Authentication required — show a helpful message
+                                // in the mapping table rather than the generic empty
+                                // message so the user knows to sign in.
                                 try {
                                     const mappingTbody = document.querySelector('[data-role="mapping-list"]');
                                     if (mappingTbody) mappingTbody.innerHTML = '<tr><td colspan="7" class="empty">Please sign in to view risk-to-mitigation links.</td></tr>';
@@ -631,12 +927,17 @@
                             } else if (resp.ok) {
                                 const data = await resp.json();
                                 if (Array.isArray(data) && data.length) {
+                                    // The mapping endpoint returns an array of mapping
+                                    // objects for the plan — treat these as authoritative
+                                    // details for the mapping table.
                                     plan = normalizePlan({ ...plan, risk_mitigation_details: data });
                                     try {
                                         const idx = state.plans.findIndex((p) => p.id === plan.id);
                                         if (idx !== -1) state.plans[idx] = plan;
                                     } catch (ignore) { }
                                 } else {
+                                    // As a fallback, try the plan detail endpoint which
+                                    // may include nested risk_mitigation_details.
                                     const base = apiEndpoints.plans || '/api/core/test-plans/';
                                     const detailUrl = `${base}${plan.id}/`;
                                     const dResp = await fetch(detailUrl, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
@@ -871,6 +1172,7 @@
                             }
                         });
 
+                        // Log the source and mapping ids for diagnostic purposes
                         try {
                             console.debug('[automation] mapping rows source', { source: detailsSource || 'unknown', ids: uniqueDetails.map((m) => m && m.id) });
                         } catch (err) { /* ignore */ }
@@ -1085,49 +1387,208 @@
         };
 
         const renderScenarioList = () => {
-            if (!els.scenarioList) {
+            // support pages that render scenarios in a table body (`scenarioTableBody`)
+            // or a legacy `scenarioList` container. If neither exists, bail out.
+            if (!els.scenarioTableBody && !els.scenarioList) {
                 return;
             }
             const plan = getSelectedPlan();
-            if (els.planName) {
-                els.planName.textContent = plan ? plan.name : '—';
-            }
-            els.scenarioList.innerHTML = '';
+            console.debug('[automation] renderScenarioList called', { selectedPlanId: state.selectedPlanId, plan: plan ? { id: plan.id, scenarios: Array.isArray(plan.scenarios) ? plan.scenarios.length : 0 } : null });
+            if (els.planName) els.planName.textContent = plan ? plan.name : '—';
+            // render into table body if present
+            const tbody = els.scenarioTableBody;
             if (!plan) {
-                els.scenarioList.innerHTML = '<p class="empty">Select a plan to view scenarios.</p>';
+                const emptyTableHtml = '<tr><td colspan="6" class="empty">Select a plan to view scenarios.</td></tr>';
+                const emptyListHtml = '<p class="empty">Select a plan to view scenarios.</p>';
+                if (tbody) tbody.innerHTML = emptyTableHtml;
+                if (els.scenarioList) els.scenarioList.innerHTML = emptyListHtml;
                 return;
             }
             const scenarios = Array.isArray(plan.scenarios) ? plan.scenarios : [];
-            if (!scenarios.length) {
-                els.scenarioList.innerHTML = '<p class="empty">No scenarios created yet for this plan.</p>';
+            console.debug('[automation] plan has scenarios count', scenarios.length);
+            // Detailed per-scenario debug to surface module/plan shapes that
+            // can break client-side filters when the API returns nested
+            // objects instead of primitive ids.
+            try {
+                const details = scenarios.map((s) => ({ id: s && s.id, moduleValue: s && s.module, moduleType: s && s.module === null ? 'null' : typeof (s && s.module) }));
+                console.debug('[automation] scenario module snapshot', details.slice(0, 50));
+            } catch (err) {
+                console.debug('[automation] error while snapshotting scenario modules', err);
+            }
+            // apply scenario search filter (from header)
+            const q = state._scenarioSearch || '';
+            const moduleFilterVal = (document.getElementById('module-filter') && document.getElementById('module-filter').value) ? String(document.getElementById('module-filter').value) : '';
+            console.debug('[automation] applying filters', { search: q, moduleFilterVal });
+            const filtered = scenarios.filter((s) => {
+                if (q) {
+                    const lower = q;
+                    const match = (s.title || '').toLowerCase().includes(lower) || (s.description || '').toLowerCase().includes(lower) || (Array.isArray(s.tags) ? s.tags.join(' ').toLowerCase().includes(lower) : false);
+                    if (!match) return false;
+                }
+                if (moduleFilterVal) {
+                    // module filter expects module id match
+                    // Log a per-item comparison to help debugging mismatches.
+                    try { console.debug('[automation] module filter compare', { scenarioId: s && s.id, scenarioModule: s && s.module, cmpTo: moduleFilterVal, eq: String(s && s.module || '') === String(moduleFilterVal) }); } catch (e) { }
+                    return String(s.module || '') === String(moduleFilterVal);
+                }
+                return true;
+            });
+            if (!filtered.length) {
+                if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="empty">No scenarios match the current filters for this plan.</td></tr>';
+                else els.scenarioList.innerHTML = '<p class="empty">No scenarios match the current filters for this plan.</p>';
                 return;
             }
-            const list = document.createElement('ul');
-            list.className = 'automation-items';
-            scenarios.forEach((scenario) => {
-                const li = document.createElement('li');
-                li.className = 'automation-item';
-                if (scenario.id === state.selectedScenarioId) {
-                    li.classList.add('is-active');
-                }
-                const caseCount = Array.isArray(scenario.cases) ? scenario.cases.length : 0;
-                const tags = Array.isArray(scenario.tags) ? scenario.tags : [];
-                li.innerHTML = `
-                    <strong>${escapeHtml(scenario.title || 'Scenario')}</strong>
-                    <span>${caseCount} test case${caseCount === 1 ? '' : 's'}</span>
-                    ${tags.length ? `<div class="automation-item-tags">${tags.map((tag) => `<span class="automation-tag">${escapeHtml(tag)}</span>`).join('')}</div>` : ''}
-                    ${scenario.description ? `<small>${escapeHtml(scenario.description)}</small>` : ''}
-                `;
-                li.addEventListener('click', () => {
-                    if (state.selectedScenarioId !== scenario.id) {
-                        state.selectedScenarioId = scenario.id;
+            if (!scenarios.length) {
+                if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="empty">No scenarios created yet for this plan.</td></tr>';
+                else els.scenarioList.innerHTML = '<p class="empty">No scenarios created yet for this plan.</p>';
+                return;
+            }
+            if (tbody) {
+                const rows = filtered.map((scenario) => {
+                    const module = initialModules.find((m) => Number(m.id) === Number(scenario.module));
+                    const moduleLabel = module ? (module.title || `Module ${module.id}`) : '';
+                    return `
+                        <tr data-scenario-id="${scenario.id}">
+                            <td>${escapeHtml(scenario.title || '')}</td>
+                            <td>${escapeHtml(scenario.description || '')}</td>
+                            <td>${escapeHtml(moduleLabel)}</td>
+                            <td>${escapeHtml(formatDateTime(scenario.created_at || null))}</td>
+                            <td>${escapeHtml(formatDateTime(scenario.updated_at || null))}</td>
+                            <td>
+                                <div class="table-action-group">
+                                    <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>
+                                    <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>
+                                    <button type="button" class="action-button" data-action="add-case" data-scenario-id="${scenario.id}">Add Case</button>
+                                    <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+                tbody.innerHTML = rows;
+                return;
+            }
+        };
+
+        // wire module-filter change to re-render scenarios when user selects a module
+        const moduleFilterEl = document.getElementById('module-filter');
+        if (moduleFilterEl) {
+            moduleFilterEl.addEventListener('change', (ev) => {
+                const midRaw = moduleFilterEl.value;
+                const mid = midRaw ? Number(midRaw) : null;
+                console.debug('[automation] module filter changed', { value: mid });
+                (async () => {
+                    try {
+                        setStatus('Loading scenarios for module…', 'info');
+                        const base = apiEndpoints.scenarios || '/api/core/test-scenarios/';
+                        let url = base;
+                        const params = new URLSearchParams();
+                        if (mid) params.append('module', String(mid));
+                        if (state.selectedPlanId) params.append('plan', String(state.selectedPlanId));
+                        const query = params.toString();
+                        if (query) url = `${base}?${query}`;
+                        const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                        if (!resp.ok) throw new Error(`Failed to fetch scenarios for module: ${resp.status}`);
+                        const data = await resp.json();
+                        // normalize scenarios so module/plan are ids (not nested objects)
+                        const normalized = Array.isArray(data) ? data.map(normalizeScenario) : [];
+                        console.debug('[automation] module scenarios fetched', { count: normalized.length, sample: normalized.length ? normalized[0] : null });
+                        // Extra diagnostic: log module value/types for each returned scenario
+                        try {
+                            const moduleSnapshot = normalized.map((s) => ({ id: s && s.id, module: s && s.module, moduleType: s && s.module === null ? 'null' : typeof (s && s.module) }));
+                            console.debug('[automation] module scenarios normalized snapshot', moduleSnapshot.slice(0, 200));
+                            // show what would be matched for the currently selected module
+                            const moduleMatches = normalized.filter((s) => String(s.module || '') === String(mid));
+                            console.debug('[automation] module filter matching preview', { requestedModule: mid, matchedCount: moduleMatches.length, sample: moduleMatches.length ? moduleMatches[0] : null });
+                        } catch (err) {
+                            console.debug('[automation] error while producing module snapshots', err);
+                        }
+                        // If there's a selected plan, attach returned scenarios to it.
+                        if (state.selectedPlanId) {
+                            const planObj = state.plans.find((p) => Number(p.id) === Number(state.selectedPlanId));
+                            if (planObj) {
+                                planObj.scenarios = normalized;
+                                state.selectedScenarioId = planObj.scenarios.length ? planObj.scenarios[0].id : null;
+                            } else {
+                                // Client-side plan cache didn't contain the selected
+                                // plan id (possible if plans were refreshed elsewhere).
+                                // Fall back to rendering the fetched scenarios as a
+                                // temporary filtered list so the user sees results.
+                                const virtualPlan = { id: '__virtual__', name: 'Filtered', scenarios: normalized };
+                                if (els.planName) els.planName.textContent = virtualPlan.name;
+                                const tbody = els.scenarioTableBody;
+                                if (!virtualPlan.scenarios.length) {
+                                    if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="empty">No scenarios match the current filters.</td></tr>';
+                                } else {
+                                    const rows = virtualPlan.scenarios.map((scenario) => {
+                                        const module = initialModules.find((m) => Number(m.id) === Number(scenario.module));
+                                        const moduleLabel = module ? (module.title || `Module ${module.id}`) : '';
+                                        return `
+                                            <tr data-scenario-id="${scenario.id}">
+                                                <td>${escapeHtml(scenario.title || '')}</td>
+                                                <td>${escapeHtml(scenario.description || '')}</td>
+                                                <td>${escapeHtml(moduleLabel)}</td>
+                                                <td>${escapeHtml(formatDateTime(scenario.created_at || null))}</td>
+                                                <td>${escapeHtml(formatDateTime(scenario.updated_at || null))}</td>
+                                                <td>
+                                                    <div class="table-action-group">
+                                                        <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>
+                                                        <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>
+                                                        <button type="button" class="action-button" data-action="add-case" data-scenario-id="${scenario.id}">Add Case</button>
+                                                        <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        `;
+                                    }).join('');
+                                    tbody.innerHTML = rows;
+                                }
+                            }
+                        } else {
+                            // No selected plan: temporarily render returned scenarios as if
+                            // they belong to a virtual plan object so the table shows them.
+                            const virtualPlan = { id: '__virtual__', name: 'Filtered', scenarios: Array.isArray(data) ? data : [] };
+                            // render directly using a small helper
+                            if (els.planName) els.planName.textContent = virtualPlan.name;
+                            const tbody = els.scenarioTableBody;
+                            if (!virtualPlan.scenarios.length) {
+                                if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="empty">No scenarios match the current filters.</td></tr>';
+                            } else {
+                                const rows = virtualPlan.scenarios.map((scenario) => {
+                                    const module = initialModules.find((m) => Number(m.id) === Number(scenario.module));
+                                    const moduleLabel = module ? (module.title || `Module ${module.id}`) : '';
+                                    return `
+                                        <tr data-scenario-id="${scenario.id}">
+                                            <td>${escapeHtml(scenario.title || '')}</td>
+                                            <td>${escapeHtml(scenario.description || '')}</td>
+                                            <td>${escapeHtml(moduleLabel)}</td>
+                                            <td>${escapeHtml(formatDateTime(scenario.created_at || null))}</td>
+                                            <td>${escapeHtml(formatDateTime(scenario.updated_at || null))}</td>
+                                            <td>
+                                                <div class="table-action-group">
+                                                    <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>
+                                                    <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>
+                                                    <button type="button" class="action-button" data-action="add-case" data-scenario-id="${scenario.id}">Add Case</button>
+                                                    <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    `;
+                                }).join('');
+                                tbody.innerHTML = rows;
+                            }
+                        }
+                        renderAll();
+                        setStatus('', 'info');
+                        // update New Scenario button state when module changes
+                        try { syncNewScenarioButtonState(); } catch (e) { }
+                    } catch (err) {
+                        setStatus(err instanceof Error ? err.message : 'Unable to load module scenarios.', 'error');
                         renderAll();
                     }
-                });
-                list.appendChild(li);
+                })();
             });
-            els.scenarioList.appendChild(list);
-        };
+        }
 
         const renderCaseList = () => {
             if (!els.caseList) {
@@ -1312,6 +1773,88 @@
             }
         };
 
+        // Delegated event handling for scenario action buttons in table
+        const scenarioTable = () => document.querySelector('[data-role="scenario-table-body"]');
+        if (scenarioTable) {
+            document.addEventListener('click', async (ev) => {
+                const target = ev.target;
+                if (!target) return;
+                const action = target.dataset && target.dataset.action ? target.dataset.action : null;
+                if (!action) return;
+                if (!['view-scenario', 'edit-scenario', 'add-case', 'delete-scenario'].includes(action)) return;
+                const sid = target.dataset && target.dataset.scenarioId ? target.dataset.scenarioId : null;
+                if (!sid) return;
+                ev.preventDefault();
+                if (action === 'view-scenario' || action === 'edit-scenario') {
+                    // reuse existing openPlanModal / view handlers - for simplicity
+                    // fetch scenario detail and open a simple modal via existing plan modal if present
+                    try {
+                        const url = `${apiEndpoints.scenarios || '/api/core/test-scenarios/'}${sid}/`;
+                        const resp = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                        if (resp && resp.ok) {
+                            const data = await resp.json();
+                            // open module add scenario modal in view/edit mode
+                            const mode = action === 'view-scenario' ? 'view' : 'edit';
+                            // Prefer the shared modal API so the Data Management module's
+                            // internal state (moduleScenarioModalMode / moduleScenarioCurrentId)
+                            // is updated correctly. Fall back to manual population if the
+                            // helper is not available for some reason.
+                            try {
+                                const normalizedScenario = typeof normalizeScenario === 'function' ? normalizeScenario(data) : data;
+                                if (typeof window.openModuleScenarioModal === 'function') {
+                                    window.openModuleScenarioModal(mode, normalizedScenario.module || null, normalizedScenario);
+                                } else {
+                                    const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
+                                    if (modal) {
+                                        // populate fields as a graceful fallback
+                                        const moduleInput = document.getElementById('module-add-scenario-module-id'); if (moduleInput) moduleInput.value = normalizedScenario.module || '';
+                                        const titleInput = document.getElementById('module-add-scenario-title'); if (titleInput) titleInput.value = normalizedScenario.title || '';
+                                        const descInput = document.getElementById('module-add-scenario-description'); if (descInput) descInput.value = normalizedScenario.description || '';
+                                        const pre = document.getElementById('module-add-scenario-preconditions'); if (pre) pre.value = normalizedScenario.preconditions || '';
+                                        const post = document.getElementById('module-add-scenario-postconditions'); if (post) post.value = normalizedScenario.postconditions || '';
+                                        const tags = document.getElementById('module-add-scenario-tags'); if (tags) tags.value = Array.isArray(normalizedScenario.tags) ? normalizedScenario.tags.join(',') : (normalizedScenario.tags || '');
+                                        // set readonly for view
+                                        const readOnly = mode === 'view';
+                                        [titleInput, descInput, pre, post, tags].forEach((n) => { if (n) { n.readOnly = readOnly; n.disabled = readOnly; } });
+                                        const submit = modal.querySelector('button[type="submit"]'); if (submit) submit.hidden = readOnly;
+                                        modal.hidden = false; body.classList.add('automation-modal-open');
+                                    }
+                                }
+                            } catch (err) {
+                                // if anything goes wrong, try the basic fallback
+                                const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
+                                if (modal) modal.hidden = false;
+                                body.classList.add('automation-modal-open');
+                            }
+                        }
+                    } catch (err) { /* ignore */ }
+                } else if (action === 'add-case') {
+                    // open add case modal and prefill scenario id
+                    const caseModal = document.querySelector('[data-role="module-add-case-modal"]');
+                    if (caseModal) {
+                        const hid = document.getElementById('module-add-case-scenario-id'); if (hid) hid.value = sid;
+                        caseModal.hidden = false; body.classList.add('automation-modal-open');
+                    }
+                } else if (action === 'delete-scenario') {
+                    // confirm and delete
+                    if (!confirm('Delete this scenario? This cannot be undone.')) return;
+                    try {
+                        const delUrl = `${apiEndpoints.scenarios || '/api/core/test-scenarios/'}${sid}/`;
+                        const resp = await fetch(delUrl, { method: 'DELETE', credentials: 'same-origin', headers: { 'X-CSRFToken': getCsrfToken() } });
+                        if (resp && (resp.status === 204 || resp.ok)) {
+                            setStatus('Scenario deleted.', 'success');
+                            // refresh plans to update UI
+                            await refreshPlans({ silent: true });
+                        } else {
+                            setStatus('Failed to delete scenario.', 'error');
+                        }
+                    } catch (err) {
+                        setStatus('Failed to delete scenario.', 'error');
+                    }
+                }
+            });
+        }
+
         const submitJson = async (url, payload, method = 'POST') => {
             const response = await fetch(url, {
                 method,
@@ -1466,6 +2009,8 @@
             }
         };
 
+        // module add scenario form is handled by data_management.js; no duplicate handler here
+
         const handleScenarioSubmit = async (event) => {
             event.preventDefault();
             if (!els.scenarioForm) {
@@ -1479,6 +2024,7 @@
             try {
                 const payload = {
                     plan: plan.id,
+                    module: (document.getElementById('scenario-module') && document.getElementById('scenario-module').value) || null,
                     title: (inputs.scenario.title.value || '').trim(),
                     description: inputs.scenario.description.value || '',
                     preconditions: inputs.scenario.preconditions.value || '',
@@ -1655,7 +2201,57 @@
         document.addEventListener('keydown', handlePlanModalEscape);
 
         initObjectiveEditor();
-        initialSelection();
-        renderAll();
+        // Always attempt to load scenarios directly from the scenarios API on
+        // initialization. This guarantees a network call to /api/core/test-scenarios/
+        // so the Scenarios table can be populated even when the server-rendered
+        // `initial_plans` payload lacks nested scenarios.
+        const loadScenariosDirect = async () => {
+            try {
+                const scenariosUrl = apiEndpoints.scenarios || '/api/core/test-scenarios/';
+                // debug log so you can see this attempt in the console
+                console.debug('[automation] attempting to load scenarios from', scenariosUrl);
+                setStatus('Loading scenarios…', 'info');
+                const resp = await fetch(scenariosUrl, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                if (!resp.ok) throw new Error(`Failed to load scenarios: ${resp.status}`);
+                const scenarios = await resp.json();
+                // normalize fetched scenarios
+                const normalized = Array.isArray(scenarios) ? scenarios.map(normalizeScenario) : [];
+                console.debug('[automation] scenarios fetched', Array.isArray(normalized) ? normalized.length : typeof normalized);
+                // If we don't have plans on the client, fetch them first so we
+                // can attach scenarios to real plan objects and set a selected
+                // plan id. This covers cases where `initial_plans` was empty.
+                if (!Array.isArray(state.plans) || !state.plans.length) {
+                    try {
+                        console.debug('[automation] no plans present, fetching plans before attaching scenarios');
+                        await refreshPlans({ silent: true });
+                    } catch (err) {
+                        console.warn('[automation] failed to refresh plans before attaching scenarios', err);
+                    }
+                }
+                // attach scenarios to plans by matching plan id
+                if (Array.isArray(scenarios) && Array.isArray(state.plans)) {
+                    state.plans.forEach((plan) => {
+                        const pid = plan && plan.id ? plan.id : null;
+                        plan.scenarios = normalized.filter((s) => Number(s.plan) === Number(pid));
+                    });
+                }
+                initialSelection();
+                renderAll();
+                setStatus('', 'info');
+            } catch (err) {
+                console.warn('[automation] direct scenarios load failed, falling back to refreshPlans()', err);
+                // fallback to refreshing plans (which may include nested scenarios)
+                try {
+                    await refreshPlans({ silent: false });
+                } catch (_err) {
+                    // if that fails, render with whatever we have and show error
+                    initialSelection();
+                    renderAll();
+                }
+            }
+        };
+
+        // fire the direct scenarios loader unconditionally
+        loadScenariosDirect();
     });
 })();
