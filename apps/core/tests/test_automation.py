@@ -254,6 +254,24 @@ class DataManagementTests(APITestCase):
             password="secret123",
         )
         self.client.force_authenticate(self.user)
+        # provide a reusable environment/collection/request for adhoc execute tests
+        self.environment = models.ApiEnvironment.objects.create(
+            name="Staging",
+            variables={"base_url": "https://example.org"},
+            default_headers={"X-Env": "staging"},
+        )
+        self.collection = models.ApiCollection.objects.create(
+            name="Sample Collection",
+            description="Demonstrates automation run",
+        )
+        self.collection.environments.add(self.environment)
+        self.request = models.ApiRequest.objects.create(
+            collection=self.collection,
+            name="List Widgets",
+            method="GET",
+            url="{{ base_url }}/widgets",
+            headers={"Accept": "application/json"},
+        )
 
     def test_risk_mitigation_crud_flow(self) -> None:
         risk_payload = {"title": "Data center outage", "description": "Primary region unavailable."}

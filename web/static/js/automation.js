@@ -200,6 +200,37 @@
             },
         };
 
+        // Stepper state for multi-step plan creation
+        let planDraftId = null;
+        let currentPlanStep = 1;
+        const planSteps = Array.from(document.querySelectorAll('.plan-step'));
+        const maxPlanSteps = planSteps.length || 5;
+
+        const elsExtra = {
+            planPrev: root.querySelector('[data-action="plan-prev"]'),
+            planSubmit: document.getElementById('plan-submit'),
+        };
+
+        const showPlanStep = (step) => {
+            planSteps.forEach((node) => {
+                const s = Number(node.dataset.step || 0);
+                node.hidden = s !== step;
+            });
+            currentPlanStep = step;
+            // update buttons
+            if (elsExtra.planPrev) {
+                elsExtra.planPrev.hidden = step <= 1;
+            }
+            if (elsExtra.planSubmit) {
+                elsExtra.planSubmit.textContent = step < maxPlanSteps ? 'Next' : 'Save';
+            }
+        };
+
+        const resetPlanStepper = () => {
+            planDraftId = null;
+            showPlanStep(1);
+        };
+
         const objectiveTextarea = inputs.plan.objective;
         let objectiveEditor = null;
         let objectiveEditorAttempts = 0;
@@ -361,6 +392,7 @@
             plans: normalizePlans(initialPlans),
             selectedPlanId: null,
             selectedScenarioId: null,
+            editingPlan: false,
         };
 
         const getSelectedPlan = () => state.plans.find((plan) => plan.id === state.selectedPlanId) || null;
@@ -411,6 +443,74 @@
                     focusTarget.focus();
                 }
             });
+        };
+
+        const openPlanEdit = (plan) => {
+            if (!plan) return;
+            state.editingPlan = true;
+            planDraftId = plan.id;
+            // populate fields for step 1
+            if (inputs.plan.name) inputs.plan.name.value = plan.name || '';
+            if (inputs.plan.description) inputs.plan.description.value = plan.description || '';
+            // scopes
+            const scopes = Array.isArray(plan.scopes) ? plan.scopes : [];
+            const inScope = scopes.filter(s => s.category === 'in_scope').map(s => s.item || '').join('\n');
+            const outScope = scopes.filter(s => s.category === 'out_scope').map(s => s.item || '').join('\n');
+            if (inputs.plan.scopeIn) inputs.plan.scopeIn.value = inScope;
+            if (inputs.plan.scopeOut) inputs.plan.scopeOut.value = outScope;
+            // testing timeline & simple lists
+            if (inputs.plan.modules) inputs.plan.modules.value = Array.isArray(plan.modules_under_test) ? plan.modules_under_test.join(',') : '';
+            if (inputs.plan.tools) inputs.plan.tools.value = Array.isArray(plan.tools) ? plan.tools.join(',') : '';
+            if (inputs.plan.testers) inputs.plan.testers.value = Array.isArray(plan.testers) ? plan.testers.join(',') : '';
+            if (inputs.plan.approver) inputs.plan.approver.value = plan.approver || '';
+            if (inputs.plan.kickoff) inputs.plan.kickoff.value = plan.testing_timeline ? (plan.testing_timeline.kickoff || '') : '';
+            if (inputs.plan.signoff) inputs.plan.signoff.value = plan.testing_timeline ? (plan.testing_timeline.signoff || '') : '';
+            // objective
+            const editor = getObjectiveEditor();
+            if (editor && typeof editor.setContent === 'function') {
+                editor.setContent(plan.objective || '');
+            } else if (inputs.plan.objective) {
+                inputs.plan.objective.value = plan.objective || '';
+            }
+            showPlanStep(1);
+            openPlanModal();
+            // render risk matrix checkboxes for step 4
+            renderPlanRiskMatrix(plan);
+        };
+
+        const renderPlanRiskMatrix = async (plan) => {
+            if (!els.planRiskMatrix) return;
+            // try to fetch risks/mitigations if not available
+            const fetchUrl = (path) => apiEndpoints[path] || '';
+            let risks = [];
+            try {
+                const rUrl = fetchUrl('risks');
+                if (rUrl) {
+                    const resp = await fetch(rUrl, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                    if (resp.ok) risks = await resp.json();
+                }
+            } catch (_err) {
+                risks = [];
+            }
+            if (!risks.length) {
+                // try to use data injected on page if present
+                try {
+                    const node = document.getElementById('automation-initial-risks');
+                    if (node) risks = JSON.parse(node.textContent || node.innerText || '[]');
+                } catch (_e) {
+                    risks = [];
+                }
+            }
+            if (!risks.length) {
+                els.planRiskMatrix.innerHTML = '<p class="empty">No risks available. Create risks in the Data Management panel first.</p>';
+                return;
+            }
+            const linked = Array.isArray(plan.risk_mitigations) ? plan.risk_mitigations : [];
+            const rows = risks.map((risk) => {
+                const checked = linked.includes(risk.id) ? 'checked' : '';
+                return `<label class="plan-risk-row"><input type="checkbox" data-role="plan-risk-checkbox" value="${risk.id}" ${checked}> ${escapeHtml(risk.title || '')}</label>`;
+            }).join('');
+            els.planRiskMatrix.innerHTML = `<div class="plan-risk-list">${rows}</div>`;
         };
 
         const closePlanModal = (options = {}) => {
@@ -549,6 +649,11 @@
                     <td data-label="Kickoff">${escapeHtml(kickoff)}</td>
                     <td data-label="Sign-off">${escapeHtml(signoff)}</td>
                     <td data-label="Approver">${escapeHtml(approver)}</td>
+                    <td data-label="Actions">
+                        <div class="table-action-group">
+                            <button type="button" class="action-button" data-action="edit-plan" data-plan-id="${plan.id}">Edit</button>
+                        </div>
+                    </td>
                 `;
 
                 const selectPlan = () => {
@@ -803,9 +908,9 @@
             }
         };
 
-        const submitJson = async (url, payload) => {
+        const submitJson = async (url, payload, method = 'POST') => {
             const response = await fetch(url, {
-                method: 'POST',
+                method,
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': getCsrfToken(),
@@ -839,63 +944,112 @@
             }
             try {
                 setStatus('Saving test plan…', 'info');
-                const payload = {
-                    name: (inputs.plan.name.value || '').trim(),
-                    description: (inputs.plan.description.value || '').trim(),
-                    modules_under_test: splitList(inputs.plan.modules.value),
-                    testing_types: {
-                        functional: splitList(inputs.plan.functional.value),
-                        non_functional: splitList(inputs.plan.nonFunctional.value),
-                    },
-                    tools: splitList(inputs.plan.tools.value),
-                    testers: splitList(inputs.plan.testers.value),
-                    approver: (inputs.plan.approver.value || '').trim(),
-                    testing_timeline: {},
-                };
-                if (!payload.name) {
-                    throw new Error('Plan name is required.');
+
+                const baseUrl = apiEndpoints.plans || '/api/core/test-plans/';
+                const planDetailUrl = (id) => `${baseUrl}${id}/`;
+
+                // Build payload depending on the current step
+                let payload = {};
+                if (currentPlanStep === 1) {
+                    payload = {
+                        name: (inputs.plan.name.value || '').trim(),
+                        description: (inputs.plan.description.value || '').trim(),
+                    };
+                    if (!payload.name) {
+                        throw new Error('Plan name is required.');
+                    }
+
+                    if (state.editingPlan && planDraftId) {
+                        // update existing plan basic info and advance
+                        await submitJson(planDetailUrl(planDraftId), payload, 'PATCH');
+                        showPlanStep(2);
+                        setStatus('Basic info updated. Continue to Objective.', 'success');
+                        return;
+                    }
+
+                    // Create initial draft
+                    const created = await submitJson(baseUrl, payload);
+                    planDraftId = created.id;
+                    // advance to next step
+                    showPlanStep(2);
+                    setStatus('Basic info saved. Continue to Objective.', 'success');
+                    return;
                 }
-                const objectiveContent = readObjectiveContent();
-                if (!objectiveContent.plain) {
-                    throw new Error('Plan objective is required.');
+
+                // For steps > 1 we require a draft id
+                if (!planDraftId) {
+                    throw new Error('No draft plan found. Start from step 1.');
                 }
-                payload.objective = objectiveContent.html;
-                const scopeInRaw = inputs.plan.scopeIn ? inputs.plan.scopeIn.value : '';
-                const scopeOutRaw = inputs.plan.scopeOut ? inputs.plan.scopeOut.value : '';
-                const scopeItems = [];
-                splitList(scopeInRaw).forEach((item) => {
-                    scopeItems.push({ category: 'in_scope', item });
-                });
-                splitList(scopeOutRaw).forEach((item) => {
-                    scopeItems.push({ category: 'out_scope', item });
-                });
-                if (scopeItems.length) {
+
+                if (currentPlanStep === 2) {
+                    const objectiveContent = readObjectiveContent();
+                    if (!objectiveContent.plain) {
+                        throw new Error('Plan objective is required.');
+                    }
+                    payload.objective = objectiveContent.html;
+                }
+
+                if (currentPlanStep === 3) {
+                    const scopeInRaw = inputs.plan.scopeIn ? inputs.plan.scopeIn.value : '';
+                    const scopeOutRaw = inputs.plan.scopeOut ? inputs.plan.scopeOut.value : '';
+                    const scopeItems = [];
+                    splitList(scopeInRaw).forEach((item) => {
+                        scopeItems.push({ category: 'in_scope', item });
+                    });
+                    splitList(scopeOutRaw).forEach((item) => {
+                        scopeItems.push({ category: 'out_scope', item });
+                    });
                     payload.scopes = scopeItems;
                 }
-                if (inputs.plan.kickoff.value) {
-                    payload.testing_timeline.kickoff = inputs.plan.kickoff.value;
-                }
-                if (inputs.plan.signoff.value) {
-                    payload.testing_timeline.signoff = inputs.plan.signoff.value;
-                }
-                if (els.planRiskMatrix) {
-                    const selectedRisks = Array.from(
-                        els.planRiskMatrix.querySelectorAll('[data-role="plan-risk-checkbox"]')
-                    )
-                        .filter((input) => input instanceof HTMLInputElement && input.checked && input.value !== '')
-                        .map((input) => Number(input.value))
-                        .filter((value) => Number.isFinite(value));
-                    if (selectedRisks.length) {
+
+                if (currentPlanStep === 4) {
+                    if (els.planRiskMatrix) {
+                        const selectedRisks = Array.from(
+                            els.planRiskMatrix.querySelectorAll('[data-role="plan-risk-checkbox"]')
+                        )
+                            .filter((input) => input instanceof HTMLInputElement && input.checked && input.value !== '')
+                            .map((input) => Number(input.value))
+                            .filter((value) => Number.isFinite(value));
                         payload.risk_mitigations = selectedRisks;
                     }
                 }
-                const created = await submitJson(apiEndpoints.plans || '/api/core/test-plans/', payload);
-                await refreshPlans({ selectPlanId: created.id, silent: true });
-                closePlanModal({ resetForm: true, returnFocus: false });
-                focusPlanRow(created.id);
-                setStatus('Test plan created.', 'success');
+
+                if (currentPlanStep === 5) {
+                    payload = {
+                        modules_under_test: splitList(inputs.plan.modules.value),
+                        testing_types: {
+                            functional: splitList(inputs.plan.functional.value),
+                            non_functional: splitList(inputs.plan.nonFunctional.value),
+                        },
+                        tools: splitList(inputs.plan.tools.value),
+                        testers: splitList(inputs.plan.testers.value),
+                        approver: (inputs.plan.approver.value || '').trim(),
+                        testing_timeline: {},
+                    };
+                    if (inputs.plan.kickoff.value) {
+                        payload.testing_timeline.kickoff = inputs.plan.kickoff.value;
+                    }
+                    if (inputs.plan.signoff.value) {
+                        payload.testing_timeline.signoff = inputs.plan.signoff.value;
+                    }
+                }
+
+                // PATCH the draft (use PATCH so partial updates are accepted)
+                await submitJson(planDetailUrl(planDraftId), payload, 'PATCH');
+
+                if (currentPlanStep < maxPlanSteps) {
+                    showPlanStep(currentPlanStep + 1);
+                    setStatus(`Step ${currentPlanStep} saved.`, 'success');
+                } else {
+                    // final step completed
+                    await refreshPlans({ selectPlanId: planDraftId, silent: true });
+                    closePlanModal({ resetForm: true, returnFocus: false });
+                    focusPlanRow(planDraftId);
+                    setStatus('Test plan created.', 'success');
+                    resetPlanStepper();
+                }
             } catch (error) {
-                const message = error instanceof Error ? error.message : 'Unable to create plan.';
+                const message = error instanceof Error ? error.message : 'Unable to save plan.';
                 setStatus(message, 'error');
             }
         };
@@ -1025,6 +1179,7 @@
             els.planForm.addEventListener('reset', () => {
                 window.setTimeout(() => {
                     resetObjectiveEditor();
+                    resetPlanStepper();
                 }, 0);
             });
         }
@@ -1043,17 +1198,36 @@
                 openPlanModal();
             });
         }
+        if (elsExtra.planPrev) {
+            elsExtra.planPrev.addEventListener('click', (event) => {
+                event.preventDefault();
+                const prev = Math.max(1, currentPlanStep - 1);
+                showPlanStep(prev);
+            });
+        }
         root.addEventListener('click', (event) => {
             const openTrigger = event.target.closest('[data-action="open-plan-modal"]');
             if (openTrigger) {
                 event.preventDefault();
                 openPlanModal();
+                return;
+            }
+            const editTrigger = event.target.closest('[data-action="edit-plan"]');
+            if (editTrigger) {
+                event.preventDefault();
+                const pid = editTrigger.dataset.planId ? Number(editTrigger.dataset.planId) : null;
+                if (pid) {
+                    const plan = state.plans.find(p => p.id === pid);
+                    if (plan) openPlanEdit(plan);
+                }
+                return;
             }
         });
         planModalCloseButtons.forEach((node) => {
             node.addEventListener('click', (event) => {
                 event.preventDefault();
                 closePlanModal({ resetForm: true, returnFocus: true });
+                resetPlanStepper();
             });
         });
         document.addEventListener('keydown', handlePlanModalEscape);

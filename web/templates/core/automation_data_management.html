@@ -294,46 +294,6 @@
         </div>
     </div>
 
-    <div class="automation-modal" data-role="mapping-modal" hidden>
-        <div class="automation-modal__backdrop" data-action="close-mapping-modal"></div>
-        <div class="automation-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="mapping-modal-title">
-            <header class="automation-modal__header">
-                <h2 id="mapping-modal-title">Link Risk to Mitigation</h2>
-                <button type="button" class="automation-modal__close" data-action="close-mapping-modal" aria-label="Close risk mapping modal">&times;</button>
-            </header>
-            <form id="mapping-form" class="automation-form" autocomplete="off">
-                <fieldset>
-                    <legend class="sr-only">Risk to mitigation linkage</legend>
-                    <div class="form-row">
-                        <label for="mapping-risk">Risk<span aria-hidden="true">*</span></label>
-                        <select id="mapping-risk" name="risk" required data-role="mapping-risk-select"></select>
-                    </div>
-                    <div class="form-row">
-                        <label for="mapping-mitigation">Mitigation Plan<span aria-hidden="true">*</span></label>
-                        <select id="mapping-mitigation" name="mitigation_plan" required data-role="mapping-mitigation-select"></select>
-                    </div>
-                    <div class="form-row">
-                        <label for="mapping-impact">Impact</label>
-                        <textarea id="mapping-impact" name="impact" rows="4" placeholder="Summarize the impact if the risk materializes."></textarea>
-                    </div>
-                </fieldset>
-                <div class="form-meta" data-role="mapping-meta" hidden>
-                    <div class="form-meta__entry">
-                        <span class="form-meta__label">Linked</span>
-                        <span class="form-meta__value"><time data-role="mapping-created">—</time></span>
-                    </div>
-                    <div class="form-meta__entry">
-                        <span class="form-meta__label">Updated</span>
-                        <span class="form-meta__value"><time data-role="mapping-updated">—</time></span>
-                    </div>
-                </div>
-                <div class="form-actions">
-                    <button type="submit" class="btn-primary" data-role="mapping-submit">Save</button>
-                    <button type="button" class="btn-secondary" data-action="close-mapping-modal">Close</button>
-                </div>
-            </form>
-        </div>
-    </div>
 
     {{ initial_environments|json_script:"automation-initial-environments" }}
     {{ initial_risks|json_script:"automation-initial-risks" }}

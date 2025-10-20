@@ -68,6 +68,13 @@ class ApiCollectionDirectorySerializer(serializers.ModelSerializer):
         }
 
 
+class TestToolsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = models.TestTools
+        fields = ["id", "title", "description", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
 class ApiRequestSerializer(serializers.ModelSerializer):
     assertions = ApiAssertionSerializer(many=True, required=False)
     collection = serializers.PrimaryKeyRelatedField(

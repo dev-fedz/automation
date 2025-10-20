@@ -49,4 +49,9 @@ docker compose exec automation  python manage.py init_modules
 docker compose exec automation python manage.py init_module_permissions
 docker compose exec automation python manage.py  init_superuser_role
 docker compose exec automation python manage.py  seed_accounts
+
+stop docker
+sudo -u postgres /Library/PostgreSQL/18/bin/pg_ctl stop -D /Library/PostgreSQL/18/data -m fast
+lsof -i :5432 -Pn || true
+
 ```

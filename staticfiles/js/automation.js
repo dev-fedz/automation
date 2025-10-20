@@ -775,9 +775,9 @@
             }
         };
 
-        const submitJson = async (url, payload) => {
+        const submitJson = async (url, payload, method = 'POST') => {
             const response = await fetch(url, {
-                method: 'POST',
+                method,
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': getCsrfToken(),

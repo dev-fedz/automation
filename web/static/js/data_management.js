@@ -160,7 +160,9 @@
     };
 
     document.addEventListener("DOMContentLoaded", () => {
-        const root = document.getElementById("data-management-app");
+        // support mounting the same module on both the dedicated Data Management
+        // page (`data-management-app`) and the Test Plans page (`automation-app`).
+        const root = document.getElementById("data-management-app") || document.getElementById("automation-app");
         if (!root) {
             return;
         }
@@ -192,6 +194,7 @@
             risks: ensureTrailingSlash(apiEndpoints.risks || ""),
             mitigations: ensureTrailingSlash(apiEndpoints.mitigation_plans || ""),
             mappings: ensureTrailingSlash(apiEndpoints.risk_mitigations || ""),
+            testTools: ensureTrailingSlash(apiEndpoints.test_tools || ""),
         };
 
         if (!endpoints.environments || !endpoints.risks || !endpoints.mitigations || !endpoints.mappings) {
@@ -239,6 +242,16 @@
             mappingRiskSelect: root.querySelector('[data-role="mapping-risk-select"]'),
             mappingMitigationSelect: root.querySelector('[data-role="mapping-mitigation-select"]'),
             mappingImpact: document.getElementById("mapping-impact"),
+            testToolsList: root.querySelector('[data-role="test-tools-list"]'),
+            testToolsSearch: root.querySelector('[data-role="test-tools-search"]'),
+            testToolsModal: root.querySelector('[data-role="test-tools-modal"]'),
+            testToolsForm: document.getElementById("test-tools-form"),
+            testToolsTitle: document.getElementById("test-tools-title"),
+            testToolsDescription: document.getElementById("test-tools-description"),
+            testToolsSubmit: root.querySelector('[data-role="test-tools-submit"]'),
+            testToolsMeta: root.querySelector('[data-role="test-tools-meta"]'),
+            testToolsCreated: root.querySelector('[data-role="test-tools-created"]'),
+            testToolsUpdated: root.querySelector('[data-role="test-tools-updated"]'),
         };
 
         const body = document.body;
@@ -261,6 +274,10 @@
             riskSearch: "",
             mitigationSearch: "",
             mappingSearch: "",
+            testTools: Array.isArray(readScriptJson("automation-initial-test-tools")) ? readScriptJson("automation-initial-test-tools") : [],
+            testToolsModalMode: "create",
+            testToolsCurrentId: null,
+            testToolsSearch: "",
         };
 
         const setStatus = (message, variant = "info") => {
@@ -362,6 +379,117 @@
                 }
             } else {
                 els.environmentMeta.hidden = true;
+            }
+        };
+
+        const renderTestToolsList = () => {
+            if (!els.testToolsList) {
+                return;
+            }
+            const filtered = state.testTools.filter((tool) => {
+                const q = state.testToolsSearch.toLowerCase();
+                if (!q) return true;
+                return (tool.title || "").toLowerCase().includes(q) || (tool.description || "").toLowerCase().includes(q);
+            });
+            if (!filtered.length) {
+                els.testToolsList.innerHTML = '<tr><td colspan="4" class="empty">No test tools match the current filters.</td></tr>';
+                return;
+            }
+            const rows = filtered
+                .map((tool) => `
+                    <tr data-tool-id="${tool.id}">
+                        <td>${escapeHtml(tool.title || "")}</td>
+                        <td>${escapeHtml(tool.description || "")}</td>
+                        <td>${escapeHtml(tool.updated_at || "--")}</td>
+                        <td>
+                            <div class="table-action-group">
+                                <button type="button" class="action-button" data-action="view-test-tool" data-tool-id="${tool.id}">View</button>
+                                <button type="button" class="action-button" data-action="edit-test-tool" data-tool-id="${tool.id}">Edit</button>
+                                <button type="button" class="action-button" data-action="delete-test-tool" data-tool-id="${tool.id}" data-variant="danger">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                `)
+                .join("");
+            els.testToolsList.innerHTML = rows;
+        };
+
+        const loadTestTools = async () => {
+            try {
+                const url = buildUrl(endpoints.testTools, { search: state.testToolsSearch });
+                const data = await request(url, { method: 'GET' });
+                state.testTools = Array.isArray(data) ? data : [];
+                renderTestToolsList();
+            } catch (error) {
+                // keep existing state if fetch fails
+                renderTestToolsList();
+            }
+        };
+
+        const openTestToolsModal = (mode, tool = null) => {
+            if (!els.testToolsModal) return;
+            state.testToolsModalMode = mode;
+            if (mode === "create") {
+                state.testToolsCurrentId = null;
+                state.testToolsForm = { title: "", description: "" };
+            } else if ((mode === "edit" || mode === "view") && tool) {
+                state.testToolsCurrentId = tool.id;
+                state.testToolsForm = { title: tool.title || "", description: tool.description || "", createdAt: tool.created_at, updatedAt: tool.updated_at };
+            }
+            if (els.testToolsTitle) {
+                els.testToolsTitle.value = state.testToolsForm.title || "";
+                els.testToolsTitle.readOnly = mode === "view";
+            }
+            if (els.testToolsDescription) {
+                els.testToolsDescription.value = state.testToolsForm.description || "";
+                els.testToolsDescription.readOnly = mode === "view";
+            }
+            if (els.testToolsSubmit) {
+                els.testToolsSubmit.textContent = mode === "edit" ? "Update" : "Save";
+                els.testToolsSubmit.hidden = mode === "view";
+            }
+            if (els.testToolsMeta) {
+                if (state.testToolsForm.createdAt || state.testToolsForm.updatedAt) {
+                    els.testToolsMeta.hidden = false;
+                    if (els.testToolsCreated) els.testToolsCreated.textContent = state.testToolsForm.createdAt ? formatDateTime(state.testToolsForm.createdAt) : "--";
+                    if (els.testToolsUpdated) els.testToolsUpdated.textContent = state.testToolsForm.updatedAt ? formatDateTime(state.testToolsForm.updatedAt) : "--";
+                } else {
+                    els.testToolsMeta.hidden = true;
+                }
+            }
+            els.testToolsModal.hidden = false;
+            body.classList.add("automation-modal-open");
+            if (els.testToolsTitle) els.testToolsTitle.focus();
+        };
+
+        const closeTestToolsModal = () => {
+            if (!els.testToolsModal) return;
+            els.testToolsModal.hidden = true;
+            body.classList.remove("automation-modal-open");
+            if (els.testToolsForm) els.testToolsForm.reset && els.testToolsForm.reset();
+            state.testToolsModalMode = "create";
+            state.testToolsCurrentId = null;
+        };
+
+        const handleTestToolsSubmit = async (event) => {
+            event.preventDefault();
+            try {
+                setStatus("Saving tool…", "info");
+                const payload = {
+                    title: (els.testToolsTitle.value || "").trim(),
+                    description: els.testToolsDescription.value || "",
+                };
+                if (!payload.title) throw new Error("Tool title is required.");
+                const url = endpoints.testTools;
+                const created = await request(url, { method: "POST", body: JSON.stringify(payload) });
+                // refresh local state
+                state.testTools.unshift(created);
+                renderTestToolsList();
+                closeTestToolsModal();
+                setStatus("Tool saved.", "success");
+            } catch (error) {
+                const message = error instanceof Error ? error.message : "Unable to save tool.";
+                setStatus(message, "error");
             }
         };
 
@@ -524,7 +652,7 @@
                 return;
             }
             if (!state.risks.length) {
-                els.riskList.innerHTML = '<tr><td colspan="3" class="empty">No risks match the current filters.</td></tr>';
+                els.riskList.innerHTML = '<tr><td colspan="5" class="empty">No risks match the current filters.</td></tr>';
                 return;
             }
             const rows = state.risks
@@ -535,6 +663,8 @@
                         <tr data-risk-id="${risk.id}">
                             <td data-label="Title">${title}</td>
                             <td data-label="Description">${description}</td>
+                            <td data-label="Created">${escapeHtml(formatDateTime(risk.created_at))}</td>
+                            <td data-label="Updated">${escapeHtml(formatDateTime(risk.updated_at))}</td>
                             <td data-label="Actions">
                                 <div class="table-action-group">
                                     <button type="button" class="action-button" data-action="view-risk" data-id="${risk.id}">View</button>
@@ -554,7 +684,7 @@
                 return;
             }
             if (!state.mitigationPlans.length) {
-                els.mitigationList.innerHTML = '<tr><td colspan="3" class="empty">No mitigation plans match the current filters.</td></tr>';
+                els.mitigationList.innerHTML = '<tr><td colspan="5" class="empty">No mitigation plans match the current filters.</td></tr>';
                 return;
             }
             const rows = state.mitigationPlans
@@ -565,6 +695,8 @@
                         <tr data-mitigation-id="${plan.id}">
                             <td data-label="Title">${title}</td>
                             <td data-label="Description">${description}</td>
+                            <td data-label="Created">${escapeHtml(formatDateTime(plan.created_at))}</td>
+                            <td data-label="Updated">${escapeHtml(formatDateTime(plan.updated_at))}</td>
                             <td data-label="Actions">
                                 <div class="table-action-group">
                                     <button type="button" class="action-button" data-action="view-mitigation" data-id="${plan.id}">View</button>
@@ -831,9 +963,18 @@
             }
         };
 
-        const openMappingModal = (mode, mapping = null) => {
+        const openMappingModal = async (mode, mapping = null) => {
             if (!els.mappingModal) {
                 return;
+            }
+            // If risks or mitigations are not loaded (e.g., when this module is mounted on
+            // the Test Plans page and initial data wasn't injected), try to load them.
+            if (!state.risks.length || !state.mitigationPlans.length) {
+                try {
+                    await Promise.all([loadRisks(), loadMitigationPlans()]);
+                } catch (err) {
+                    // ignore fetch errors here; we'll show the existing error below
+                }
             }
             if (!state.risks.length || !state.mitigationPlans.length) {
                 setStatus("Add at least one risk and mitigation plan before creating links.", "error");
@@ -992,7 +1133,9 @@
                 return;
             }
             const action = trigger.dataset.action;
-            const id = trigger.dataset.id ? Number(trigger.dataset.id) : null;
+            // some tables use data-id, test-tools uses data-tool-id — support both
+            const rawId = trigger.dataset.id || trigger.dataset.toolId || trigger.getAttribute('data-tool-id');
+            const id = rawId ? Number(rawId) : null;
 
             switch (action) {
                 case "open-environment-modal":
@@ -1031,6 +1174,38 @@
                         await request(`${endpoints.environments}${id}/`, { method: "DELETE" });
                         setStatus("Environment deleted.", "success");
                         await loadEnvironments();
+                    } catch (error) {
+                        setStatus(error.message, "error");
+                    }
+                    break;
+                }
+
+                case "view-test-tool": {
+                    event.preventDefault();
+                    const tool = state.testTools.find((item) => item.id === id);
+                    if (tool) {
+                        openTestToolsModal("view", tool);
+                    }
+                    break;
+                }
+
+                case "edit-test-tool": {
+                    event.preventDefault();
+                    const tool = state.testTools.find((item) => item.id === id);
+                    if (tool) {
+                        openTestToolsModal("edit", tool);
+                    }
+                    break;
+                }
+
+                case "delete-test-tool": {
+                    event.preventDefault();
+                    if (!id) break;
+                    if (!window.confirm("Are you sure you want to delete this tool?")) break;
+                    try {
+                        await request(`${endpoints.testTools}${id}/`, { method: "DELETE" });
+                        setStatus("Tool deleted.", "success");
+                        await loadTestTools();
                     } catch (error) {
                         setStatus(error.message, "error");
                     }
@@ -1364,6 +1539,7 @@
             });
         }
 
+        // Keep Escape key behaviour packed in a dedicated handler
         document.addEventListener("keydown", (event) => {
             if (event.key === "Escape") {
                 if (els.environmentModal && !els.environmentModal.hidden) {
@@ -1377,5 +1553,62 @@
                 }
             }
         });
+
+        // Test tools form wiring - initialize on DOMContentLoaded so buttons work immediately
+        if (els.testToolsForm) {
+            els.testToolsForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                const title = els.testToolsTitle ? (els.testToolsTitle.value || '').trim() : '';
+                const description = els.testToolsDescription ? (els.testToolsDescription.value || '').trim() : '';
+                if (!title) {
+                    setStatus('Tool title is required.', 'error');
+                    return;
+                }
+                const payload = { title, description };
+                try {
+                    if (state.testToolsModalMode === 'edit' && state.testToolsCurrentId) {
+                        const updated = await request(`${endpoints.testTools}${state.testToolsCurrentId}/`, { method: 'PATCH', body: JSON.stringify(payload) });
+                        if (updated && typeof updated === 'object') {
+                            const idx = state.testTools.findIndex((t) => Number(t.id) === Number(updated.id));
+                            if (idx > -1) {
+                                state.testTools[idx] = updated;
+                            } else {
+                                state.testTools.unshift(updated);
+                            }
+                        }
+                        setStatus('Tool updated successfully.', 'success');
+                    } else {
+                        const created = await request(endpoints.testTools, { method: 'POST', body: JSON.stringify(payload) });
+                        state.testTools.unshift(created);
+                        setStatus('Tool created successfully.', 'success');
+                    }
+                    closeTestToolsModal();
+                    renderTestToolsList();
+                } catch (error) {
+                    setStatus(error.message, 'error');
+                }
+            });
+        }
+
+        // wire open/close triggers for test tools
+        const testToolsOpenTrigger = root.querySelector('[data-action="open-test-tools-modal"]');
+        const testToolsCloseTriggers = Array.from(root.querySelectorAll('[data-action="close-test-tools-modal"]'));
+        if (testToolsOpenTrigger) testToolsOpenTrigger.addEventListener('click', (ev) => { ev.preventDefault(); openTestToolsModal('create'); });
+        testToolsCloseTriggers.forEach((node) => node.addEventListener('click', (ev) => { ev.preventDefault(); closeTestToolsModal(); }));
+        if (els.testToolsSearch) els.testToolsSearch.addEventListener('input', debounce((ev) => { state.testToolsSearch = (ev.target.value || '').trim(); renderTestToolsList(); }, 250));
+
+        // Initial fetch / render for test tools
+        (async () => {
+            try {
+                // if backend endpoint present, load fresh list, otherwise use initial state
+                if (endpoints.testTools) {
+                    const data = await request(endpoints.testTools);
+                    if (Array.isArray(data)) state.testTools = data;
+                }
+                renderTestToolsList();
+            } catch (_err) {
+                renderTestToolsList();
+            }
+        })();
     });
 })();

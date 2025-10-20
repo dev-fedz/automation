@@ -19,6 +19,7 @@ router.register(r"test-cases", views.TestCaseViewSet, basename="core-test-cases"
 router.register(r"risks", views.RiskViewSet, basename="core-risks")
 router.register(r"mitigation-plans", views.MitigationPlanViewSet, basename="core-mitigation-plans")
 router.register(r"risk-mitigations", views.RiskAndMitigationPlanViewSet, basename="core-risk-mitigation-plans")
+router.register(r"test-tools", views.TestToolsViewSet, basename="core-test-tools")
 
 urlpatterns = router.urls + [
 	path("tester/execute/", views.ApiAdhocRequestView.as_view(), name="core-request-execute"),

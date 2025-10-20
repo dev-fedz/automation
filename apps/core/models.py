@@ -244,7 +244,8 @@ class TestPlan(TimeStampedModel):
         null=True,
     )
     name = models.CharField(max_length=150, unique=True)
-    objective = models.TextField()
+    # allow drafts to be created before the rich-text objective is provided
+    objective = models.TextField(blank=True, default="")
     objectives = models.JSONField(default=list, blank=True)
     description = models.TextField(blank=True)
     modules_under_test = models.JSONField(default=list, blank=True)

@@ -370,6 +370,14 @@ class RiskViewSet(viewsets.ModelViewSet):
         return queryset
 
 
+class TestToolsViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.TestToolsSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return models.TestTools.objects.order_by("title", "id")
+
+
 class MitigationPlanViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.MitigationPlanSerializer
     permission_classes = [IsAuthenticated]
@@ -461,6 +469,7 @@ def _prepare_automation_data() -> dict[str, Any]:
         "risks": reverse("core:core-risks-list"),
         "mitigation_plans": reverse("core:core-mitigation-plans-list"),
         "risk_mitigations": reverse("core:core-risk-mitigation-plans-list"),
+        "test_tools": reverse("core:core-test-tools-list"),
     }
 
     selected_plan = plans_payload[0] if plans_payload else None
@@ -482,6 +491,7 @@ def _prepare_automation_data() -> dict[str, Any]:
         "risks": risks_payload,
         "mitigation_plans": mitigation_plans_payload,
         "risk_mitigations": risk_mitigations_payload,
+        "test_tools": serializers.TestToolsSerializer(models.TestTools.objects.order_by("title", "id"), many=True).data,
     }
 
 
@@ -611,6 +621,22 @@ def automation_data_management_risk_registry(request, section: str | None = None
         "initial_section": section or "",
     }
     return render(request, "core/automation_data_management_risk_registry.html", context)
+
+
+@login_required
+def automation_data_management_test_tools(request, section: str | None = None):
+    """Render Test Tools focused data management page."""
+    data = _prepare_automation_data()
+    context = {
+        "initial_metrics": data["metrics"],
+        "initial_environments": data["environments"],
+        "initial_risks": data["risks"],
+        "initial_mitigation_plans": data["mitigation_plans"],
+        "initial_risk_mitigations": data["risk_mitigations"],
+        "api_endpoints": data["api_endpoints"],
+        "initial_section": section or "test-tools",
+    }
+    return render(request, "core/automation_data_management_test_tools.html", context)
 
 
 
