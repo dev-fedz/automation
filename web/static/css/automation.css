@@ -399,6 +399,87 @@
     gap: 0.85rem;
 }
 
+/* Module collapsible body and scenarios table styling */
+.col-collapse {
+    width: 44px;
+    text-align: center;
+    vertical-align: middle;
+}
+.btn-icon.module-toggle {
+    border: 1px solid var(--automation-accent-dark);
+    background: var(--automation-accent);
+    color: #fff;
+    border-radius: 6px;
+    padding: 0.12rem 0.38rem;
+    font-size: 0.95rem;
+    line-height: 1;
+    box-shadow: 0 2px 6px -4px rgba(0,0,0,0.25);
+    transition: background 0.12s ease, transform 0.08s ease;
+}
+.btn-icon.module-toggle:hover {
+    background: var(--automation-accent-dark);
+    transform: translateY(-1px);
+}
+.btn-icon.module-toggle:focus {
+    outline: 3px solid rgba(244,180,0,0.18);
+    outline-offset: 2px;
+}
+.module-row-body td {
+    padding: 0.5rem 0.6rem 0.75rem 0.6rem;
+    background: rgba(255, 249, 221, 0.6);
+}
+.module-body {
+    width: 100%;
+}
+.module-scenarios-wrapper {
+    width: 100%;
+    overflow: auto;
+}
+.module-scenarios-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: auto;
+    font-size: 0.9rem;
+}
+.module-scenarios-table thead tr th {
+    background: rgba(244, 180, 0, 0.08);
+    color: var(--automation-accent-dark);
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+}
+.module-scenarios-table tbody tr:hover {
+    background: rgba(255, 249, 221, 0.5);
+}
+.module-scenarios-table tbody tr td.empty {
+    color: var(--automation-text-muted);
+}
+.module-scenarios-table td.scenario-actions {
+    text-align: right;
+}
+.module-scenarios-table th,
+.module-scenarios-table td {
+    padding: 0.5rem 0.65rem;
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+    vertical-align: middle;
+    text-align: left;
+}
+.module-body-actions {
+    padding: 0.45rem 0.6rem 0.25rem 0.6rem;
+}
+.module-body-actions .action-button {
+    height: 2.1rem; /* match inline-select / visually close to .btn-primary */
+    padding: 0 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.75rem;
+}
+.module-body .empty {
+    padding: 0.6rem 0.6rem;
+    color: var(--automation-text-muted);
+}
+
 .form-row {
     display: flex;
     flex-direction: column;

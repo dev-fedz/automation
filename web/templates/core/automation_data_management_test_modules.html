@@ -134,6 +134,57 @@
         </div>
     </div>
 
+    <!-- Add Test Case modal (used for adding a case directly to a scenario) -->
+    <div class="automation-modal" data-role="module-add-case-modal" hidden>
+        <div class="automation-modal__backdrop" data-action="close-module-add-case-modal"></div>
+        <div class="automation-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="module-add-case-modal-title">
+            <header class="automation-modal__header">
+                <h2 id="module-add-case-modal-title">Add Test Case</h2>
+                <button type="button" class="automation-modal__close" data-action="close-module-add-case-modal" aria-label="Close">&times;</button>
+            </header>
+            <form id="module-add-case-form" class="automation-form" autocomplete="off">
+                <fieldset>
+                    <legend class="sr-only">New test case</legend>
+                    <input type="hidden" id="module-add-case-scenario-id" name="scenario">
+                    <div class="form-row">
+                        <label for="module-add-case-title">Title<span aria-hidden="true">*</span></label>
+                        <input type="text" id="module-add-case-title" name="title" required maxlength="150" placeholder="Case title">
+                    </div>
+                    <div class="form-row">
+                        <label for="module-add-case-description">Description</label>
+                        <textarea id="module-add-case-description" name="description" rows="3"></textarea>
+                    </div>
+                    <div class="form-row">
+                        <label for="module-add-case-steps">Steps (one per line)</label>
+                        <textarea id="module-add-case-steps" name="steps" rows="4" placeholder="Step 1\nStep 2"></textarea>
+                    </div>
+                    <div class="form-row">
+                        <label for="module-add-case-expected">Expected results (one per line)</label>
+                        <textarea id="module-add-case-expected" name="expected" rows="4"></textarea>
+                    </div>
+                    <div class="form-row inline">
+                        <div>
+                            <label for="module-add-case-priority">Priority</label>
+                            <input type="text" id="module-add-case-priority" name="priority" placeholder="P1">
+                        </div>
+                        <div>
+                            <label for="module-add-case-owner">Owner</label>
+                            <input type="text" id="module-add-case-owner" name="owner" placeholder="owner@example.com">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <label for="module-add-case-request">Related API Request ID (optional)</label>
+                        <input type="number" id="module-add-case-request" name="request" min="1" step="1" placeholder="123">
+                    </div>
+                </fieldset>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">Save Test Case</button>
+                    <button type="button" class="btn-secondary" data-action="close-module-add-case-modal">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     {{ initial_metrics|default:"[]"|json_script:"data-management-initial-metrics" }}
     {{ api_endpoints|default:"{}"|json_script:"automation-api-endpoints" }}
     {{ initial_plans|default:"[]"|json_script:"automation-initial-plans" }}

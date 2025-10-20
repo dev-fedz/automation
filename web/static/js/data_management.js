@@ -296,6 +296,9 @@
             testToolsModalMode: "create",
             testToolsCurrentId: null,
             testToolsSearch: "",
+            moduleScenarioSearch: {},
+            moduleScenarioModalMode: 'create',
+            moduleScenarioCurrentId: null,
         };
 
         const setStatus = (message, variant = "info") => {
@@ -455,10 +458,28 @@
                 .map((m) => {
                     const plan = initialPlans.find((p) => Number(p.id) === Number(m.plan_id));
                     const planLabel = plan ? (plan.name || plan.title || `Plan ${plan.id}`) : "";
-                    const scenarios = Array.isArray(m.scenarios) ? m.scenarios : [];
+                    const scenariosAll = Array.isArray(m.scenarios) ? m.scenarios : [];
+                    const query = state.moduleScenarioSearch && state.moduleScenarioSearch[m.id] ? String(state.moduleScenarioSearch[m.id]).toLowerCase() : '';
+                    const scenarios = query ? scenariosAll.filter((s) => {
+                        const q = query;
+                        return (s.title || '').toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q);
+                    }) : scenariosAll;
                     const scenarioRows = scenarios
                         .map((s) => `
-                            <li class="module-scenario-item" data-scenario-id="${s.id}"><strong>${escapeHtml(s.title || '')}</strong> <small>${escapeHtml(s.updated_at || '')}</small></li>
+                            <tr class="module-scenario-row" data-scenario-id="${s.id}">
+                                <td class="scenario-title">${escapeHtml(s.title || '')}</td>
+                                <td class="scenario-description">${escapeHtml(s.description || '')}</td>
+                                <td class="scenario-created">${escapeHtml(formatDateTime(s.created_at || null))}</td>
+                                <td class="scenario-updated">${escapeHtml(formatDateTime(s.updated_at || null))}</td>
+                                <td class="scenario-actions">
+                                    <div class="table-action-group">
+                                        <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${s.id}">View</button>
+                                        <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${s.id}">Edit</button>
+                                        <button type="button" class="action-button" data-action="add-case" data-scenario-id="${s.id}">Add Case</button>
+                                        <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${s.id}" data-variant="danger">Delete</button>
+                                    </div>
+                                </td>
+                            </tr>
                         `)
                         .join("");
                     return `
@@ -479,15 +500,29 @@
                             </div>
                         </td>
                     </tr>
-                    <tr class="module-row-body" data-module-body-for="${m.id}" hidden>
+                        <tr class="module-row-body" data-module-body-for="${m.id}" hidden>
                         <td colspan="7">
                             <div class="module-body">
                                 <div class="module-body-actions">
-                                    <button type="button" class="action-button" data-action="add-scenario-to-module" data-module-id="${m.id}">Add Scenario</button>
+                                    <input type="search" class="automation-search" placeholder="Search scenarios" data-action="module-scenario-search" data-module-id="${m.id}" value="${escapeHtml(state.moduleScenarioSearch && state.moduleScenarioSearch[m.id] ? state.moduleScenarioSearch[m.id] : '')}">
+                                    <button type="button" class="btn-primary" data-action="add-scenario-to-module" data-module-id="${m.id}">Add Scenario</button>
                                 </div>
-                                <ul class="module-scenarios-list">
-                                    ${scenarioRows || '<li class="empty">No scenarios yet.</li>'}
-                                </ul>
+                                <div class="module-scenarios-wrapper">
+                                    <table class="module-scenarios-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Title</th>
+                                                    <th>Description</th>
+                                                    <th>Created</th>
+                                                    <th>Updated</th>
+                                                    <th>Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                ${scenarioRows || '<tr><td colspan="5" class="empty">No scenarios yet.</td></tr>'}
+                                            </tbody>
+                                        </table>
+                                </div>
                             </div>
                         </td>
                     </tr>
@@ -497,8 +532,8 @@
             els.testModulesList.innerHTML = rows;
         };
 
-        // Toggle module collapse/expand
-        const toggleModule = (moduleId, expand) => {
+        // Toggle module collapse/expand (supports lazy-loading scenarios on first expand)
+        const toggleModule = async (moduleId, expand) => {
             const row = els.testModulesList.querySelector(`[data-module-id="${moduleId}"]`);
             if (!row) return;
             const btn = row.querySelector('[data-action="toggle-module"]');
@@ -508,7 +543,38 @@
             if (!body || !btn) return;
             const isExpanded = btn.getAttribute('aria-expanded') === 'true';
             const willExpand = typeof expand === 'boolean' ? expand : !isExpanded;
+
+            // find module object in state
+            const moduleObj = state.testModules.find((m) => Number(m.id) === Number(moduleId));
+
             if (willExpand) {
+                // if scenarios not loaded yet, fetch them
+                if (moduleObj && !moduleObj._scenarios_loaded) {
+                    try {
+                        setStatus('Loading scenarios…', 'info');
+                        const url = endpoints.scenarios || (apiEndpoints.scenarios ? ensureTrailingSlash(apiEndpoints.scenarios) : '/api/core/test-scenarios/');
+                        const data = await request(buildUrl(url, { module: moduleId }), { method: 'GET' });
+                        moduleObj.scenarios = Array.isArray(data) ? data : [];
+                        moduleObj._scenarios_loaded = true;
+                        // re-render list so scenarios appear in the DOM
+                        renderTestModulesList();
+                        // after re-render, find the new row/button and expand it
+                        const newRow = els.testModulesList.querySelector(`[data-module-id="${moduleId}"]`);
+                        const newBtn = newRow ? newRow.querySelector('[data-action="toggle-module"]') : null;
+                        const newBodyRow = els.testModulesList.querySelector(`tr.module-row-body[data-module-body-for="${moduleId}"]`);
+                        if (newBodyRow) newBodyRow.hidden = false;
+                        if (newBtn) {
+                            newBtn.setAttribute('aria-expanded', 'true');
+                            newBtn.textContent = '▾';
+                        }
+                        setStatus('', 'info');
+                        return;
+                    } catch (err) {
+                        setStatus(err instanceof Error ? err.message : 'Failed to load scenarios.', 'error');
+                        return;
+                    }
+                }
+                // if already loaded, just reveal body
                 bodyRow.hidden = false;
                 btn.setAttribute('aria-expanded', 'true');
                 btn.textContent = '▾';
@@ -519,16 +585,67 @@
             }
         };
 
-        // Open add-scenario modal for a given module id
-        const openModuleAddScenarioModal = (moduleId) => {
+        // Ensure a module row is expanded after a render (keeps UI stable after updates)
+        const ensureModuleExpanded = (moduleId) => {
+            // find the row/button in the current DOM and expand it
+            const row = els.testModulesList.querySelector(`[data-module-id="${moduleId}"]`);
+            if (!row) return;
+            const btn = row.querySelector('[data-action="toggle-module"]');
+            const bodyRow = els.testModulesList.querySelector(`tr.module-row-body[data-module-body-for="${moduleId}"]`);
+            if (!btn || !bodyRow) return;
+            bodyRow.hidden = false;
+            btn.setAttribute('aria-expanded', 'true');
+            btn.textContent = '▾';
+        };
+
+        // Open add/edit/view scenario modal for a given module id
+        const openModuleScenarioModal = (mode, moduleId, scenario = null) => {
             const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
             if (!modal) return;
-            const input = document.getElementById('module-add-scenario-module-id');
-            if (input) input.value = moduleId;
+            state.moduleScenarioModalMode = mode || 'create';
+            state.moduleScenarioCurrentId = scenario && scenario.id ? scenario.id : null;
+            // populate module hidden input
+            const moduleInput = document.getElementById('module-add-scenario-module-id');
+            if (moduleInput) moduleInput.value = moduleId || (scenario && scenario.module ? scenario.module : '');
+            // populate fields
+            const titleInput = document.getElementById('module-add-scenario-title');
+            const descInput = document.getElementById('module-add-scenario-description');
+            const preInput = document.getElementById('module-add-scenario-preconditions');
+            const postInput = document.getElementById('module-add-scenario-postconditions');
+            const tagsInput = document.getElementById('module-add-scenario-tags');
+            if (scenario) {
+                if (titleInput) titleInput.value = scenario.title || '';
+                if (descInput) descInput.value = scenario.description || '';
+                if (preInput) preInput.value = scenario.preconditions || '';
+                if (postInput) postInput.value = scenario.postconditions || '';
+                if (tagsInput) tagsInput.value = Array.isArray(scenario.tags) ? scenario.tags.join(',') : (scenario.tags || '');
+            } else {
+                if (titleInput) titleInput.value = '';
+                if (descInput) descInput.value = '';
+                if (preInput) preInput.value = '';
+                if (postInput) postInput.value = '';
+                if (tagsInput) tagsInput.value = '';
+            }
+            const submit = modal.querySelector('button[type="submit"]');
+            // view mode => readonly fields and hide submit
+            const readOnly = mode === 'view';
+            if (titleInput) { titleInput.readOnly = readOnly; titleInput.disabled = readOnly; }
+            if (descInput) { descInput.readOnly = readOnly; descInput.disabled = readOnly; }
+            if (preInput) { preInput.readOnly = readOnly; preInput.disabled = readOnly; }
+            if (postInput) { postInput.readOnly = readOnly; postInput.disabled = readOnly; }
+            if (tagsInput) { tagsInput.readOnly = readOnly; tagsInput.disabled = readOnly; }
+            if (submit) submit.hidden = readOnly;
+            // set header title
+            const header = document.getElementById('module-add-scenario-modal-title');
+            if (header) {
+                if (mode === 'edit') header.textContent = 'Edit Scenario';
+                else if (mode === 'view') header.textContent = 'View Scenario';
+                else header.textContent = 'Add Scenario to Module';
+            }
             modal.hidden = false;
             body.classList.add('automation-modal-open');
-            const title = document.getElementById('module-add-scenario-title');
-            if (title) title.focus();
+            // focus first input when not viewing
+            if (!readOnly && titleInput) titleInput.focus();
         };
 
         const closeModuleAddScenarioModal = () => {
@@ -538,6 +655,12 @@
             body.classList.remove('automation-modal-open');
             const form = document.getElementById('module-add-scenario-form');
             if (form) form.reset();
+        };
+
+        const closeModuleScenarioModal = () => {
+            state.moduleScenarioModalMode = 'create';
+            state.moduleScenarioCurrentId = null;
+            closeModuleAddScenarioModal();
         };
 
         const handleModuleAddScenarioSubmit = async (event) => {
@@ -569,24 +692,45 @@
             if (moduleObj && moduleObj.plan_id) payload.plan = moduleObj.plan_id;
             try {
                 setStatus('Saving scenario…', 'info');
-                const url = endpoints.scenarios || (apiEndpoints.scenarios ? ensureTrailingSlash(apiEndpoints.scenarios) : '/api/core/test-scenarios/');
-                const created = await request(url, { method: 'POST', body: JSON.stringify(payload) });
-                // insert scenario into module's sublist in state and DOM
-                if (moduleObj) {
-                    moduleObj.scenarios = moduleObj.scenarios || [];
-                    moduleObj.scenarios.unshift(created);
-                    // re-render modules list to reflect changes
-                    renderTestModulesList();
-                    // expand this module to show the new scenario
-                    toggleModule(moduleId, true);
+                const urlBase = endpoints.scenarios || (apiEndpoints.scenarios ? ensureTrailingSlash(apiEndpoints.scenarios) : '/api/core/test-scenarios/');
+                if (state.moduleScenarioModalMode === 'edit' && state.moduleScenarioCurrentId) {
+                    // update existing scenario
+                    const editUrl = `${urlBase}${state.moduleScenarioCurrentId}/`;
+                    const updated = await request(editUrl, { method: 'PATCH', body: JSON.stringify(payload) });
+                    // update in state
+                    if (moduleObj && Array.isArray(moduleObj.scenarios)) {
+                        const idx = moduleObj.scenarios.findIndex((s) => Number(s.id) === Number(updated.id));
+                        if (idx > -1) {
+                            moduleObj.scenarios[idx] = updated;
+                        } else {
+                            moduleObj.scenarios.unshift(updated);
+                        }
+                        renderTestModulesList();
+                        ensureModuleExpanded(moduleId);
+                    } else {
+                        await loadTestModules();
+                    }
+                    closeModuleScenarioModal();
+                    setStatus('Scenario updated.', 'success');
                 } else {
-                    // fallback: reload modules from server
-                    await loadTestModules();
+                    const created = await request(urlBase, { method: 'POST', body: JSON.stringify(payload) });
+                    // insert scenario into module's sublist in state and DOM
+                    if (moduleObj) {
+                        moduleObj.scenarios = moduleObj.scenarios || [];
+                        moduleObj.scenarios.unshift(created);
+                        // re-render modules list to reflect changes
+                        renderTestModulesList();
+                        // keep this module expanded so the new scenario is visible
+                        ensureModuleExpanded(moduleId);
+                    } else {
+                        // fallback: reload modules from server
+                        await loadTestModules();
+                    }
+                    closeModuleScenarioModal();
+                    setStatus('Scenario saved.', 'success');
                 }
-                closeModuleAddScenarioModal();
-                setStatus('Scenario saved.', 'success');
             } catch (error) {
-                const message = error instanceof Error ? error.message : 'Unable to create scenario.';
+                const message = error instanceof Error ? error.message : 'Unable to save scenario.';
                 setStatus(message, 'error');
             }
         };
@@ -1462,7 +1606,7 @@
                 case "add-scenario-to-module": {
                     event.preventDefault();
                     if (!id) break;
-                    openModuleAddScenarioModal(id);
+                    openModuleScenarioModal('create', id);
                     break;
                 }
                 case "toggle-module": {
@@ -1471,9 +1615,120 @@
                     toggleModule(id);
                     break;
                 }
+
+
                 case "close-module-add-scenario-modal": {
                     event.preventDefault();
-                    closeModuleAddScenarioModal();
+                    closeModuleScenarioModal();
+                    break;
+                }
+
+                case "view-scenario": {
+                    event.preventDefault();
+                    const sid = trigger.dataset.scenarioId ? Number(trigger.dataset.scenarioId) : null;
+                    if (!sid) break;
+                    // find scenario in state across modules
+                    let found = null;
+                    state.testModules.forEach((m) => {
+                        if (Array.isArray(m.scenarios)) {
+                            const s = m.scenarios.find((sc) => Number(sc.id) === Number(sid));
+                            if (s) found = { scenario: s, moduleId: m.id };
+                        }
+                    });
+                    if (found) {
+                        openModuleScenarioModal('view', found.moduleId, found.scenario);
+                    } else {
+                        // as a fallback, fetch scenario from API
+                        (async () => {
+                            try {
+                                const urlBase = endpoints.scenarios || (apiEndpoints.scenarios ? ensureTrailingSlash(apiEndpoints.scenarios) : '/api/core/test-scenarios/');
+                                const data = await request(`${urlBase}${sid}/`, { method: 'GET' });
+                                openModuleScenarioModal('view', data.module || null, data);
+                            } catch (err) {
+                                setStatus(err instanceof Error ? err.message : 'Unable to fetch scenario.', 'error');
+                            }
+                        })();
+                    }
+                    break;
+                }
+                case "edit-scenario": {
+                    event.preventDefault();
+                    const sid = trigger.dataset.scenarioId ? Number(trigger.dataset.scenarioId) : null;
+                    if (!sid) break;
+                    let found = null;
+                    state.testModules.forEach((m) => {
+                        if (Array.isArray(m.scenarios)) {
+                            const s = m.scenarios.find((sc) => Number(sc.id) === Number(sid));
+                            if (s) found = { scenario: s, moduleId: m.id };
+                        }
+                    });
+                    if (found) {
+                        openModuleScenarioModal('edit', found.moduleId, found.scenario);
+                    } else {
+                        (async () => {
+                            try {
+                                const urlBase = endpoints.scenarios || (apiEndpoints.scenarios ? ensureTrailingSlash(apiEndpoints.scenarios) : '/api/core/test-scenarios/');
+                                const data = await request(`${urlBase}${sid}/`, { method: 'GET' });
+                                openModuleScenarioModal('edit', data.module || null, data);
+                            } catch (err) {
+                                setStatus(err instanceof Error ? err.message : 'Unable to fetch scenario.', 'error');
+                            }
+                        })();
+                    }
+                    break;
+                }
+                case "delete-scenario": {
+                    event.preventDefault();
+                    const sid = trigger.dataset.scenarioId ? Number(trigger.dataset.scenarioId) : null;
+                    if (!sid) break;
+                    if (!window.confirm('Are you sure you want to delete this scenario?')) break;
+                    try {
+                        const urlBase = endpoints.scenarios || (apiEndpoints.scenarios ? ensureTrailingSlash(apiEndpoints.scenarios) : '/api/core/test-scenarios/');
+                        await request(`${urlBase}${sid}/`, { method: 'DELETE' });
+                        // remove from state
+                        let parentModuleId = null;
+                        state.testModules.forEach((m) => {
+                            if (Array.isArray(m.scenarios)) {
+                                const idx = m.scenarios.findIndex((s) => Number(s.id) === Number(sid));
+                                if (idx > -1) {
+                                    parentModuleId = m.id;
+                                    m.scenarios.splice(idx, 1);
+                                }
+                            }
+                        });
+                        renderTestModulesList();
+                        // keep parent module expanded if known
+                        if (parentModuleId) ensureModuleExpanded(parentModuleId);
+                        setStatus('Scenario deleted.', 'success');
+                    } catch (err) {
+                        setStatus(err instanceof Error ? err.message : 'Unable to delete scenario.', 'error');
+                    }
+                    break;
+                }
+                case "add-case": {
+                    event.preventDefault();
+                    const sid = trigger.dataset.scenarioId ? Number(trigger.dataset.scenarioId) : null;
+                    if (!sid) break;
+                    const modal = document.querySelector('[data-role="module-add-case-modal"]');
+                    const input = document.getElementById('module-add-case-scenario-id');
+                    if (input) input.value = sid;
+                    if (modal) {
+                        modal.hidden = false;
+                        body.classList.add('automation-modal-open');
+                        const title = document.getElementById('module-add-case-title');
+                        if (title) title.focus();
+                    }
+                    break;
+                }
+                case "close-module-add-case-modal": {
+                    event.preventDefault();
+                    const modal = document.querySelector('[data-role="module-add-case-modal"]');
+                    if (modal) {
+                        modal.hidden = true;
+                        body.classList.remove('automation-modal-open');
+                        const form = document.getElementById('module-add-case-form');
+                        if (form) form.reset();
+                    }
                     break;
                 }
 
@@ -1709,6 +1964,46 @@
                     break;
             }
         });
+
+        // separate input handler for search inputs (we want debounce behaviour)
+        root.addEventListener('input', debounce((event) => {
+            const target = event.target;
+            if (!target) return;
+            const action = target.dataset && target.dataset.action;
+            if (action === 'module-scenario-search') {
+                const mid = target.dataset.moduleId ? Number(target.dataset.moduleId) : null;
+                if (!mid) return;
+                // capture caret/selection so we can restore it after re-render
+                let selStart = null;
+                let selEnd = null;
+                try {
+                    if (typeof target.selectionStart === 'number') {
+                        selStart = target.selectionStart;
+                        selEnd = target.selectionEnd;
+                    }
+                } catch (e) {
+                    // ignore if not supported
+                }
+                state.moduleScenarioSearch[mid] = (target.value || '').trim();
+                // re-render only modules list so filter applies
+                renderTestModulesList();
+                ensureModuleExpanded(mid);
+                // restore focus & selection to the new input element (DOM was re-rendered)
+                window.setTimeout(() => {
+                    const newInput = root.querySelector(`[data-action="module-scenario-search"][data-module-id="${mid}"]`);
+                    if (newInput) {
+                        newInput.focus();
+                        try {
+                            if (selStart !== null && typeof newInput.setSelectionRange === 'function') {
+                                newInput.setSelectionRange(selStart, selEnd);
+                            }
+                        } catch (err) {
+                            // ignore selection restore errors
+                        }
+                    }
+                }, 0);
+            }
+        }, 250));
 
         if (els.environmentForm) {
             els.environmentForm.addEventListener("input", handleEnvironmentFormInput);
@@ -1959,6 +2254,68 @@
                     renderTestModulesList();
                 } catch (error) {
                     setStatus(error.message, 'error');
+                }
+            });
+        }
+
+        // module add case form wiring
+        const moduleAddCaseForm = document.getElementById('module-add-case-form');
+        if (moduleAddCaseForm) {
+            moduleAddCaseForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                const scenarioInput = document.getElementById('module-add-case-scenario-id');
+                const titleInput = document.getElementById('module-add-case-title');
+                const descInput = document.getElementById('module-add-case-description');
+                const stepsInput = document.getElementById('module-add-case-steps');
+                const expectedInput = document.getElementById('module-add-case-expected');
+                const priorityInput = document.getElementById('module-add-case-priority');
+                const ownerInput = document.getElementById('module-add-case-owner');
+                const requestInput = document.getElementById('module-add-case-request');
+                const sid = scenarioInput && scenarioInput.value ? Number(scenarioInput.value) : null;
+                if (!sid) {
+                    setStatus('Scenario id missing for test case.', 'error');
+                    return;
+                }
+                const payload = {
+                    scenario: sid,
+                    title: (titleInput && titleInput.value || '').trim(),
+                    description: descInput && descInput.value || '',
+                    steps: stepsInput && stepsInput.value ? stepsInput.value.split(/\n/).map((s) => s.trim()).filter(Boolean) : [],
+                    expected_results: expectedInput && expectedInput.value ? expectedInput.value.split(/\n/).map((s) => ({ note: s.trim() })).filter(Boolean) : [],
+                    priority: priorityInput && priorityInput.value ? priorityInput.value : '',
+                    owner: ownerInput && ownerInput.value ? ownerInput.value : '',
+                };
+                if (requestInput && requestInput.value) {
+                    const parsed = Number(requestInput.value);
+                    if (!Number.isNaN(parsed) && parsed > 0) payload.related_api_request = parsed;
+                }
+                if (!payload.title) {
+                    setStatus('Test case title is required.', 'error');
+                    return;
+                }
+                try {
+                    setStatus('Saving test case…', 'info');
+                    const urlBase = endpoints.cases || (apiEndpoints.cases ? ensureTrailingSlash(apiEndpoints.cases) : '/api/core/test-cases/');
+                    const created = await request(urlBase, { method: 'POST', body: JSON.stringify(payload) });
+                    // close modal and reset
+                    const modal = document.querySelector('[data-role="module-add-case-modal"]');
+                    if (modal) {
+                        modal.hidden = true;
+                        body.classList.remove('automation-modal-open');
+                    }
+                    moduleAddCaseForm.reset();
+                    setStatus('Test case saved.', 'success');
+                    // optional: refresh modules or plans to show newly created case in related views
+                    // if plans API is available, refresh plans so scenario/case counts update
+                    if (endpoints.testModules) {
+                        // try updating modules scenarios cache by reloading modules
+                        await loadTestModules();
+                    } else {
+                        // fallback to refresh plans if available
+                        try { await refreshPlans({ silent: true }); } catch (_) { }
+                    }
+                } catch (err) {
+                    setStatus(err instanceof Error ? err.message : 'Unable to save test case.', 'error');
                 }
             });
         }

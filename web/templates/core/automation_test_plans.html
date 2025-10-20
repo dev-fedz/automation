@@ -25,8 +25,8 @@
                 <thead>
                     <tr>
                         <th scope="col">Plan</th>
-                        <th scope="col">Scenarios</th>
                         <th scope="col">Modules</th>
+                        <th scope="col">Scenarios</th>
                         <th scope="col">Testers</th>
                         <th scope="col">Kickoff</th>
                         <th scope="col">Sign-off</th>
@@ -43,9 +43,9 @@
                                     {% if plan.description %}<div class="table-secondary">{{ plan.description }}</div>{% endif %}
                                     {% if plan.objective %}<div class="table-tertiary table-tertiary-rich">{{ plan.objective }}</div>{% endif %}
                                 </td>
-                                <td data-label="Scenarios">{{ plan.scenarios|length }}</td>
                                 <td data-label="Modules">{{ plan.modules_under_test|length }}</td>
                                 <td data-label="Testers">{{ plan.testers|length }}</td>
+                                <td data-label="Scenarios">{{ plan.scenarios|length }}</td>
                                 <td data-label="Kickoff">{{ plan.testing_timeline.kickoff|default:"—" }}</td>
                                 <td data-label="Sign-off">{{ plan.testing_timeline.signoff|default:"—" }}</td>
                                 <td data-label="Approver">{{ plan.approver|default:"—" }}</td>
