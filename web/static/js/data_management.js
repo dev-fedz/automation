@@ -803,10 +803,14 @@
                     const editUrl = `${urlBase}${state.moduleScenarioCurrentId}/`;
                     const updated = await request(editUrl, { method: 'PATCH', body: JSON.stringify(payload) });
                     // close modal immediately to ensure it hides even if later
-                    // UI updates throw. Then update client state and refresh.
+                    // UI updates throw. Then refresh authoritative state first
+                    // and ensure the module stays expanded so the collapsible
+                    // does not close unexpectedly.
                     try { closeModuleScenarioModal(); } catch (e) { /* ignore */ }
                     try {
-                        // update in state
+                        // Update the scenario in-place in local state so we don't
+                        // replace the whole modules list (which can be filtered on
+                        // the server and remove records unexpectedly).
                         if (moduleObj && Array.isArray(moduleObj.scenarios)) {
                             const normalizedUpdated = normalizeScenario(updated);
                             const idx = moduleObj.scenarios.findIndex((s) => Number(s.id) === Number(normalizedUpdated.id));
@@ -815,14 +819,12 @@
                             } else {
                                 moduleObj.scenarios.unshift(normalizedUpdated);
                             }
+                            // re-render to show the updated row
                             renderTestModulesList();
-                            ensureModuleExpanded(moduleId);
+                            // ensure module remains expanded
+                            if (moduleId) ensureModuleExpanded(moduleId);
                         }
-                        // refresh authoritative server state
-                        try {
-                            await loadTestModules();
-                            try { document.dispatchEvent(new CustomEvent('test-modules-changed', { detail: { moduleId } })); } catch (e) { }
-                        } catch (e) { /* ignore */ }
+                        try { document.dispatchEvent(new CustomEvent('test-modules-changed', { detail: { moduleId } })); } catch (e) { }
                     } catch (e) {
                         try { console.info('[data-management] error updating state after update', { error: e && (e.message || e) }); } catch (err) { }
                     }
@@ -834,17 +836,21 @@
                     // UI updates throw. Then update client state and refresh.
                     try { closeModuleScenarioModal(); } catch (e) { /* ignore */ }
                     try {
-                        // After creating, prefer to refresh authoritative server state
-                        // before touching the DOM to avoid races where elements are
-                        // re-rendered/removed while we query them.
-                        try { await loadTestModules(); } catch (e) { /* ignore */ }
-                        try {
-                            // after refreshing, expand the module so the new scenario is visible
+                        // Insert created scenario into local module state when possible
+                        const normalizedCreated = normalizeScenario(created);
+                        if (moduleObj) {
+                            moduleObj.scenarios = moduleObj.scenarios || [];
+                            moduleObj.scenarios.unshift(normalizedCreated);
+                            // re-render modules list and keep module expanded
+                            renderTestModulesList();
                             if (moduleId) ensureModuleExpanded(moduleId);
-                        } catch (e) {
-                            try { console.info('[data-management] error updating state after create', { error: e && (e.message || e) }); } catch (err) { }
+                            try { document.dispatchEvent(new CustomEvent('test-modules-changed', { detail: { moduleId } })); } catch (e) { }
+                        } else {
+                            // fallback: reload authoritative modules list
+                            try { await loadTestModules(); } catch (e) { /* ignore */ }
+                            try { if (moduleId) ensureModuleExpanded(moduleId); } catch (e) { }
+                            try { document.dispatchEvent(new CustomEvent('test-modules-changed', { detail: { moduleId } })); } catch (e) { }
                         }
-                        try { document.dispatchEvent(new CustomEvent('test-modules-changed', { detail: { moduleId } })); } catch (e) { }
                     } catch (e) {
                         try { console.info('[data-management] error in create flow', { error: e && (e.message || e) }); } catch (err) { }
                     }
