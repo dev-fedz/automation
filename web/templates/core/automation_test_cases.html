@@ -10,86 +10,8 @@
 
 {% block content %}
 <div class="automation-dashboard" id="automation-app">
-    <header class="automation-header">
-        <div class="automation-heading">
-            <h1>Test Cases</h1>
-            <p>Create detailed automation steps, expectations, and dynamic data bindings for each scenario.</p>
-        </div>
-        <div class="automation-status" data-role="status" aria-live="polite" hidden></div>
-    </header>
-
-    <section class="automation-metrics" aria-label="Automation metrics">
-        <article class="automation-metric" data-metric-key="plans">
-            <span class="metric-label">Test Plans</span>
-            <strong class="metric-value">{{ initial_metrics.plans }}</strong>
-        </article>
-        <article class="automation-metric" data-metric-key="scenarios">
-            <span class="metric-label">Scenarios</span>
-            <strong class="metric-value">{{ initial_metrics.scenarios }}</strong>
-        </article>
-        <article class="automation-metric" data-metric-key="cases">
-            <span class="metric-label">Test Cases</span>
-            <strong class="metric-value">{{ initial_metrics.cases }}</strong>
-        </article>
-        <article class="automation-metric" data-metric-key="collections">
-            <span class="metric-label">Collections</span>
-            <strong class="metric-value">{{ initial_metrics.collections }}</strong>
-        </article>
-        <article class="automation-metric" data-metric-key="runs">
-            <span class="metric-label">Runs</span>
-            <strong class="metric-value">{{ initial_metrics.runs }}</strong>
-        </article>
-        <article class="automation-metric" data-metric-key="environments">
-            <span class="metric-label">Environments</span>
-            <strong class="metric-value">{{ initial_metrics.environments }}</strong>
-        </article>
-    </section>
 
     <div class="automation-grid">
-        <section class="automation-panel" data-panel="plans" aria-labelledby="headline-plans">
-            <div class="panel-header">
-                <h2 id="headline-plans">Select Plan</h2>
-                <button type="button" class="automation-refresh" data-action="refresh-plans">Refresh</button>
-            </div>
-            <div class="automation-list" data-role="plan-list" aria-live="polite">
-                {% if initial_plans %}
-                    <ul class="automation-items">
-                        {% for plan in initial_plans %}
-                            <li class="automation-item{% if initial_selected_plan and plan.id == initial_selected_plan.id %} is-active{% endif %}">
-                                <strong>{{ plan.name|default:"Untitled plan" }}</strong>
-                                <span>{{ plan.scenarios|length }} scenario{% if plan.scenarios|length != 1 %}s{% endif %}</span>
-                            </li>
-                        {% endfor %}
-                    </ul>
-                {% else %}
-                    <p class="empty">No plans available. Create one from the Test Plans module first.</p>
-                {% endif %}
-            </div>
-        </section>
-
-        <section class="automation-panel" data-panel="scenarios" aria-labelledby="headline-scenarios">
-            <div class="panel-header">
-                <h2 id="headline-scenarios">Select Scenario</h2>
-                <p class="panel-meta">Plan: <span data-role="selected-plan-name">{{ initial_selected_plan.name|default:"—" }}</span></p>
-            </div>
-            <div class="automation-list" data-role="scenario-list" aria-live="polite">
-                {% if initial_selected_plan and initial_selected_plan.scenarios %}
-                    <ul class="automation-items">
-                        {% for scenario in initial_selected_plan.scenarios %}
-                            <li class="automation-item{% if initial_selected_scenario and scenario.id == initial_selected_scenario.id %} is-active{% endif %}">
-                                <strong>{{ scenario.title|default:"Scenario" }}</strong>
-                                <span>{{ scenario.cases|length }} test case{% if scenario.cases|length != 1 %}s{% endif %}</span>
-                                {% if scenario.description %}<small>{{ scenario.description }}</small>{% endif %}
-                            </li>
-                        {% endfor %}
-                    </ul>
-                {% elif initial_selected_plan %}
-                    <p class="empty">No scenarios available. Create one from the Test Scenarios module.</p>
-                {% else %}
-                    <p class="empty">Select a plan to view scenarios.</p>
-                {% endif %}
-            </div>
-        </section>
 
         <section class="automation-panel" data-panel="cases" aria-labelledby="headline-cases">
             <div class="panel-header">

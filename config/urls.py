@@ -82,6 +82,7 @@ urlpatterns = [
 	path('data-management/mitigation-plans/', app_views.automation_data_management_mitigation_plan, {"section": "mitigation"}, name='data-management-mitigation'),
 	path('data-management/environments/', app_views.automation_data_management_api_environment, {"section": "environments"}, name='data-management-environments'),
 	path('data-management/test-tools/', app_views.automation_data_management_test_tools, {"section": "test-tools"}, name='data-management-test-tools'),
+	path('data-management/test-modules/', app_views.automation_data_management_test_modules, {"section": "test-modules"}, name='data-management-test-modules'),
 	path('data-management/risk-matrix/', app_views.automation_data_management, {"section": "matrix"}, name='data-management-matrix'),
 	path('automation/api-tester/', app_views.api_tester_page, name='api-tester'),
 	path('healthz/', healthz, name='healthz'),

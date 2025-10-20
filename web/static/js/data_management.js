@@ -186,6 +186,7 @@
         const initialRisks = readScriptJson("automation-initial-risks") || [];
         const initialMitigations = readScriptJson("automation-initial-mitigation-plans") || [];
         const initialMappings = readScriptJson("automation-initial-risk-mitigations") || [];
+        const initialPlans = readScriptJson("automation-initial-plans") || [];
         const initialSection = readScriptJson("data-management-initial-section") || "";
         const apiEndpoints = readScriptJson("automation-api-endpoints") || {};
 
@@ -195,6 +196,7 @@
             mitigations: ensureTrailingSlash(apiEndpoints.mitigation_plans || ""),
             mappings: ensureTrailingSlash(apiEndpoints.risk_mitigations || ""),
             testTools: ensureTrailingSlash(apiEndpoints.test_tools || ""),
+            testModules: ensureTrailingSlash(apiEndpoints.test_modules || ""),
         };
 
         if (!endpoints.environments || !endpoints.risks || !endpoints.mitigations || !endpoints.mappings) {
@@ -252,6 +254,18 @@
             testToolsMeta: root.querySelector('[data-role="test-tools-meta"]'),
             testToolsCreated: root.querySelector('[data-role="test-tools-created"]'),
             testToolsUpdated: root.querySelector('[data-role="test-tools-updated"]'),
+            testModulesList: root.querySelector('[data-role="test-modules-list"]'),
+            testModulesSearch: root.querySelector('[data-role="test-modules-search"]'),
+            testModulesModal: root.querySelector('[data-role="test-modules-modal"]'),
+            testModulesForm: document.getElementById("test-modules-form"),
+            testModulesTitle: document.getElementById("test-modules-title"),
+            testModulesDescription: document.getElementById("test-modules-description"),
+            testModulesPlan: document.getElementById("test-modules-plan"),
+            testModulesFilterPlan: document.getElementById("test-modules-filter-plan"),
+            testModulesSubmit: root.querySelector('[data-role="test-modules-submit"]'),
+            testModulesMeta: root.querySelector('[data-role="test-modules-meta"]'),
+            testModulesCreated: root.querySelector('[data-role="test-modules-created"]'),
+            testModulesUpdated: root.querySelector('[data-role="test-modules-updated"]'),
         };
 
         const body = document.body;
@@ -264,12 +278,16 @@
             environmentModalMode: "create",
             environmentCurrentId: null,
             environmentForm: null,
+            testModules: [],
+            testModulesSearch: "",
             environmentSearch: "",
             riskModalMode: "create",
             riskCurrentId: null,
             mitigationModalMode: "create",
             mitigationCurrentId: null,
+            testModulesModalMode: "create",
             mappingModalMode: "create",
+            testModulesCurrentId: null,
             mappingCurrentId: null,
             riskSearch: "",
             mitigationSearch: "",
@@ -414,6 +432,48 @@
             els.testToolsList.innerHTML = rows;
         };
 
+        const renderTestModulesList = () => {
+            if (!els.testModulesList) {
+                return;
+            }
+            let filtered = state.testModules.filter((m) => {
+                const q = state.testModulesSearch.toLowerCase();
+                if (!q) return true;
+                return (m.title || "").toLowerCase().includes(q) || (m.description || "").toLowerCase().includes(q) || String(m.plan_id || "").toLowerCase().includes(q);
+            });
+            // apply plan filter if selected
+            if (els.testModulesFilterPlan && els.testModulesFilterPlan.value) {
+                const planVal = Number(els.testModulesFilterPlan.value);
+                filtered = filtered.filter((m) => Number(m.plan_id) === planVal);
+            }
+            if (!filtered.length) {
+                els.testModulesList.innerHTML = '<tr><td colspan="5" class="empty">No test modules match the current filters.</td></tr>';
+                return;
+            }
+            const rows = filtered
+                .map((m) => {
+                    const plan = initialPlans.find((p) => Number(p.id) === Number(m.plan_id));
+                    const planLabel = plan ? (plan.name || plan.title || `Plan ${plan.id}`) : "";
+                    return `
+                    <tr data-module-id="${m.id}">
+                        <td>${escapeHtml(m.title || "")}</td>
+                        <td>${escapeHtml(m.description || "")}</td>
+                        <td>${escapeHtml(planLabel)}</td>
+                        <td>${escapeHtml(m.updated_at || "--")}</td>
+                        <td>
+                            <div class="table-action-group">
+                                <button type="button" class="action-button" data-action="view-test-module" data-module-id="${m.id}">View</button>
+                                <button type="button" class="action-button" data-action="edit-test-module" data-module-id="${m.id}">Edit</button>
+                                <button type="button" class="action-button" data-action="delete-test-module" data-module-id="${m.id}" data-variant="danger">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+                })
+                .join("");
+            els.testModulesList.innerHTML = rows;
+        };
+
         const loadTestTools = async () => {
             try {
                 const url = buildUrl(endpoints.testTools, { search: state.testToolsSearch });
@@ -423,6 +483,21 @@
             } catch (error) {
                 // keep existing state if fetch fails
                 renderTestToolsList();
+            }
+        };
+
+        const loadTestModules = async () => {
+            try {
+                const params = { search: state.testModulesSearch };
+                if (els.testModulesFilterPlan && els.testModulesFilterPlan.value) {
+                    params.plan = els.testModulesFilterPlan.value;
+                }
+                const url = buildUrl(endpoints.testModules, params);
+                const data = await request(url, { method: 'GET' });
+                state.testModules = Array.isArray(data) ? data : [];
+                renderTestModulesList();
+            } catch (error) {
+                renderTestModulesList();
             }
         };
 
@@ -462,6 +537,66 @@
             if (els.testToolsTitle) els.testToolsTitle.focus();
         };
 
+        const openTestModulesModal = (mode, module = null) => {
+            if (!els.testModulesModal) return;
+            state.testModulesModalMode = mode;
+            if (mode === "create") {
+                state.testModulesCurrentId = null;
+                state.testModulesForm = { title: "", description: "" };
+            } else if ((mode === "edit" || mode === "view") && module) {
+                state.testModulesCurrentId = module.id;
+                state.testModulesForm = { title: module.title || "", description: module.description || "", createdAt: module.created_at, updatedAt: module.updated_at, plan_id: module.plan_id || null };
+            }
+            if (els.testModulesTitle) {
+                els.testModulesTitle.value = state.testModulesForm.title || "";
+                els.testModulesTitle.readOnly = mode === "view";
+            }
+            if (els.testModulesDescription) {
+                els.testModulesDescription.value = state.testModulesForm.description || "";
+                els.testModulesDescription.readOnly = mode === "view";
+            }
+            // populate plans select
+            if (els.testModulesPlan) {
+                // clear existing
+                els.testModulesPlan.innerHTML = '<option value="">— Select plan —</option>';
+                initialPlans.forEach((p) => {
+                    const opt = document.createElement('option');
+                    opt.value = p.id || '';
+                    opt.textContent = p.name || p.title || `Plan ${p.id}`;
+                    els.testModulesPlan.appendChild(opt);
+                });
+                // set selected value when editing/viewing
+                const selectedPlanId = state.testModulesForm && state.testModulesForm.plan_id ? String(state.testModulesForm.plan_id) : (module && module.plan_id ? String(module.plan_id) : '');
+                els.testModulesPlan.value = selectedPlanId || '';
+                els.testModulesPlan.disabled = mode === 'view';
+            }
+            if (els.testModulesSubmit) {
+                els.testModulesSubmit.textContent = mode === "edit" ? "Update" : "Save";
+                els.testModulesSubmit.hidden = mode === "view";
+            }
+            if (els.testModulesMeta) {
+                if (state.testModulesForm.createdAt || state.testModulesForm.updatedAt) {
+                    els.testModulesMeta.hidden = false;
+                    if (els.testModulesCreated) els.testModulesCreated.textContent = state.testModulesForm.createdAt ? formatDateTime(state.testModulesForm.createdAt) : "--";
+                    if (els.testModulesUpdated) els.testModulesUpdated.textContent = state.testModulesForm.updatedAt ? formatDateTime(state.testModulesForm.updatedAt) : "--";
+                } else {
+                    els.testModulesMeta.hidden = true;
+                }
+            }
+            els.testModulesModal.hidden = false;
+            body.classList.add("automation-modal-open");
+            if (els.testModulesTitle) els.testModulesTitle.focus();
+        };
+
+        const closeTestModulesModal = () => {
+            if (!els.testModulesModal) return;
+            els.testModulesModal.hidden = true;
+            body.classList.remove("automation-modal-open");
+            if (els.testModulesForm) els.testModulesForm.reset && els.testModulesForm.reset();
+            state.testModulesModalMode = "create";
+            state.testModulesCurrentId = null;
+        };
+
         const closeTestToolsModal = () => {
             if (!els.testToolsModal) return;
             els.testToolsModal.hidden = true;
@@ -489,6 +624,28 @@
                 setStatus("Tool saved.", "success");
             } catch (error) {
                 const message = error instanceof Error ? error.message : "Unable to save tool.";
+                setStatus(message, "error");
+            }
+        };
+
+        const handleTestModulesSubmit = async (event) => {
+            event.preventDefault();
+            try {
+                setStatus("Saving module…", "info");
+                const payload = {
+                    title: (els.testModulesTitle.value || "").trim(),
+                    description: els.testModulesDescription.value || "",
+                    plan: (els.testModulesPlan && els.testModulesPlan.value) ? Number(els.testModulesPlan.value) : null,
+                };
+                if (!payload.title) throw new Error("Module title is required.");
+                const url = endpoints.testModules;
+                const created = await request(url, { method: "POST", body: JSON.stringify(payload) });
+                state.testModules.unshift(created);
+                renderTestModulesList();
+                closeTestModulesModal();
+                setStatus("Module saved.", "success");
+            } catch (error) {
+                const message = error instanceof Error ? error.message : "Unable to save module.";
                 setStatus(message, "error");
             }
         };
@@ -1134,8 +1291,8 @@
                 return;
             }
             const action = trigger.dataset.action;
-            // some tables use data-id, test-tools uses data-tool-id — support both
-            const rawId = trigger.dataset.id || trigger.dataset.toolId || trigger.getAttribute('data-tool-id');
+            // some tables use data-id, test-tools uses data-tool-id and modules use data-module-id — support all
+            const rawId = trigger.dataset.id || trigger.dataset.toolId || trigger.dataset.moduleId || trigger.getAttribute('data-tool-id') || trigger.getAttribute('data-module-id');
             const id = rawId ? Number(rawId) : null;
 
             switch (action) {
@@ -1207,6 +1364,37 @@
                         await request(`${endpoints.testTools}${id}/`, { method: "DELETE" });
                         setStatus("Tool deleted.", "success");
                         await loadTestTools();
+                    } catch (error) {
+                        setStatus(error.message, "error");
+                    }
+                    break;
+                }
+                case "view-test-module": {
+                    event.preventDefault();
+                    const module = state.testModules.find((item) => item.id === id);
+                    if (module) {
+                        openTestModulesModal("view", module);
+                    }
+                    break;
+                }
+
+                case "edit-test-module": {
+                    event.preventDefault();
+                    const module = state.testModules.find((item) => item.id === id);
+                    if (module) {
+                        openTestModulesModal("edit", module);
+                    }
+                    break;
+                }
+
+                case "delete-test-module": {
+                    event.preventDefault();
+                    if (!id) break;
+                    if (!window.confirm("Are you sure you want to delete this module?")) break;
+                    try {
+                        await request(`${endpoints.testModules}${id}/`, { method: "DELETE" });
+                        setStatus("Module deleted.", "success");
+                        await loadTestModules();
                     } catch (error) {
                         setStatus(error.message, "error");
                     }
@@ -1603,12 +1791,70 @@
             });
         }
 
+        // Test modules form wiring - initialize on DOMContentLoaded so buttons work immediately
+        if (els.testModulesForm) {
+            els.testModulesForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                const title = els.testModulesTitle ? (els.testModulesTitle.value || '').trim() : '';
+                const description = els.testModulesDescription ? (els.testModulesDescription.value || '').trim() : '';
+                if (!title) {
+                    setStatus('Module title is required.', 'error');
+                    return;
+                }
+                const payload = { title, description, plan: (els.testModulesPlan && els.testModulesPlan.value) ? Number(els.testModulesPlan.value) : null };
+                try {
+                    if (state.testModulesModalMode === 'edit' && state.testModulesCurrentId) {
+                        const updated = await request(`${endpoints.testModules}${state.testModulesCurrentId}/`, { method: 'PATCH', body: JSON.stringify(payload) });
+                        if (updated && typeof updated === 'object') {
+                            const idx = state.testModules.findIndex((t) => Number(t.id) === Number(updated.id));
+                            if (idx > -1) {
+                                state.testModules[idx] = updated;
+                            } else {
+                                state.testModules.unshift(updated);
+                            }
+                        }
+                        setStatus('Module updated successfully.', 'success');
+                    } else {
+                        const created = await request(endpoints.testModules, { method: 'POST', body: JSON.stringify(payload) });
+                        state.testModules.unshift(created);
+                        setStatus('Module created successfully.', 'success');
+                    }
+                    closeTestModulesModal();
+                    renderTestModulesList();
+                } catch (error) {
+                    setStatus(error.message, 'error');
+                }
+            });
+        }
+
         // wire open/close triggers for test tools
         const testToolsOpenTrigger = root.querySelector('[data-action="open-test-tools-modal"]');
         const testToolsCloseTriggers = Array.from(root.querySelectorAll('[data-action="close-test-tools-modal"]'));
         if (testToolsOpenTrigger) testToolsOpenTrigger.addEventListener('click', (ev) => { ev.preventDefault(); openTestToolsModal('create'); });
         testToolsCloseTriggers.forEach((node) => node.addEventListener('click', (ev) => { ev.preventDefault(); closeTestToolsModal(); }));
         if (els.testToolsSearch) els.testToolsSearch.addEventListener('input', debounce((ev) => { state.testToolsSearch = (ev.target.value || '').trim(); renderTestToolsList(); }, 250));
+
+        const testModulesOpenTrigger = root.querySelector('[data-action="open-test-modules-modal"]');
+        const testModulesCloseTriggers = Array.from(root.querySelectorAll('[data-action="close-test-modules-modal"]'));
+        if (testModulesOpenTrigger) testModulesOpenTrigger.addEventListener('click', (ev) => { ev.preventDefault(); openTestModulesModal('create'); });
+        testModulesCloseTriggers.forEach((node) => node.addEventListener('click', (ev) => { ev.preventDefault(); closeTestModulesModal(); }));
+        if (els.testModulesSearch) els.testModulesSearch.addEventListener('input', debounce((ev) => { state.testModulesSearch = (ev.target.value || '').trim(); renderTestModulesList(); }, 250));
+
+        // populate plan filter select
+        if (els.testModulesFilterPlan) {
+            // clear then populate
+            els.testModulesFilterPlan.innerHTML = '<option value="">All plans</option>';
+            initialPlans.forEach((p) => {
+                const opt = document.createElement('option');
+                opt.value = p.id || '';
+                opt.textContent = p.name || p.title || `Plan ${p.id}`;
+                els.testModulesFilterPlan.appendChild(opt);
+            });
+            els.testModulesFilterPlan.addEventListener('change', () => {
+                // reload modules when filter changes
+                loadTestModules();
+            });
+        }
 
         // Initial fetch / render for test tools
         (async () => {
@@ -1619,8 +1865,14 @@
                     if (Array.isArray(data)) state.testTools = data;
                 }
                 renderTestToolsList();
+                if (endpoints.testModules) {
+                    const data = await request(endpoints.testModules);
+                    if (Array.isArray(data)) state.testModules = data;
+                }
+                renderTestModulesList();
             } catch (_err) {
                 renderTestToolsList();
+                renderTestModulesList();
             }
         })();
     });

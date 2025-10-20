@@ -224,6 +224,25 @@ class TestTools(TimeStampedModel):
         return self.title
 
 
+class TestModules(TimeStampedModel):
+    """Represents a logical module under test used inside Test Plans."""
+    title = models.CharField(max_length=150)
+    description = models.TextField(blank=True)
+    plan = models.ForeignKey(
+        "TestPlan",
+        on_delete=models.SET_NULL,
+        related_name="test_modules",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        ordering = ["title", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return self.title
+
+
 class TestPlan(TimeStampedModel):
     """High-level plan describing the scope and approach for automation testing."""
 
@@ -434,18 +453,6 @@ class TeamMember(TimeStampedModel):
     def __str__(self) -> str:  # pragma: no cover
         return f"{self.get_role_display()}"
 
-
-class TestModules(TimeStampedModel):
-    """Test Module for test strategies."""
-    title = models.CharField(max_length=150)
-    description = models.TextField(blank=True)
-
-    class Meta:
-        ordering = ["title", "id"]
-
-    def __str__(self) -> str:  # pragma: no cover
-        return self.title
-    
 
 class TestScenario(TimeStampedModel):
     """Concrete scenario derived from the test plan, grouping related test cases."""

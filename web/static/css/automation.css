@@ -576,6 +576,24 @@
     background: rgba(244, 180, 0, 0.12);
 }
 
+/* Inline select used next to action buttons to visually match their height */
+.inline-select {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.45rem 0.9rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    background: white;
+    border: 1px solid rgba(0,0,0,0.06);
+    color: inherit;
+    height: 2.1rem; /* visually close to .btn-primary */
+}
+
+.inline-select:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(185,124,0,0.12);
+}
+
 
 
 

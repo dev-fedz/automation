@@ -75,6 +75,21 @@ class TestToolsSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "updated_at"]
 
 
+class TestModulesSerializer(serializers.ModelSerializer):
+    plan = serializers.PrimaryKeyRelatedField(
+        queryset=models.TestPlan.objects.all(),
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
+    plan_id = serializers.IntegerField(source="plan.id", read_only=True)
+
+    class Meta:
+        model = models.TestModules
+        fields = ["id", "title", "description", "plan", "plan_id", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at", "plan_id"]
+
+
 class ApiRequestSerializer(serializers.ModelSerializer):
     assertions = ApiAssertionSerializer(many=True, required=False)
     collection = serializers.PrimaryKeyRelatedField(

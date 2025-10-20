@@ -378,6 +378,21 @@ class TestToolsViewSet(viewsets.ModelViewSet):
         return models.TestTools.objects.order_by("title", "id")
 
 
+class TestModulesViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.TestModulesSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = models.TestModules.objects.order_by("title", "id")
+        plan_id = self.request.query_params.get("plan")
+        if plan_id not in (None, ""):
+            try:
+                queryset = queryset.filter(plan_id=int(plan_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"plan": "Plan must be an integer."}) from exc
+        return queryset
+
+
 class MitigationPlanViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.MitigationPlanSerializer
     permission_classes = [IsAuthenticated]
@@ -481,6 +496,7 @@ def _prepare_automation_data() -> dict[str, Any]:
         "mitigation_plans": reverse("core:core-mitigation-plans-list"),
         "risk_mitigations": reverse("core:core-risk-mitigation-plans-list"),
         "test_tools": reverse("core:core-test-tools-list"),
+        "test_modules": reverse("core:core-test-modules-list"),
     }
 
     selected_plan = plans_payload[0] if plans_payload else None
@@ -503,6 +519,7 @@ def _prepare_automation_data() -> dict[str, Any]:
         "mitigation_plans": mitigation_plans_payload,
     "risk_mitigations": risk_mitigations_payload,
         "test_tools": serializers.TestToolsSerializer(models.TestTools.objects.order_by("title", "id"), many=True).data,
+        "test_modules": serializers.TestModulesSerializer(models.TestModules.objects.order_by("title", "id"), many=True).data,
     }
 
 
@@ -670,6 +687,23 @@ def automation_data_management_test_tools(request, section: str | None = None):
         "initial_section": section or "test-tools",
     }
     return render(request, "core/automation_data_management_test_tools.html", context)
+
+
+@login_required
+def automation_data_management_test_modules(request, section: str | None = None):
+    """Render Test Modules focused data management page."""
+    data = _prepare_automation_data()
+    context = {
+        "initial_metrics": data["metrics"],
+        "initial_environments": data["environments"],
+        "initial_risks": data["risks"],
+        "initial_mitigation_plans": data["mitigation_plans"],
+        "initial_risk_mitigations": data["risk_mitigations"],
+        "initial_plans": data.get("plans", []),
+        "api_endpoints": data["api_endpoints"],
+        "initial_section": section or "test-modules",
+    }
+    return render(request, "core/automation_data_management_test_modules.html", context)
 
 
 
