@@ -444,6 +444,7 @@ class MitigationPlanSerializer(serializers.ModelSerializer):
 
 
 class RiskAndMitigationPlanSerializer(serializers.ModelSerializer):
+    plan = serializers.PrimaryKeyRelatedField(queryset=models.TestPlan.objects.all(), required=False, allow_null=True)
     risk = serializers.PrimaryKeyRelatedField(queryset=models.Risk.objects.all())
     mitigation_plan = serializers.PrimaryKeyRelatedField(queryset=models.MitigationPlan.objects.all())
     risk_title = serializers.CharField(source="risk.title", read_only=True)
@@ -451,9 +452,43 @@ class RiskAndMitigationPlanSerializer(serializers.ModelSerializer):
     mitigation_plan_title = serializers.CharField(source="mitigation_plan.title", read_only=True)
     mitigation_plan_description = serializers.CharField(source="mitigation_plan.description", read_only=True)
 
+    def create(self, validated_data: dict[str, Any]) -> models.RiskAndMitigationPlan:
+        """
+        Make creation idempotent: if a mapping for the same (risk, mitigation_plan)
+        already exists, return that instance instead of raising a uniqueness
+        error. Update the impact field when a different value is provided.
+        """
+        plan = validated_data.get("plan")
+        risk = validated_data.get("risk")
+        mitigation = validated_data.get("mitigation_plan")
+        impact = validated_data.get("impact", "")
+        defaults = {"impact": impact}
+        if plan is not None:
+            defaults["plan"] = plan
+        obj, created = models.RiskAndMitigationPlan.objects.get_or_create(
+            risk=risk,
+            mitigation_plan=mitigation,
+            defaults=defaults,
+        )
+        # If an existing mapping was returned but a plan or impact was
+        # provided in the request, ensure we update the existing record so
+        # that mappings can be associated with a TestPlan after the fact.
+        if not created:
+            changed = False
+            if impact and obj.impact != impact:
+                obj.impact = impact
+                changed = True
+            if plan is not None and getattr(obj, "plan_id", None) != getattr(plan, "id", None):
+                obj.plan = plan
+                changed = True
+            if changed:
+                obj.save()
+        return obj
+
     class Meta:
         model = models.RiskAndMitigationPlan
         fields = [
+            "plan",
             "id",
             "risk",
             "risk_title",
@@ -474,6 +509,10 @@ class RiskAndMitigationPlanSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+        # Disable automatic model validators (e.g. UniqueTogetherValidator)
+        # so we can implement idempotent create() logic that safely
+        # resolves existing mappings via get_or_create.
+        validators = []
 
 
 class TestPlanSerializer(serializers.ModelSerializer):
@@ -485,13 +524,12 @@ class TestPlanSerializer(serializers.ModelSerializer):
     scopes = TestPlanScopeSerializer(many=True, required=False)
     maintenances = TestPlanMaintenanceSerializer(many=True, read_only=True)
     scenarios = TestScenarioSerializer(many=True, read_only=True)
-    risk_mitigations = serializers.PrimaryKeyRelatedField(
-        queryset=models.RiskAndMitigationPlan.objects.all(),
-        many=True,
-        required=False,
-    )
+    # The relationship was changed: RiskAndMitigationPlan now has a ForeignKey to
+    # TestPlan with related_name='risk_mitigation_links'. Expose the detailed
+    # link objects on the TestPlan serializer via that related_name. We no
+    # longer expose a direct M2M of mapping ids on the plan.
     risk_mitigation_details = RiskAndMitigationPlanSerializer(
-        source="risk_mitigations",
+        source="risk_mitigation_links",
         many=True,
         read_only=True,
     )
@@ -511,7 +549,6 @@ class TestPlanSerializer(serializers.ModelSerializer):
             "testers",
             "approver",
             "scopes",
-            "risk_mitigations",
             "risk_mitigation_details",
             "maintenances",
             "scenarios",
@@ -567,24 +604,22 @@ class TestPlanSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data: dict[str, Any]) -> models.TestPlan:
         scopes_data = validated_data.pop("scopes", [])
-        risk_mitigations = validated_data.pop("risk_mitigations", [])
         plan = models.TestPlan.objects.create(**validated_data)
         self._replace_scopes(plan, scopes_data)
-        if risk_mitigations:
-            plan.risk_mitigations.set(risk_mitigations)
         return plan
 
     @transaction.atomic
     def update(self, instance: models.TestPlan, validated_data: dict[str, Any]) -> models.TestPlan:
         scopes_data = validated_data.pop("scopes", None)
-        risk_mitigations = validated_data.pop("risk_mitigations", None)
+        # The M2M relationship was removed; mappings are now separate objects
+        # (RiskAndMitigationPlan) referencing the plan. Updates to links should
+        # be performed via the RiskAndMitigationPlan endpoints.
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
         if scopes_data is not None:
             self._replace_scopes(instance, scopes_data)
-        if risk_mitigations is not None:
-            instance.risk_mitigations.set(risk_mitigations)
+        return instance
         return instance
 
     def _replace_scopes(self, plan: models.TestPlan, scopes_data: list[dict[str, Any]]) -> None:

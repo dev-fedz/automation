@@ -151,6 +151,7 @@
             scenarioFormReset: root.querySelector('[data-action="reset-scenario-form"]'),
             caseFormReset: root.querySelector('[data-action="reset-case-form"]'),
             maintenanceFormReset: root.querySelector('[data-action="reset-maintenance-form"]'),
+            planRiskMatrix: document.getElementById('plan-risk-matrix'),
         };
 
         const planModalCloseButtons = Array.from(root.querySelectorAll('[data-action="close-plan-modal"]'));
@@ -197,6 +198,37 @@
                 approvedBy: document.getElementById('maintenance-approved'),
                 updates: document.getElementById('maintenance-updates'),
             },
+        };
+
+        // Stepper state for multi-step plan creation
+        let planDraftId = null;
+        let currentPlanStep = 1;
+        const planSteps = Array.from(document.querySelectorAll('.plan-step'));
+        const maxPlanSteps = planSteps.length || 5;
+
+        const elsExtra = {
+            planPrev: root.querySelector('[data-action="plan-prev"]'),
+            planSubmit: document.getElementById('plan-submit'),
+        };
+
+        const showPlanStep = (step) => {
+            planSteps.forEach((node) => {
+                const s = Number(node.dataset.step || 0);
+                node.hidden = s !== step;
+            });
+            currentPlanStep = step;
+            // update buttons
+            if (elsExtra.planPrev) {
+                elsExtra.planPrev.hidden = step <= 1;
+            }
+            if (elsExtra.planSubmit) {
+                elsExtra.planSubmit.textContent = step < maxPlanSteps ? 'Next' : 'Save';
+            }
+        };
+
+        const resetPlanStepper = () => {
+            planDraftId = null;
+            showPlanStep(1);
         };
 
         const objectiveTextarea = inputs.plan.objective;
@@ -332,8 +364,35 @@
             } else if (!next.scopes) {
                 next.scopes = [];
             }
+            // legacy: TestPlan.risk_mitigations was removed in favor of
+            // RiskAndMitigationPlan.plan FK. Clients should use
+            // risk_mitigation_details (nested objects) or the injected
+            // `automation-initial-risk-mitigations` payload when needed.
+            if (Array.isArray(next.risk_mitigation_details)) {
+                next.risk_mitigation_details = next.risk_mitigation_details.map((entry) => ({ ...entry }));
+            } else if (!next.risk_mitigation_details) {
+                next.risk_mitigation_details = [];
+            }
             if (Array.isArray(next.modules_under_test)) {
                 next.modules_under_test = [...next.modules_under_test];
+            }
+            // preserve testing types structure
+            if (next.testing_types && typeof next.testing_types === 'object') {
+                // shallow copy categories and arrays to avoid mutating original
+                const copy = {};
+                if (Array.isArray(next.testing_types.functional)) {
+                    copy.functional = [...next.testing_types.functional];
+                } else {
+                    copy.functional = [];
+                }
+                if (Array.isArray(next.testing_types.non_functional)) {
+                    copy.non_functional = [...next.testing_types.non_functional];
+                } else {
+                    copy.non_functional = [];
+                }
+                next.testing_types = copy;
+            } else if (!next.testing_types) {
+                next.testing_types = { functional: [], non_functional: [] };
             }
             if (Array.isArray(next.testers)) {
                 next.testers = [...next.testers];
@@ -347,6 +406,7 @@
             plans: normalizePlans(initialPlans),
             selectedPlanId: null,
             selectedScenarioId: null,
+            editingPlan: false,
         };
 
         const getSelectedPlan = () => state.plans.find((plan) => plan.id === state.selectedPlanId) || null;
@@ -399,6 +459,459 @@
             });
         };
 
+        const openPlanEdit = async (plan) => {
+            // Debug: log when the edit modal is opened and whether details exist
+            try {
+                console.debug('[automation] openPlanEdit called', { id: plan && plan.id, hasDetails: Array.isArray(plan && plan.risk_mitigation_details) && plan.risk_mitigation_details.length });
+            } catch (e) { /* ignore logging errors */ }
+            if (!plan) return;
+            // Ensure we have the full plan detail (including risk_mitigation_details)
+            // The list endpoint may not include nested mapping details, so fetch
+            // the detail endpoint when needed to populate the mapping table.
+            try {
+                const hasDetails = Array.isArray(plan.risk_mitigation_details) && plan.risk_mitigation_details.length;
+                if (!hasDetails && plan.id) {
+                    const base = apiEndpoints.plans || '/api/core/test-plans/';
+                    const url = `${base}${plan.id}/`;
+                    const resp = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                    if (resp && resp.ok) {
+                        const data = await resp.json();
+                        if (data && typeof data === 'object') {
+                            // normalize fetched plan so nested arrays and fields
+                            // (notably risk_mitigation_details) are in the shape
+                            // our renderer expects.
+                            plan = normalizePlan(data);
+                            // update cached state entry if present
+                            try {
+                                const idx = state.plans.findIndex((p) => p.id === plan.id);
+                                if (idx !== -1) state.plans[idx] = plan;
+                            } catch (ignore) { }
+                        }
+                    }
+                }
+            } catch (ignore) {
+                // ignore fetch errors and continue with whatever plan data we have
+            }
+            state.editingPlan = true;
+            state.viewingPlan = false;
+            planDraftId = plan.id;
+            // populate fields for step 1
+            if (inputs.plan.name) inputs.plan.name.value = plan.name || '';
+            if (inputs.plan.description) inputs.plan.description.value = plan.description || '';
+            // scopes
+            const scopes = Array.isArray(plan.scopes) ? plan.scopes : [];
+            const inScope = scopes.filter(s => s.category === 'in_scope').map(s => s.item || '').join('\n');
+            const outScope = scopes.filter(s => s.category === 'out_scope').map(s => s.item || '').join('\n');
+            if (inputs.plan.scopeIn) inputs.plan.scopeIn.value = inScope;
+            if (inputs.plan.scopeOut) inputs.plan.scopeOut.value = outScope;
+            // testing timeline & simple lists
+            if (inputs.plan.modules) inputs.plan.modules.value = Array.isArray(plan.modules_under_test) ? plan.modules_under_test.join(',') : '';
+            if (inputs.plan.tools) inputs.plan.tools.value = Array.isArray(plan.tools) ? plan.tools.join(',') : '';
+            // testing types: fill comma-separated inputs
+            if (inputs.plan.functional) {
+                const f = plan.testing_types && Array.isArray(plan.testing_types.functional) ? plan.testing_types.functional.join(',') : '';
+                inputs.plan.functional.value = f;
+            }
+            if (inputs.plan.nonFunctional) {
+                const nf = plan.testing_types && Array.isArray(plan.testing_types.non_functional) ? plan.testing_types.non_functional.join(',') : '';
+                inputs.plan.nonFunctional.value = nf;
+            }
+            if (inputs.plan.testers) inputs.plan.testers.value = Array.isArray(plan.testers) ? plan.testers.join(',') : '';
+            if (inputs.plan.approver) inputs.plan.approver.value = plan.approver || '';
+            if (inputs.plan.kickoff) inputs.plan.kickoff.value = plan.testing_timeline ? (plan.testing_timeline.kickoff || '') : '';
+            if (inputs.plan.signoff) inputs.plan.signoff.value = plan.testing_timeline ? (plan.testing_timeline.signoff || '') : '';
+            // objective
+            const editor = getObjectiveEditor();
+            if (editor && typeof editor.setContent === 'function') {
+                editor.setContent(plan.objective || '');
+            } else if (inputs.plan.objective) {
+                inputs.plan.objective.value = plan.objective || '';
+            }
+            showPlanStep(1);
+            openPlanModal();
+            // render risk matrix checkboxes for step 4
+            renderPlanRiskMatrix(plan);
+        };
+
+        const openPlanView = async (plan) => {
+            if (!plan) return;
+            // Fetch detail if needed
+            try {
+                const hasDetails = Array.isArray(plan.risk_mitigation_details) && plan.risk_mitigation_details.length;
+                if (!hasDetails && plan.id) {
+                    const base = apiEndpoints.plans || '/api/core/test-plans/';
+                    const url = `${base}${plan.id}/`;
+                    const resp = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                    if (resp && resp.ok) {
+                        const data = await resp.json();
+                        if (data && typeof data === 'object') plan = data;
+                    }
+                }
+            } catch (e) { /* ignore */ }
+            // Populate modal fields but keep it read-only
+            state.editingPlan = false;
+            state.viewingPlan = true;
+            planDraftId = null;
+            if (inputs.plan.name) { inputs.plan.name.value = plan.name || ''; inputs.plan.name.disabled = true; }
+            if (inputs.plan.description) { inputs.plan.description.value = plan.description || ''; inputs.plan.description.disabled = true; }
+            if (inputs.plan.scopeIn) { inputs.plan.scopeIn.value = Array.isArray(plan.scopes) ? plan.scopes.filter(s => s.category === 'in_scope').map(s => s.item).join('\n') : ''; inputs.plan.scopeIn.disabled = true; }
+            if (inputs.plan.scopeOut) { inputs.plan.scopeOut.value = Array.isArray(plan.scopes) ? plan.scopes.filter(s => s.category === 'out_scope').map(s => s.item).join('\n') : ''; inputs.plan.scopeOut.disabled = true; }
+            if (inputs.plan.modules) { inputs.plan.modules.value = Array.isArray(plan.modules_under_test) ? plan.modules_under_test.join(',') : ''; inputs.plan.modules.disabled = true; }
+            if (inputs.plan.tools) { inputs.plan.tools.value = Array.isArray(plan.tools) ? plan.tools.join(',') : ''; inputs.plan.tools.disabled = true; }
+            if (inputs.plan.testers) { inputs.plan.testers.value = Array.isArray(plan.testers) ? plan.testers.join(',') : ''; inputs.plan.testers.disabled = true; }
+            if (inputs.plan.approver) { inputs.plan.approver.value = plan.approver || ''; inputs.plan.approver.disabled = true; }
+            // objective: set read-only content
+            const editor = getObjectiveEditor();
+            if (editor && typeof editor.setContent === 'function') {
+                editor.setContent(plan.objective || '');
+                // if the editor supports disabling, try to set readonly
+                if (typeof editor.mode === 'function') {
+                    try { editor.mode.set('readonly'); } catch (ignore) { }
+                }
+            } else if (inputs.plan.objective) { inputs.plan.objective.value = plan.objective || ''; inputs.plan.objective.disabled = true; }
+            showPlanStep(1);
+            openPlanModal();
+            renderPlanRiskMatrix(plan);
+        };
+
+        const enablePlanInputs = () => {
+            try {
+                if (inputs && inputs.plan) {
+                    Object.values(inputs.plan).forEach((node) => {
+                        if (node && typeof node === 'object' && 'disabled' in node) node.disabled = false;
+                    });
+                }
+                const editor = getObjectiveEditor();
+                if (editor && typeof editor.setContent === 'function') {
+                    // no-op for enabling; editor may be interactive by default
+                }
+            } catch (e) { }
+            state.viewingPlan = false;
+        };
+
+        const renderPlanRiskMatrix = async (plan) => {
+            // Normalize incoming plan object early so downstream logic can
+            // rely on consistent shapes (notably risk_mitigation_details).
+            plan = normalizePlan(plan);
+            // Debug: log invocation and basic plan/risk state as well as the
+            // presence/size of page-injected mapping payloads which we prefer.
+            try {
+                const hasDetails = Array.isArray(plan && plan.risk_mitigation_details) && plan.risk_mitigation_details.length;
+                const selNode = document.getElementById('automation-initial-risk-mitigations-for-selected');
+                const byPlanNode = document.getElementById('automation-initial-risk-mitigations-by-plan');
+                const allNode = document.getElementById('automation-initial-risk-mitigations');
+                let selLen = null; let byPlanLen = null; let allLen = null;
+                try { selLen = selNode ? (JSON.parse(selNode.textContent || selNode.innerText || '[]') || []).length : null; } catch (_e) { selLen = 'parse-error'; }
+                try { byPlanLen = byPlanNode ? Object.keys(JSON.parse(byPlanNode.textContent || byPlanNode.innerText || '{}') || {}).reduce((acc, k) => acc + ((JSON.parse(byPlanNode.textContent || byPlanNode.innerText || '{}') || {})[k] || []).length, 0) : null; } catch (_e) { byPlanLen = 'parse-error'; }
+                try { allLen = allNode ? (JSON.parse(allNode.textContent || allNode.innerText || '[]') || []).length : null; } catch (_e) { allLen = 'parse-error'; }
+                console.debug('[automation] renderPlanRiskMatrix called', { id: plan && plan.id, hasDetails, injected: { selectedForPlan: selLen, byPlanTotal: byPlanLen, allMappings: allLen } });
+            } catch (e) { /* ignore logging errors */ }
+            if (!els.planRiskMatrix) return;
+            // Ensure we have detailed mapping objects for the plan. If the plan
+            // only contains mapping ids (from the list endpoint), fetch the
+            // detail endpoint so we can render the mapping rows immediately.
+            try {
+                const hasDetails = Array.isArray(plan && plan.risk_mitigation_details) && plan.risk_mitigation_details.length;
+                // If the plan doesn't include nested details, attempt to fetch
+                // them from the per-plan mapping endpoint which accepts ?plan=<id>.
+                if (!hasDetails && plan && plan.id) {
+                    const mappingsUrlBase = apiEndpoints.risk_mitigations || '/api/core/risk-and-mitigation-plans/';
+                    const url = `${mappingsUrlBase}?plan=${encodeURIComponent(plan.id)}`;
+                    try {
+                        // Debug: log the exact URL we're about to request so we can
+                        // verify the plan query parameter is present.
+                        try { console.debug('[automation] fetching per-plan mappings', { mappingsUrlBase, url, planId: plan.id }); } catch (e) { }
+                        const resp = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                        if (resp) {
+                            if (resp.status === 401) {
+                                try {
+                                    const mappingTbody = document.querySelector('[data-role="mapping-list"]');
+                                    if (mappingTbody) mappingTbody.innerHTML = '<tr><td colspan="7" class="empty">Please sign in to view risk-to-mitigation links.</td></tr>';
+                                } catch (err) { /* ignore */ }
+                            } else if (resp.ok) {
+                                const data = await resp.json();
+                                if (Array.isArray(data) && data.length) {
+                                    plan = normalizePlan({ ...plan, risk_mitigation_details: data });
+                                    try {
+                                        const idx = state.plans.findIndex((p) => p.id === plan.id);
+                                        if (idx !== -1) state.plans[idx] = plan;
+                                    } catch (ignore) { }
+                                } else {
+                                    const base = apiEndpoints.plans || '/api/core/test-plans/';
+                                    const detailUrl = `${base}${plan.id}/`;
+                                    const dResp = await fetch(detailUrl, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                                    if (dResp && dResp.ok) {
+                                        const dData = await dResp.json();
+                                        if (dData && typeof dData === 'object') {
+                                            plan = normalizePlan(dData);
+                                            try {
+                                                const idx2 = state.plans.findIndex((p) => p.id === plan.id);
+                                                if (idx2 !== -1) state.plans[idx2] = plan;
+                                            } catch (ignore) { }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (ignore) { }
+                }
+            } catch (ignore) { }
+            // try to fetch risks/mitigations if not available
+            const fetchUrl = (path) => apiEndpoints[path] || '';
+            let risks = [];
+            try {
+                const rUrl = fetchUrl('risks');
+                if (rUrl) {
+                    const resp = await fetch(rUrl, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                    if (resp.ok) risks = await resp.json();
+                }
+            } catch (_err) {
+                risks = [];
+            }
+            if (!risks.length) {
+                // try to use data injected on page if present
+                try {
+                    const node = document.getElementById('automation-initial-risks');
+                    if (node) risks = JSON.parse(node.textContent || node.innerText || '[]');
+                } catch (_e) {
+                    risks = [];
+                }
+            }
+            if (!risks.length) {
+                els.planRiskMatrix.innerHTML = '<p class="empty">No risks available. Create risks in the Data Management panel first.</p>';
+                return;
+            }
+            // plan.risk_mitigations contains mapping ids (RiskAndMitigationPlan ids),
+            // while risk_mitigation_details contains objects with the actual risk id
+            // in the `risk` property. Prefer deriving linked risk ids from
+            // risk_mitigation_details so the matrix can compare against Risk ids.
+            let linked = [];
+            if (Array.isArray(plan.risk_mitigation_details) && plan.risk_mitigation_details.length) {
+                linked = plan.risk_mitigation_details.map((d) => d && d.risk).filter(Boolean);
+            } else {
+                // Prefer the injected per-selected-plan payload (fast, exact)
+                try {
+                    const selNode = document.getElementById('automation-initial-risk-mitigations-for-selected');
+                    if (selNode) {
+                        const sel = JSON.parse(selNode.textContent || selNode.innerText || '[]');
+                        if (Array.isArray(sel) && sel.length) {
+                            linked = sel.map((m) => m && m.risk).filter(Boolean);
+                        }
+                    }
+                } catch (_e) { /* ignore parsing errors */ }
+                // Next, try per-plan map object
+                if (!linked.length) {
+                    try {
+                        const byPlanNode = document.getElementById('automation-initial-risk-mitigations-by-plan');
+                        if (byPlanNode) {
+                            const mapObj = JSON.parse(byPlanNode.textContent || byPlanNode.innerText || '{}');
+                            const arr = mapObj && (mapObj[String(plan.id)] || mapObj[plan.id]) ? (mapObj[String(plan.id)] || mapObj[plan.id]) : [];
+                            if (Array.isArray(arr) && arr.length) {
+                                linked = arr.map((m) => m && m.risk).filter(Boolean);
+                            }
+                        }
+                    } catch (_e) { /* ignore */ }
+                }
+                // Fallback: try to resolve from the full page-injected initial mappings
+                if (!linked.length) {
+                    try {
+                        const node = document.getElementById('automation-initial-risk-mitigations');
+                        if (node) {
+                            const allMappings = JSON.parse(node.textContent || node.innerText || '[]');
+                            if (Array.isArray(allMappings) && allMappings.length) {
+                                const forPlan = allMappings.filter((m) => m && Number(m.plan) === Number(plan.id));
+                                linked = forPlan.map((m) => m && m.risk).filter(Boolean);
+                            }
+                        }
+                    } catch (_e) {
+                        linked = [];
+                    }
+                }
+            }
+            const rows = risks.map((risk) => {
+                const checked = linked.includes(risk.id) ? 'checked' : '';
+                return `<label class="plan-risk-row"><input type="checkbox" data-role="plan-risk-checkbox" value="${risk.id}" ${checked}> ${escapeHtml(risk.title || '')}</label>`;
+            }).join('');
+            els.planRiskMatrix.innerHTML = `<div class="plan-risk-list">${rows}</div>`;
+
+            // Also populate the detailed mapping table (used in the plan modal)
+            // if present on the page. This table is normally managed by the
+            // data-management module, but on the Test Plan modal that module
+            // may not be initialised. Populate it from the plan's
+            // risk_mitigation_details so users can see linked mitigations.
+            try {
+                const mappingTbody = document.querySelector('[data-role="mapping-list"]');
+                if (mappingTbody) {
+                    try { console.debug('[automation] mapping tbody found on page'); } catch (e) { }
+                    // Prefer the detailed objects on the plan, but fall back to
+                    // resolving mapping ids against the page-injected initial
+                    // risk mitigations if the details are not present. This
+                    // covers cases where the list endpoint doesn't include
+                    // nested objects or a detail fetch failed due to auth.
+                    let details = Array.isArray(plan.risk_mitigation_details) ? plan.risk_mitigation_details : [];
+                    let detailsSource = Array.isArray(plan.risk_mitigation_details) && plan.risk_mitigation_details.length ? 'details' : null;
+                    if (!details.length) {
+                        // Prefer selected-plan injected mappings
+                        try {
+                            const selNode = document.getElementById('automation-initial-risk-mitigations-for-selected');
+                            if (selNode) {
+                                const sel = JSON.parse(selNode.textContent || selNode.innerText || '[]');
+                                if (Array.isArray(sel) && sel.length) { details = sel; detailsSource = 'selected'; }
+                            }
+                        } catch (_e) { /* ignore */ }
+                    }
+                    if (!details.length) {
+                        // Next prefer the by-plan mapping map
+                        try {
+                            const byPlanNode = document.getElementById('automation-initial-risk-mitigations-by-plan');
+                            if (byPlanNode) {
+                                const mapObj = JSON.parse(byPlanNode.textContent || byPlanNode.innerText || '{}');
+                                const arr = mapObj && (mapObj[String(plan.id)] || mapObj[plan.id]) ? (mapObj[String(plan.id)] || mapObj[plan.id]) : [];
+                                if (Array.isArray(arr) && arr.length) { details = arr; detailsSource = 'by-plan'; }
+                            }
+                        } catch (_e) { /* ignore */ }
+                    }
+                    if (!details.length) {
+                        try {
+                            const node = document.getElementById('automation-initial-risk-mitigations');
+                            if (node) {
+                                const allMappings = JSON.parse(node.textContent || node.innerText || '[]');
+                                if (Array.isArray(allMappings) && allMappings.length) {
+                                    details = allMappings.filter((m) => m && Number(m.plan) === Number(plan.id));
+                                    if (details.length) detailsSource = 'all-mappings';
+                                }
+                            }
+                        } catch (_e) {
+                            details = [];
+                        }
+                    }
+                    if (!details.length) {
+                        try { console.debug('[automation] mapping details resolved: none'); } catch (e) { }
+                        // Additional debug info to help diagnose why mappings are
+                        // empty: dump page-injected mappings and plan id.
+                        try {
+                            const nodeAll = document.getElementById('automation-initial-risk-mitigations');
+                            const allText = nodeAll ? (nodeAll.textContent || nodeAll.innerText || '') : '';
+                            console.debug('[automation] fallback allMappings length', allText ? (JSON.parse(allText) || []).length : 0, 'planId', plan && plan.id);
+                        } catch (err) { console.debug('[automation] error parsing fallback mappings', err); }
+                        mappingTbody.innerHTML = '<tr><td colspan="7" class="empty">No risk to mitigation links found for the current filters.</td></tr>';
+                        // If mappings were not available yet due to a race, try a
+                        // single delayed retry to populate the table.
+                        setTimeout(() => {
+                            try {
+                                const node = document.getElementById('automation-initial-risk-mitigations');
+                                if (node) {
+                                    const allMappings = JSON.parse(node.textContent || node.innerText || '[]');
+                                    const forPlan = Array.isArray(allMappings) ? allMappings.filter((m) => m && Number(m.plan) === Number(plan.id)) : [];
+                                    if (forPlan.length) {
+                                        console.debug('[automation] retry: found fallback mappings after delay', forPlan.length);
+                                        // Dedupe by mapping id in case the details got
+                                        // populated elsewhere and to avoid rendering
+                                        // duplicate rows when the same mapping appears
+                                        // in multiple payloads.
+                                        const seen = new Set();
+                                        const uniqueForPlan = [];
+                                        forPlan.forEach((m) => {
+                                            const key = m && (m.id || m.pk || m.mapping_id) ? String(m.id || m.pk || m.mapping_id) : null;
+                                            if (!key) return;
+                                            if (!seen.has(key)) {
+                                                seen.add(key);
+                                                uniqueForPlan.push(m);
+                                            }
+                                        });
+
+                                        const retryRows = uniqueForPlan
+                                            .map((m, idx) => {
+                                                const riskTitle = m.risk_title ? escapeHtml(m.risk_title) : 'Untitled';
+                                                const mitigationTitle = m.mitigation_plan_title ? escapeHtml(m.mitigation_plan_title) : 'Untitled';
+                                                const impact = m.impact ? escapeHtml(m.impact) : '&mdash;';
+                                                const updated = m.updated_at ? formatDateTime(m.updated_at) : '&mdash;';
+                                                return `
+                                                    <tr data-mapping-id="${m.id}" data-source="all-mappings">
+                                                        <td data-label="#">${idx + 1}</td>
+                                                        <td data-label="Risk"><strong>${riskTitle}</strong>${m.risk_description ? `<div class="table-secondary">${escapeHtml(m.risk_description)}</div>` : ''}</td>
+                                                        <td data-label="Mitigation Plan"><strong>${mitigationTitle}</strong>${m.mitigation_plan_description ? `<div class="table-secondary">${escapeHtml(m.mitigation_plan_description)}</div>` : ''}</td>
+                                                        <td data-label="Impact">${impact}</td>
+                                                        <td data-label="Linked">&check;</td>
+                                                        <td data-label="Updated">${updated}</td>
+                                                        <td data-label="Actions"><div class="table-action-group"><button type="button" class="action-button" data-action="view-mapping" data-id="${m.id}">View</button></div></td>
+                                                    </tr>
+                                                `;
+                                            })
+                                            .join('');
+                                        // Only replace the tbody if we still have the
+                                        // placeholder / empty row to avoid duplicating
+                                        // rows that may have been inserted by another
+                                        // module.
+                                        const existing = mappingTbody.querySelectorAll('tr[data-mapping-id]');
+                                        if (!existing || existing.length === 0) {
+                                            mappingTbody.innerHTML = retryRows;
+                                        } else {
+                                            console.debug('[automation] retry: mapping table already populated, skipping overwrite', { existing: existing.length });
+                                        }
+                                    }
+                                }
+                            } catch (err) {
+                                /* ignore retry errors */
+                            }
+                        }, 250);
+                    } else {
+                        try { console.debug('[automation] mapping details resolved', { count: details.length }); } catch (e) { }
+                        // Dedupe details by mapping id to avoid rendering
+                        // duplicate rows if entries come from multiple
+                        // sources (nested details, by-plan map, full list).
+                        const seen = new Set();
+                        const uniqueDetails = [];
+                        details.forEach((m) => {
+                            const key = m && (m.id || m.pk || m.mapping_id) ? String(m.id || m.pk || m.mapping_id) : null;
+                            if (!key) return;
+                            if (!seen.has(key)) {
+                                seen.add(key);
+                                uniqueDetails.push(m);
+                            }
+                        });
+
+                        try {
+                            console.debug('[automation] mapping rows source', { source: detailsSource || 'unknown', ids: uniqueDetails.map((m) => m && m.id) });
+                        } catch (err) { /* ignore */ }
+
+                        const mapRows = uniqueDetails
+                            .map((m, idx) => {
+                                const riskTitle = m.risk_title ? escapeHtml(m.risk_title) : 'Untitled';
+                                const mitigationTitle = m.mitigation_plan_title ? escapeHtml(m.mitigation_plan_title) : 'Untitled';
+                                const impact = m.impact ? escapeHtml(m.impact) : '&mdash;';
+                                const updated = m.updated_at ? formatDateTime(m.updated_at) : '&mdash;';
+                                return `
+                                    <tr data-mapping-id="${m.id}" data-source="${detailsSource || 'unknown'}">
+                                        <td data-label="#">${idx + 1}</td>
+                                        <td data-label="Risk">
+                                            <strong>${riskTitle}</strong>
+                                            ${m.risk_description ? `<div class="table-secondary">${escapeHtml(m.risk_description)}</div>` : ''}
+                                        </td>
+                                        <td data-label="Mitigation Plan">
+                                            <strong>${mitigationTitle}</strong>
+                                            ${m.mitigation_plan_description ? `<div class="table-secondary">${escapeHtml(m.mitigation_plan_description)}</div>` : ''}
+                                        </td>
+                                        <td data-label="Impact">${impact}</td>
+                                        <td data-label="Linked">&check;</td>
+                                        <td data-label="Updated">${updated}</td>
+                                        <td data-label="Actions">
+                                            <div class="table-action-group">
+                                                <button type="button" class="action-button" data-action="view-mapping" data-id="${m.id}">View</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                `;
+                            })
+                            .join('');
+                        mappingTbody.innerHTML = mapRows;
+                    }
+                }
+            } catch (e) {
+                // ignore errors updating auxiliary mapping table
+            }
+        };
+
         const closePlanModal = (options = {}) => {
             const { resetForm = false, returnFocus = true } = options;
             if (!els.planModal) {
@@ -410,6 +923,10 @@
                 els.planForm.reset();
                 resetObjectiveEditor();
             }
+            // if we were viewing a plan, re-enable inputs
+            try {
+                if (state.viewingPlan) enablePlanInputs();
+            } catch (e) { }
             if (returnFocus && els.planModalTrigger) {
                 els.planModalTrigger.focus();
             }
@@ -471,6 +988,18 @@
             return segments.length ? `<div class="table-scope-preview">${segments.join('')}</div>` : '';
         };
 
+        const buildRiskPreview = (plan) => {
+            if (!plan || typeof plan !== 'object') {
+                return '';
+            }
+            const linked = Array.isArray(plan.risk_mitigation_details) ? plan.risk_mitigation_details : [];
+            if (!linked.length) {
+                return '';
+            }
+            const summary = linked.length === 1 ? '1 linked risk' : `${linked.length} linked risks`;
+            return `<div class="table-tertiary">${escapeHtml(summary)}</div>`;
+        };
+
         const renderPlanList = () => {
             if (!els.planList) {
                 return;
@@ -500,6 +1029,7 @@
                 const signoff = timeline.signoff || '—';
                 const approver = plan.approver || '—';
                 const scopePreview = buildScopePreview(plan);
+                const riskPreview = buildRiskPreview(plan);
 
                 if (plan.id === state.selectedPlanId) {
                     row.classList.add('is-active');
@@ -514,6 +1044,7 @@
                         ${plan.description ? `<div class="table-secondary">${escapeHtml(plan.description)}</div>` : ''}
                         ${plan.objective ? `<div class="table-tertiary table-tertiary-rich">${plan.objective}</div>` : ''}
                         ${scopePreview}
+                        ${riskPreview}
                     </td>
                     <td data-label="Scenarios">${scenarioCount}</td>
                     <td data-label="Modules">${moduleCount}</td>
@@ -521,6 +1052,12 @@
                     <td data-label="Kickoff">${escapeHtml(kickoff)}</td>
                     <td data-label="Sign-off">${escapeHtml(signoff)}</td>
                     <td data-label="Approver">${escapeHtml(approver)}</td>
+                    <td data-label="Actions">
+                            <div class="table-action-group">
+                                <button type="button" class="action-button" data-action="view-plan" data-plan-id="${plan.id}">View</button>
+                                <button type="button" class="action-button" data-action="edit-plan" data-plan-id="${plan.id}">Edit</button>
+                            </div>
+                    </td>
                 `;
 
                 const selectPlan = () => {
@@ -809,54 +1346,122 @@
             if (!els.planForm) {
                 return;
             }
+            // If we're viewing a plan (read-only), do not submit to server — just advance steps locally
+            if (state.viewingPlan) {
+                if (currentPlanStep < maxPlanSteps) {
+                    showPlanStep(currentPlanStep + 1);
+                } else {
+                    // closing after final view step
+                    closePlanModal({ resetForm: true, returnFocus: false });
+                    resetPlanStepper();
+                }
+                return;
+            }
             try {
                 setStatus('Saving test plan…', 'info');
-                const payload = {
-                    name: (inputs.plan.name.value || '').trim(),
-                    description: (inputs.plan.description.value || '').trim(),
-                    modules_under_test: splitList(inputs.plan.modules.value),
-                    testing_types: {
-                        functional: splitList(inputs.plan.functional.value),
-                        non_functional: splitList(inputs.plan.nonFunctional.value),
-                    },
-                    tools: splitList(inputs.plan.tools.value),
-                    testers: splitList(inputs.plan.testers.value),
-                    approver: (inputs.plan.approver.value || '').trim(),
-                    testing_timeline: {},
-                };
-                if (!payload.name) {
-                    throw new Error('Plan name is required.');
+
+                const baseUrl = apiEndpoints.plans || '/api/core/test-plans/';
+                const planDetailUrl = (id) => `${baseUrl}${id}/`;
+
+                // Build payload depending on the current step
+                let payload = {};
+                if (currentPlanStep === 1) {
+                    payload = {
+                        name: (inputs.plan.name.value || '').trim(),
+                        description: (inputs.plan.description.value || '').trim(),
+                    };
+                    if (!payload.name) {
+                        throw new Error('Plan name is required.');
+                    }
+
+                    if (state.editingPlan && planDraftId) {
+                        // update existing plan basic info and advance
+                        await submitJson(planDetailUrl(planDraftId), payload, 'PATCH');
+                        showPlanStep(2);
+                        setStatus('Basic info updated. Continue to Objective.', 'success');
+                        return;
+                    }
+
+                    // Create initial draft
+                    const created = await submitJson(baseUrl, payload);
+                    planDraftId = created.id;
+                    // advance to next step
+                    showPlanStep(2);
+                    setStatus('Basic info saved. Continue to Objective.', 'success');
+                    return;
                 }
-                const objectiveContent = readObjectiveContent();
-                if (!objectiveContent.plain) {
-                    throw new Error('Plan objective is required.');
+
+                // For steps > 1 we require a draft id
+                if (!planDraftId) {
+                    throw new Error('No draft plan found. Start from step 1.');
                 }
-                payload.objective = objectiveContent.html;
-                const scopeInRaw = inputs.plan.scopeIn ? inputs.plan.scopeIn.value : '';
-                const scopeOutRaw = inputs.plan.scopeOut ? inputs.plan.scopeOut.value : '';
-                const scopeItems = [];
-                splitList(scopeInRaw).forEach((item) => {
-                    scopeItems.push({ category: 'in_scope', item });
-                });
-                splitList(scopeOutRaw).forEach((item) => {
-                    scopeItems.push({ category: 'out_scope', item });
-                });
-                if (scopeItems.length) {
+
+                if (currentPlanStep === 2) {
+                    const objectiveContent = readObjectiveContent();
+                    if (!objectiveContent.plain) {
+                        throw new Error('Plan objective is required.');
+                    }
+                    payload.objective = objectiveContent.html;
+                }
+
+                if (currentPlanStep === 3) {
+                    const scopeInRaw = inputs.plan.scopeIn ? inputs.plan.scopeIn.value : '';
+                    const scopeOutRaw = inputs.plan.scopeOut ? inputs.plan.scopeOut.value : '';
+                    const scopeItems = [];
+                    splitList(scopeInRaw).forEach((item) => {
+                        scopeItems.push({ category: 'in_scope', item });
+                    });
+                    splitList(scopeOutRaw).forEach((item) => {
+                        scopeItems.push({ category: 'out_scope', item });
+                    });
                     payload.scopes = scopeItems;
                 }
-                if (inputs.plan.kickoff.value) {
-                    payload.testing_timeline.kickoff = inputs.plan.kickoff.value;
+
+                if (currentPlanStep === 4) {
+                    if (els.planRiskMatrix) {
+                        // Risk -> Mitigation links are separate resources (RiskAndMitigationPlan)
+                        // that reference the plan via a FK. Creating/updating those links
+                        // is handled via the Data Management module's endpoints. Do not
+                        // include `risk_mitigations` on the plan payload anymore.
+                    }
                 }
-                if (inputs.plan.signoff.value) {
-                    payload.testing_timeline.signoff = inputs.plan.signoff.value;
+
+                if (currentPlanStep === 5) {
+                    payload = {
+                        modules_under_test: splitList(inputs.plan.modules.value),
+                        testing_types: {
+                            functional: splitList(inputs.plan.functional.value),
+                            non_functional: splitList(inputs.plan.nonFunctional.value),
+                        },
+                        tools: splitList(inputs.plan.tools.value),
+                        testers: splitList(inputs.plan.testers.value),
+                        approver: (inputs.plan.approver.value || '').trim(),
+                        testing_timeline: {},
+                    };
+                    if (inputs.plan.kickoff.value) {
+                        payload.testing_timeline.kickoff = inputs.plan.kickoff.value;
+                    }
+                    if (inputs.plan.signoff.value) {
+                        payload.testing_timeline.signoff = inputs.plan.signoff.value;
+                    }
                 }
-                const created = await submitJson(apiEndpoints.plans || '/api/core/test-plans/', payload);
-                await refreshPlans({ selectPlanId: created.id, silent: true });
-                closePlanModal({ resetForm: true, returnFocus: false });
-                focusPlanRow(created.id);
-                setStatus('Test plan created.', 'success');
+
+                // PATCH the draft (use PATCH so partial updates are accepted)
+                await submitJson(planDetailUrl(planDraftId), payload, 'PATCH');
+
+                if (currentPlanStep < maxPlanSteps) {
+                    showPlanStep(currentPlanStep + 1);
+                    setStatus(`Step ${currentPlanStep} saved.`, 'success');
+                } else {
+                    // final step completed
+                    await refreshPlans({ selectPlanId: planDraftId, silent: true });
+                    closePlanModal({ resetForm: true, returnFocus: false });
+                    focusPlanRow(planDraftId);
+                    setStatus('Test plan created.', 'success');
+                    resetPlanStepper();
+                }
             } catch (error) {
-                const message = error instanceof Error ? error.message : 'Unable to create plan.';
+                const message = error instanceof Error ? error.message : 'Unable to save plan.';
                 setStatus(message, 'error');
             }
         };
@@ -986,6 +1591,7 @@
             els.planForm.addEventListener('reset', () => {
                 window.setTimeout(() => {
                     resetObjectiveEditor();
+                    resetPlanStepper();
                 }, 0);
             });
         }
@@ -1004,17 +1610,46 @@
                 openPlanModal();
             });
         }
+        if (elsExtra.planPrev) {
+            elsExtra.planPrev.addEventListener('click', (event) => {
+                event.preventDefault();
+                const prev = Math.max(1, currentPlanStep - 1);
+                showPlanStep(prev);
+            });
+        }
         root.addEventListener('click', (event) => {
             const openTrigger = event.target.closest('[data-action="open-plan-modal"]');
             if (openTrigger) {
                 event.preventDefault();
                 openPlanModal();
+                return;
+            }
+            const viewTrigger = event.target.closest('[data-action="view-plan"]');
+            if (viewTrigger) {
+                event.preventDefault();
+                const pid = viewTrigger.dataset.planId ? Number(viewTrigger.dataset.planId) : null;
+                if (pid) {
+                    const plan = state.plans.find(p => p.id === pid);
+                    if (plan) openPlanView(plan);
+                }
+                return;
+            }
+            const editTrigger = event.target.closest('[data-action="edit-plan"]');
+            if (editTrigger) {
+                event.preventDefault();
+                const pid = editTrigger.dataset.planId ? Number(editTrigger.dataset.planId) : null;
+                if (pid) {
+                    const plan = state.plans.find(p => p.id === pid);
+                    if (plan) openPlanEdit(plan);
+                }
+                return;
             }
         });
         planModalCloseButtons.forEach((node) => {
             node.addEventListener('click', (event) => {
                 event.preventDefault();
                 closePlanModal({ resetForm: true, returnFocus: true });
+                resetPlanStepper();
             });
         });
         document.addEventListener('keydown', handlePlanModalEscape);

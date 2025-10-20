@@ -969,9 +969,10 @@
             }
             // If risks or mitigations are not loaded (e.g., when this module is mounted on
             // the Test Plans page and initial data wasn't injected), try to load them.
-            if (!state.risks.length || !state.mitigationPlans.length) {
+            if (!state.risks.length || !state.mitigationPlans.length || !state.mappings.length) {
                 try {
-                    await Promise.all([loadRisks(), loadMitigationPlans()]);
+                    // ensure the lists required by the mapping modal are loaded
+                    await Promise.all([loadRisks(), loadMitigationPlans(), loadMappings()]);
                 } catch (err) {
                     // ignore fetch errors here; we'll show the existing error below
                 }
@@ -1429,7 +1430,19 @@
                     closeEnvironmentModal();
                     await loadEnvironments();
                 } catch (error) {
-                    setStatus(error.message, "error");
+                    const message = error instanceof Error ? error.message : String(error);
+                    // Translate DB/DRF unique constraint message into a friendlier UX message
+                    if (message && message.toLowerCase().includes('unique')) {
+                        setStatus('This risk → mitigation link already exists.', 'error');
+                    } else {
+                        setStatus(message, 'error');
+                    }
+                    // Refresh mappings to reflect the true server state
+                    try {
+                        await loadMappings();
+                    } catch (_err) {
+                        // ignore
+                    }
                 }
             });
         }

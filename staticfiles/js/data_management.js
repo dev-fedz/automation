@@ -180,11 +180,11 @@
             }
         };
 
-    const initialEnvironments = readScriptJson("automation-initial-environments") || [];
-    const initialRisks = readScriptJson("automation-initial-risks") || [];
-    const initialMitigations = readScriptJson("automation-initial-mitigation-plans") || [];
-    const initialMappings = readScriptJson("automation-initial-risk-mitigations") || [];
-    const initialSection = readScriptJson("data-management-initial-section") || "";
+        const initialEnvironments = readScriptJson("automation-initial-environments") || [];
+        const initialRisks = readScriptJson("automation-initial-risks") || [];
+        const initialMitigations = readScriptJson("automation-initial-mitigation-plans") || [];
+        const initialMappings = readScriptJson("automation-initial-risk-mitigations") || [];
+        const initialSection = readScriptJson("data-management-initial-section") || "";
         const apiEndpoints = readScriptJson("automation-api-endpoints") || {};
 
         const endpoints = {
@@ -299,225 +299,225 @@
             highlightSection(hash);
         };
 
-            const focusEnvironmentRow = (group, index) => {
-                const container = group === "variables" ? els.environmentVariableRows : els.environmentHeaderRows;
-                if (!container) {
-                    return;
-                }
-                const selector = `[data-group="${group}"][data-field="key"][data-index="${index}"]`;
-                const target = container.querySelector(selector);
-                if (target && typeof target.focus === "function") {
-                    target.focus();
-                }
-            };
+        const focusEnvironmentRow = (group, index) => {
+            const container = group === "variables" ? els.environmentVariableRows : els.environmentHeaderRows;
+            if (!container) {
+                return;
+            }
+            const selector = `[data-group="${group}"][data-field="key"][data-index="${index}"]`;
+            const target = container.querySelector(selector);
+            if (target && typeof target.focus === "function") {
+                target.focus();
+            }
+        };
 
-            const renderEnvironmentRows = (group) => {
-                const container = group === "variables" ? els.environmentVariableRows : els.environmentHeaderRows;
-                if (!container || !state.environmentForm) {
-                    return;
-                }
-                const rows = Array.isArray(state.environmentForm[group]) ? state.environmentForm[group] : [];
-                const readOnly = state.environmentModalMode === "view";
-                if (!rows.length) {
-                    const emptyText = group === "variables" ? "No variables defined." : "No headers defined.";
-                    container.innerHTML = `<tr><td colspan="3" class="empty">${emptyText}</td></tr>`;
-                    return;
-                }
-                const markup = rows
-                    .map((row, index) => {
-                        const keyValue = escapeHtml(row.key || "");
-                        const valueValue = escapeHtml(row.value || "");
-                        const removeCell = readOnly
-                            ? "&mdash;"
-                            : `<button type="button" class="btn-tertiary" data-action="environment-remove-row" data-group="${group}" data-index="${index}">Remove</button>`;
-                        return (
-                            `\n                        <tr data-index="${index}">\n` +
-                            `                            <td data-label="Key">\n` +
-                            `                                <input type="text" data-group="${group}" data-field="key" data-index="${index}" value="${keyValue}"${readOnly ? " readonly" : ""}>\n` +
-                            "                            </td>\n" +
-                            `                            <td data-label="Value">\n` +
-                            `                                <input type="text" data-group="${group}" data-field="value" data-index="${index}" value="${valueValue}"${readOnly ? " readonly" : ""}>\n` +
-                            "                            </td>\n" +
-                            `                            <td data-label="Actions">${removeCell}</td>\n` +
-                            "                        </tr>\n"
-                        );
-                    })
-                    .join("");
-                container.innerHTML = markup;
-            };
+        const renderEnvironmentRows = (group) => {
+            const container = group === "variables" ? els.environmentVariableRows : els.environmentHeaderRows;
+            if (!container || !state.environmentForm) {
+                return;
+            }
+            const rows = Array.isArray(state.environmentForm[group]) ? state.environmentForm[group] : [];
+            const readOnly = state.environmentModalMode === "view";
+            if (!rows.length) {
+                const emptyText = group === "variables" ? "No variables defined." : "No headers defined.";
+                container.innerHTML = `<tr><td colspan="3" class="empty">${emptyText}</td></tr>`;
+                return;
+            }
+            const markup = rows
+                .map((row, index) => {
+                    const keyValue = escapeHtml(row.key || "");
+                    const valueValue = escapeHtml(row.value || "");
+                    const removeCell = readOnly
+                        ? "&mdash;"
+                        : `<button type="button" class="btn-tertiary" data-action="environment-remove-row" data-group="${group}" data-index="${index}">Remove</button>`;
+                    return (
+                        `\n                        <tr data-index="${index}">\n` +
+                        `                            <td data-label="Key">\n` +
+                        `                                <input type="text" data-group="${group}" data-field="key" data-index="${index}" value="${keyValue}"${readOnly ? " readonly" : ""}>\n` +
+                        "                            </td>\n" +
+                        `                            <td data-label="Value">\n` +
+                        `                                <input type="text" data-group="${group}" data-field="value" data-index="${index}" value="${valueValue}"${readOnly ? " readonly" : ""}>\n` +
+                        "                            </td>\n" +
+                        `                            <td data-label="Actions">${removeCell}</td>\n` +
+                        "                        </tr>\n"
+                    );
+                })
+                .join("");
+            container.innerHTML = markup;
+        };
 
-            const renderEnvironmentMeta = () => {
-                if (!els.environmentMeta || !state.environmentForm) {
-                    return;
+        const renderEnvironmentMeta = () => {
+            if (!els.environmentMeta || !state.environmentForm) {
+                return;
+            }
+            const createdText = state.environmentForm.createdAt ? formatDateTime(state.environmentForm.createdAt) : null;
+            const updatedText = state.environmentForm.updatedAt ? formatDateTime(state.environmentForm.updatedAt) : null;
+            if (createdText || updatedText) {
+                els.environmentMeta.hidden = false;
+                if (els.environmentCreated) {
+                    els.environmentCreated.textContent = createdText || "--";
                 }
-                const createdText = state.environmentForm.createdAt ? formatDateTime(state.environmentForm.createdAt) : null;
-                const updatedText = state.environmentForm.updatedAt ? formatDateTime(state.environmentForm.updatedAt) : null;
-                if (createdText || updatedText) {
-                    els.environmentMeta.hidden = false;
-                    if (els.environmentCreated) {
-                        els.environmentCreated.textContent = createdText || "--";
-                    }
-                    if (els.environmentUpdated) {
-                        els.environmentUpdated.textContent = updatedText || "--";
-                    }
+                if (els.environmentUpdated) {
+                    els.environmentUpdated.textContent = updatedText || "--";
+                }
+            } else {
+                els.environmentMeta.hidden = true;
+            }
+        };
+
+        const applyEnvironmentFormState = () => {
+            if (!state.environmentForm) {
+                return;
+            }
+            state.environmentForm.variables = ensureKeyValueRows(state.environmentForm.variables);
+            state.environmentForm.headers = ensureKeyValueRows(state.environmentForm.headers);
+            const readOnly = state.environmentModalMode === "view";
+            if (els.environmentName) {
+                els.environmentName.value = state.environmentForm.name || "";
+                els.environmentName.readOnly = readOnly;
+            }
+            if (els.environmentDescription) {
+                els.environmentDescription.value = state.environmentForm.description || "";
+                els.environmentDescription.readOnly = readOnly;
+            }
+            if (els.environmentAddVariable) {
+                els.environmentAddVariable.disabled = readOnly;
+            }
+            if (els.environmentAddHeader) {
+                els.environmentAddHeader.disabled = readOnly;
+            }
+            if (els.environmentSubmit) {
+                els.environmentSubmit.hidden = readOnly;
+                els.environmentSubmit.textContent = state.environmentModalMode === "edit" ? "Update" : "Save";
+            }
+            renderEnvironmentRows("variables");
+            renderEnvironmentRows("headers");
+            renderEnvironmentMeta();
+        };
+
+        const openEnvironmentModal = (mode, environment = null) => {
+            if (!els.environmentModal) {
+                return;
+            }
+            state.environmentModalMode = mode;
+            state.environmentCurrentId = environment ? environment.id : null;
+            state.environmentForm = {
+                name: environment && environment.name ? environment.name : "",
+                description: environment && environment.description ? environment.description : "",
+                variables: toKeyValueRows(environment ? environment.variables : null),
+                headers: toKeyValueRows(environment ? environment.default_headers : null),
+                createdAt: environment && environment.created_at ? environment.created_at : null,
+                updatedAt: environment && environment.updated_at ? environment.updated_at : null,
+            };
+            const header = root.querySelector("#environment-modal-title");
+            if (header) {
+                if (mode === "edit") {
+                    header.textContent = "Edit Environment";
+                } else if (mode === "view") {
+                    header.textContent = "View Environment";
                 } else {
-                    els.environmentMeta.hidden = true;
+                    header.textContent = "New Environment";
                 }
-            };
+            }
+            applyEnvironmentFormState();
+            els.environmentModal.hidden = false;
+            body.classList.add("automation-modal-open");
+            if (mode !== "view" && els.environmentName) {
+                window.requestAnimationFrame(() => {
+                    els.environmentName.focus();
+                });
+            }
+        };
 
-            const applyEnvironmentFormState = () => {
-                if (!state.environmentForm) {
-                    return;
-                }
-                state.environmentForm.variables = ensureKeyValueRows(state.environmentForm.variables);
-                state.environmentForm.headers = ensureKeyValueRows(state.environmentForm.headers);
-                const readOnly = state.environmentModalMode === "view";
-                if (els.environmentName) {
-                    els.environmentName.value = state.environmentForm.name || "";
-                    els.environmentName.readOnly = readOnly;
-                }
-                if (els.environmentDescription) {
-                    els.environmentDescription.value = state.environmentForm.description || "";
-                    els.environmentDescription.readOnly = readOnly;
-                }
-                if (els.environmentAddVariable) {
-                    els.environmentAddVariable.disabled = readOnly;
-                }
-                if (els.environmentAddHeader) {
-                    els.environmentAddHeader.disabled = readOnly;
-                }
-                if (els.environmentSubmit) {
-                    els.environmentSubmit.hidden = readOnly;
-                    els.environmentSubmit.textContent = state.environmentModalMode === "edit" ? "Update" : "Save";
-                }
-                renderEnvironmentRows("variables");
-                renderEnvironmentRows("headers");
-                renderEnvironmentMeta();
-            };
+        const closeEnvironmentModal = () => {
+            closeModal(els.environmentModal);
+            state.environmentModalMode = "create";
+            state.environmentCurrentId = null;
+            state.environmentForm = null;
+            if (els.environmentSubmit) {
+                els.environmentSubmit.hidden = false;
+                els.environmentSubmit.textContent = "Save";
+            }
+        };
 
-            const openEnvironmentModal = (mode, environment = null) => {
-                if (!els.environmentModal) {
-                    return;
-                }
-                state.environmentModalMode = mode;
-                state.environmentCurrentId = environment ? environment.id : null;
-                state.environmentForm = {
-                    name: environment && environment.name ? environment.name : "",
-                    description: environment && environment.description ? environment.description : "",
-                    variables: toKeyValueRows(environment ? environment.variables : null),
-                    headers: toKeyValueRows(environment ? environment.default_headers : null),
-                    createdAt: environment && environment.created_at ? environment.created_at : null,
-                    updatedAt: environment && environment.updated_at ? environment.updated_at : null,
-                };
-                const header = root.querySelector("#environment-modal-title");
-                if (header) {
-                    if (mode === "edit") {
-                        header.textContent = "Edit Environment";
-                    } else if (mode === "view") {
-                        header.textContent = "View Environment";
-                    } else {
-                        header.textContent = "New Environment";
-                    }
-                }
-                applyEnvironmentFormState();
-                els.environmentModal.hidden = false;
-                body.classList.add("automation-modal-open");
-                if (mode !== "view" && els.environmentName) {
-                    window.requestAnimationFrame(() => {
-                        els.environmentName.focus();
-                    });
-                }
-            };
+        const renderEnvironments = () => {
+            if (!els.environmentList) {
+                return;
+            }
+            if (els.metricEnvironments) {
+                els.metricEnvironments.textContent = String(state.environments.length);
+            }
+            if (!state.environments.length) {
+                els.environmentList.innerHTML = '<tr><td colspan="6" class="empty">No environments match the current filters.</td></tr>';
+                return;
+            }
+            const rows = state.environments
+                .map((env) => {
+                    const name = env && env.name ? escapeHtml(env.name) : "Untitled";
+                    const description = env && env.description ? escapeHtml(env.description) : "&mdash;";
+                    const variableCount = env && env.variables && typeof env.variables === "object"
+                        ? Object.keys(env.variables).length
+                        : 0;
+                    const headerCount = env && env.default_headers && typeof env.default_headers === "object"
+                        ? Object.keys(env.default_headers).length
+                        : 0;
+                    const updatedText = escapeHtml(formatDateTime(env ? env.updated_at : null));
+                    return (
+                        `\n                        <tr data-environment-id="${env.id}">\n` +
+                        `                            <td data-label="Name">${name}</td>\n` +
+                        `                            <td data-label="Description">${description}</td>\n` +
+                        `                            <td data-label="Variables">${variableCount}</td>\n` +
+                        `                            <td data-label="Headers">${headerCount}</td>\n` +
+                        `                            <td data-label="Updated">${updatedText}</td>\n` +
+                        "                            <td data-label=\"Actions\">\n" +
+                        "                                <div class=\"table-action-group\">\n" +
+                        `                                    <button type="button" class="action-button" data-action="view-environment" data-id="${env.id}">View</button>\n` +
+                        `                                    <button type="button" class="action-button" data-action="edit-environment" data-id="${env.id}">Edit</button>\n` +
+                        `                                    <button type="button" class="action-button" data-action="delete-environment" data-id="${env.id}" data-variant="danger">Delete</button>\n` +
+                        "                                </div>\n" +
+                        "                            </td>\n" +
+                        "                        </tr>\n"
+                    );
+                })
+                .join("");
+            els.environmentList.innerHTML = rows;
+        };
 
-            const closeEnvironmentModal = () => {
-                closeModal(els.environmentModal);
-                state.environmentModalMode = "create";
-                state.environmentCurrentId = null;
-                state.environmentForm = null;
-                if (els.environmentSubmit) {
-                    els.environmentSubmit.hidden = false;
-                    els.environmentSubmit.textContent = "Save";
-                }
-            };
+        const loadEnvironments = async () => {
+            const url = buildUrl(endpoints.environments, { search: state.environmentSearch });
+            const data = await request(url, { method: "GET" });
+            state.environments = Array.isArray(data) ? data : [];
+            renderEnvironments();
+        };
 
-            const renderEnvironments = () => {
-                if (!els.environmentList) {
-                    return;
-                }
-                if (els.metricEnvironments) {
-                    els.metricEnvironments.textContent = String(state.environments.length);
-                }
-                if (!state.environments.length) {
-                    els.environmentList.innerHTML = '<tr><td colspan="6" class="empty">No environments match the current filters.</td></tr>';
-                    return;
-                }
-                const rows = state.environments
-                    .map((env) => {
-                        const name = env && env.name ? escapeHtml(env.name) : "Untitled";
-                        const description = env && env.description ? escapeHtml(env.description) : "&mdash;";
-                        const variableCount = env && env.variables && typeof env.variables === "object"
-                            ? Object.keys(env.variables).length
-                            : 0;
-                        const headerCount = env && env.default_headers && typeof env.default_headers === "object"
-                            ? Object.keys(env.default_headers).length
-                            : 0;
-                        const updatedText = escapeHtml(formatDateTime(env ? env.updated_at : null));
-                        return (
-                            `\n                        <tr data-environment-id="${env.id}">\n` +
-                            `                            <td data-label="Name">${name}</td>\n` +
-                            `                            <td data-label="Description">${description}</td>\n` +
-                            `                            <td data-label="Variables">${variableCount}</td>\n` +
-                            `                            <td data-label="Headers">${headerCount}</td>\n` +
-                            `                            <td data-label="Updated">${updatedText}</td>\n` +
-                            "                            <td data-label=\"Actions\">\n" +
-                            "                                <div class=\"table-action-group\">\n" +
-                            `                                    <button type="button" class="action-button" data-action="view-environment" data-id="${env.id}">View</button>\n` +
-                            `                                    <button type="button" class="action-button" data-action="edit-environment" data-id="${env.id}">Edit</button>\n` +
-                            `                                    <button type="button" class="action-button" data-action="delete-environment" data-id="${env.id}" data-variant="danger">Delete</button>\n` +
-                            "                                </div>\n" +
-                            "                            </td>\n" +
-                            "                        </tr>\n"
-                        );
-                    })
-                    .join("");
-                els.environmentList.innerHTML = rows;
-            };
-
-            const loadEnvironments = async () => {
-                const url = buildUrl(endpoints.environments, { search: state.environmentSearch });
-                const data = await request(url, { method: "GET" });
-                state.environments = Array.isArray(data) ? data : [];
-                renderEnvironments();
-            };
-
-            const handleEnvironmentFormInput = (event) => {
-                if (!state.environmentForm || state.environmentModalMode === "view") {
-                    return;
-                }
-                const target = event.target;
-                if (target === els.environmentName) {
-                    state.environmentForm.name = target.value;
-                    return;
-                }
-                if (target === els.environmentDescription) {
-                    state.environmentForm.description = target.value;
-                    return;
-                }
-                const group = target.dataset.group;
-                const field = target.dataset.field;
-                if (!group || !field) {
-                    return;
-                }
-                const index = Number(target.dataset.index);
-                if (!Number.isFinite(index)) {
-                    return;
-                }
-                const bucket = state.environmentForm[group];
-                if (!Array.isArray(bucket) || !bucket[index]) {
-                    return;
-                }
-                bucket[index][field] = target.value;
-            };
+        const handleEnvironmentFormInput = (event) => {
+            if (!state.environmentForm || state.environmentModalMode === "view") {
+                return;
+            }
+            const target = event.target;
+            if (target === els.environmentName) {
+                state.environmentForm.name = target.value;
+                return;
+            }
+            if (target === els.environmentDescription) {
+                state.environmentForm.description = target.value;
+                return;
+            }
+            const group = target.dataset.group;
+            const field = target.dataset.field;
+            if (!group || !field) {
+                return;
+            }
+            const index = Number(target.dataset.index);
+            if (!Number.isFinite(index)) {
+                return;
+            }
+            const bucket = state.environmentForm[group];
+            if (!Array.isArray(bucket) || !bucket[index]) {
+                return;
+            }
+            bucket[index][field] = target.value;
+        };
 
         const renderRisks = () => {
             if (!els.riskList) {
@@ -1254,7 +1254,19 @@
                     closeEnvironmentModal();
                     await loadEnvironments();
                 } catch (error) {
-                    setStatus(error.message, "error");
+                    const message = error instanceof Error ? error.message : String(error);
+                    // Translate DB/DRF unique constraint message into a friendlier UX message
+                    if (message && message.toLowerCase().includes('unique')) {
+                        setStatus('This risk → mitigation link already exists.', 'error');
+                    } else {
+                        setStatus(message, 'error');
+                    }
+                    // Refresh mappings to reflect the true server state
+                    try {
+                        await loadMappings();
+                    } catch (_err) {
+                        // ignore
+                    }
                 }
             });
         }

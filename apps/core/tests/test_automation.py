@@ -217,7 +217,7 @@ class TestPlanWorkflowTests(APITestCase):
         self.assertEqual(scenario_data["cases"][0]["expected_results"][0]["status_code"], 200)
 
     def test_plan_can_attach_risk_mitigations(self) -> None:
-        mapping = self._create_risk_mapping()
+        # Create a plan first
         plan_payload = {
             "name": "Release 2 Automation",
             "objective": "Cover regression with known risks.",
@@ -227,19 +227,27 @@ class TestPlanWorkflowTests(APITestCase):
             "testing_timeline": {},
             "testers": [],
             "approver": "qa-lead@example.com",
-            "risk_mitigations": [mapping.id],
         }
         response = self.client.post(reverse("core:core-test-plans-list"), data=plan_payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         plan_id = response.data["id"]
         plan = models.TestPlan.objects.get(pk=plan_id)
-        self.assertEqual(plan.risk_mitigations.count(), 1)
-        self.assertEqual(plan.risk_mitigations.first(), mapping)
+
+        # Now create a mapping via the mapping endpoint that links to the plan
+        mapping = self._create_risk_mapping()
+        mapping_payload = {"plan": plan.id, "risk": mapping.risk.id, "mitigation_plan": mapping.mitigation_plan.id, "impact": mapping.impact}
+        map_resp = self.client.post(reverse("core:core-risk-mitigation-plans-list"), data=mapping_payload, format="json")
+        self.assertEqual(map_resp.status_code, status.HTTP_201_CREATED)
+        map_id = map_resp.data["id"]
+
+        # Refresh from DB and assert relation
+        plan.refresh_from_db()
+        self.assertEqual(plan.risk_mitigation_links.count(), 1)
+        self.assertEqual(plan.risk_mitigation_links.first().id, map_id)
 
         detail_response = self.client.get(reverse("core:core-test-plans-detail", kwargs={"pk": plan_id}))
         self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
-        self.assertIn(mapping.id, detail_response.data["risk_mitigations"])
-        details = detail_response.data["risk_mitigation_details"]
+        details = detail_response.data.get("risk_mitigation_details", [])
         self.assertEqual(len(details), 1)
         self.assertEqual(details[0]["risk"], mapping.risk.id)
         self.assertEqual(details[0]["mitigation_plan"], mapping.mitigation_plan.id)

@@ -50,6 +50,8 @@ def test_plan_list() -> QuerySet[models.TestPlan]:
     ).order_by("title", "id")
     maintenance_qs = models.TestPlanMaintenance.objects.order_by("-effective_date", "-created_at", "id")
     scope_qs = models.TestPlanScope.objects.order_by("category", "order", "id")
+    # RiskAndMitigationPlan now references TestPlan via FK named `plan` and the
+    # related_name on TestPlan is `risk_mitigation_links`.
     risk_mitigation_qs = models.RiskAndMitigationPlan.objects.select_related("risk", "mitigation_plan").order_by(
         "risk__title",
         "mitigation_plan__title",
@@ -61,7 +63,7 @@ def test_plan_list() -> QuerySet[models.TestPlan]:
             Prefetch("scenarios", queryset=scenario_qs),
             Prefetch("maintenances", queryset=maintenance_qs),
             Prefetch("scopes", queryset=scope_qs),
-            Prefetch("risk_mitigations", queryset=risk_mitigation_qs),
+            Prefetch("risk_mitigation_links", queryset=risk_mitigation_qs),
         )
     )
 
@@ -90,9 +92,21 @@ def mitigation_plan_list() -> QuerySet[models.MitigationPlan]:
     return models.MitigationPlan.objects.order_by("title", "id")
 
 
-def risk_and_mitigation_list() -> QuerySet[models.RiskAndMitigationPlan]:
-    return models.RiskAndMitigationPlan.objects.select_related("risk", "mitigation_plan").order_by(
+def risk_and_mitigation_list(plan_id: int | None = None) -> QuerySet[models.RiskAndMitigationPlan]:
+    """Return RiskAndMitigationPlan queryset, optionally filtered by plan id.
+
+    Args:
+        plan_id: If provided, filter mappings belonging to the given TestPlan id.
+    """
+    qs = models.RiskAndMitigationPlan.objects.select_related("risk", "mitigation_plan").order_by(
         "risk__title",
         "mitigation_plan__title",
         "id",
     )
+    if plan_id is not None:
+        try:
+            qs = qs.filter(plan_id=int(plan_id))
+        except (TypeError, ValueError):
+            # If plan_id is invalid, return an empty queryset instead of raising
+            return qs.none()
+    return qs

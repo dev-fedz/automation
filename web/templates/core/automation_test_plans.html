@@ -31,6 +31,7 @@
                         <th scope="col">Kickoff</th>
                         <th scope="col">Sign-off</th>
                         <th scope="col">Approver</th>
+                        <th scope="col">Actions</th>
                     </tr>
                 </thead>
                 <tbody data-role="plan-list">
@@ -48,6 +49,12 @@
                                 <td data-label="Kickoff">{{ plan.testing_timeline.kickoff|default:"—" }}</td>
                                 <td data-label="Sign-off">{{ plan.testing_timeline.signoff|default:"—" }}</td>
                                 <td data-label="Approver">{{ plan.approver|default:"—" }}</td>
+                                <td data-label="Actions">
+                                    <div class="table-action-group">
+                                        <button type="button" class="action-button" data-action="view-plan" data-plan-id="{{ plan.id }}">View</button>
+                                        <button type="button" class="action-button" data-action="edit-plan" data-plan-id="{{ plan.id }}">Edit</button>
+                                    </div>
+                                </td>
                             </tr>
                         {% endfor %}
                     {% else %}
@@ -124,6 +131,7 @@
                                         <button type="button" class="btn-primary" data-action="open-mapping-modal">Link Risk</button>
                                     </div>
                                 </div>
+                                <div id="plan-risk-matrix" class="plan-risk-matrix"></div>
                                 <div class="card table-card automation-table-card" aria-live="polite">
                                     <table class="table-modern automation-table" aria-label="Risk and mitigation mapping">
                                         <thead>
@@ -138,9 +146,28 @@
                                             </tr>
                                         </thead>
                                         <tbody data-role="mapping-list">
-                                            <tr>
-                                                <td colspan="7" class="empty">Create a link to see the mitigation matrix populate.</td>
-                                            </tr>
+                                            {% comment %}Render server-side fallback list prepared by the view.
+                                            This avoids putting lookup logic in the template and ensures the
+                                            mapping table shows rows immediately for the selected plan.
+                                            {% endcomment %}
+                                            {% if initial_risk_mitigations_for_render and initial_risk_mitigations_for_render|length %}
+                                                {% for m in initial_risk_mitigations_for_render %}
+                                                    <tr data-mapping-id="{{ m.id }}" data-source="server">
+                                                        <td data-label="#">{{ forloop.counter }}</td>
+                                                        <td data-label="Risk"><strong>{{ m.risk_title|default:"Untitled" }}</strong>{% if m.risk_description %}<div class="table-secondary">{{ m.risk_description }}</div>{% endif %}</td>
+                                                        <td data-label="Mitigation Plan"><strong>{{ m.mitigation_plan_title|default:"Untitled" }}</strong>{% if m.mitigation_plan_description %}<div class="table-secondary">{{ m.mitigation_plan_description }}</div>{% endif %}</td>
+                                                        <td data-label="Impact">{{ m.impact|default:"&mdash;" }}</td>
+                                                        <td data-label="Linked">&check;</td>
+                                                        <td data-label="Updated">{{ m.updated_at|default:"&mdash;" }}</td>
+                                                        <td data-label="Actions"><div class="table-action-group"><button type="button" class="action-button" data-action="view-mapping" data-id="{{ m.id }}">View</button></div></td>
+                                                    </tr>
+                                                {% endfor %}
+                                            {% else %}
+                                                <tr>
+                                                    <td colspan="7" class="empty">No risk to mitigation links found for the current filters.</td>
+                                                </tr>
+                                            {% endif %}
+                                        </tbody>
                                         </tbody>
                                     </table>
                                 </div>
@@ -244,7 +271,12 @@
         </div>
     </div>
 
-    {{ initial_risk_mitigations|json_script:"automation-initial-risk-mitigations" }}
+     {# Inject the per-selected (authoritative) per-plan mappings and the by-plan map
+         so the browser can render any plan immediately without requiring an
+         authenticated API fetch. This avoids empty tables during unauthenticated
+         sessions while keeping payload sizes reasonable. #}
+     {{ initial_risk_mitigations_for_selected|json_script:"automation-initial-risk-mitigations-for-selected" }}
+     {{ initial_risk_mitigations_by_plan|json_script:"automation-initial-risk-mitigations-by-plan" }}
     {{ initial_plans|json_script:"automation-initial-plans" }}
     {{ api_endpoints|json_script:"automation-api-endpoints" }}
 </div>

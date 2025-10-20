@@ -212,7 +212,6 @@ class ApiRunResult(TimeStampedModel):
         return f"Result {self.pk} ({self.status})"
 
 
-
 class TestTools(TimeStampedModel):
     """Test Tool for test strategies."""
     title = models.CharField(max_length=150)
@@ -254,17 +253,13 @@ class TestPlan(TimeStampedModel):
     testing_timeline = models.JSONField(default=dict, blank=True)
     testers = models.JSONField(default=list, blank=True)
     approver = models.CharField(max_length=255, blank=True)
-    risk_mitigations = models.ManyToManyField(
-        "RiskAndMitigationPlan",
-        related_name="test_plans",
-        blank=True,
-    )
 
     class Meta:
         ordering = ["name", "id"]
 
     def __str__(self) -> str:  # pragma: no cover
         return self.name
+
 
 class TestPlanObjectives(TimeStampedModel):
     """Categorized objectives entries linked to a test plan."""
@@ -347,7 +342,7 @@ class MitigationPlan(TimeStampedModel):
 
 class RiskAndMitigationPlan(TimeStampedModel):
     """Links risks to mitigation plans with contextual impact notes."""
-
+    plan = models.ForeignKey(TestPlan, on_delete=models.CASCADE, related_name="risk_mitigation_links")
     risk = models.ForeignKey(Risk, on_delete=models.CASCADE, related_name="mitigation_links")
     mitigation_plan = models.ForeignKey(
         MitigationPlan,
@@ -375,7 +370,8 @@ class TestStrategy(TimeStampedModel):
 
     def __str__(self) -> str:  # pragma: no cover
         return self.title
-    
+
+
 class VersionHistory(TimeStampedModel):
     """Version history for test strategies."""
 

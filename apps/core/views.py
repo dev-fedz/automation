@@ -395,7 +395,18 @@ class RiskAndMitigationPlanViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        queryset = selectors.risk_and_mitigation_list()
+        plan_param = self.request.query_params.get("plan")
+        try:
+            # Log incoming plan param and authentication status for debugging
+            logger.debug('[core] RiskAndMitigationPlanViewSet.get_queryset called', extra={
+                'plan_param': plan_param,
+                'user_authenticated': getattr(self.request.user, 'is_authenticated', False),
+                'user': getattr(self.request.user, 'email', getattr(self.request.user, 'username', None)),
+            })
+        except Exception:
+            # protect logging from raising
+            logger.debug('[core] RiskAndMitigationPlanViewSet.get_queryset called (logging failed)')
+        queryset = selectors.risk_and_mitigation_list(plan_param if plan_param not in (None, "") else None)
         risk_id = self.request.query_params.get("risk")
         if risk_id not in (None, ""):
             try:
@@ -490,7 +501,7 @@ def _prepare_automation_data() -> dict[str, Any]:
         "environments": environments_payload,
         "risks": risks_payload,
         "mitigation_plans": mitigation_plans_payload,
-        "risk_mitigations": risk_mitigations_payload,
+    "risk_mitigations": risk_mitigations_payload,
         "test_tools": serializers.TestToolsSerializer(models.TestTools.objects.order_by("title", "id"), many=True).data,
     }
 
@@ -517,8 +528,30 @@ def automation_test_plans(request):
         "api_endpoints": data["api_endpoints"],
         "initial_selected_plan": data["selected_plan"],
         "initial_selected_scenario": data["selected_scenario"],
-        "risk_mitigations": data["risk_mitigations"],
+        "initial_risk_mitigations": data["risk_mitigations"],
+        # Build a small map of plan_id -> mappings to allow client to
+        # access per-plan mapping payload without filtering large arrays.
+        "initial_risk_mitigations_by_plan": {
+            str(plan.get("id")): [m for m in data["risk_mitigations"] if str(m.get("plan")) == str(plan.get("id"))]
+            for plan in data["plans"]
+        },
+        "initial_risk_mitigations_for_selected": [
+            m for m in data["risk_mitigations"]
+            if data.get("selected_plan") and str(m.get("plan")) == str(data["selected_plan"].get("id"))
+        ],
     }
+    # Determine a simple list to render server-side in the template. Prefer
+    # the per-selected list; otherwise fall back to the by-plan map for the
+    # selected plan id. This avoids putting complex lookup logic into the
+    # template and ensures a stable server-side fallback for unauthenticated
+    # browsers.
+    selected = context.get("initial_selected_plan")
+    by_map = context.get("initial_risk_mitigations_by_plan") or {}
+    render_list = context.get("initial_risk_mitigations_for_selected") or []
+    if not render_list and selected:
+        key = str(selected.get("id"))
+        render_list = by_map.get(key, []) if isinstance(by_map, dict) else []
+    context["initial_risk_mitigations_for_render"] = render_list
     return render(request, "core/automation_test_plans.html", context)
 
 
