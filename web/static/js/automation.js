@@ -735,6 +735,41 @@
         // call on init and when plan/module changes
         syncNewScenarioButtonState();
 
+        // Listen for module changes from data-management so we can refresh
+        // the scenarios table when modules or scenarios are created/updated.
+        try {
+            document.addEventListener('test-modules-changed', (ev) => {
+                try {
+                    console.info('[automation] test-modules-changed received', ev && ev.detail ? ev.detail : null);
+                    // Re-fetch scenarios for the currently selected plan so the
+                    // table reflects the latest server state.
+                    const pid = state.selectedPlanId || (els.scenarioPlan && els.scenarioPlan.value ? Number(els.scenarioPlan.value) : null);
+                    if (!pid) return;
+                    // Trigger the same code path as plan change to fetch and render
+                    (async () => {
+                        try {
+                            setStatus('Refreshing scenarios…', 'info');
+                            const base = apiEndpoints.scenarios || '/api/core/test-scenarios/';
+                            const url = `${base}?plan=${encodeURIComponent(pid)}`;
+                            const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                            if (!resp.ok) throw new Error(`Failed to fetch scenarios: ${resp.status}`);
+                            const data = await resp.json();
+                            const normalized = Array.isArray(data) ? data.map(normalizeScenario) : [];
+                            const planObj = state.plans.find((p) => Number(p.id) === Number(pid));
+                            if (planObj) {
+                                planObj.scenarios = normalized;
+                                state.selectedScenarioId = planObj.scenarios.length ? planObj.scenarios[0].id : null;
+                            }
+                            renderAll();
+                            setStatus('', 'info');
+                        } catch (err) {
+                            setStatus(err instanceof Error ? err.message : 'Unable to refresh scenarios.', 'error');
+                        }
+                    })();
+                } catch (e) { /* ignore */ }
+            });
+        } catch (e) { /* ignore */ }
+
         const openPlanModal = () => {
             if (!els.planModal) {
                 return;
@@ -1777,10 +1812,17 @@
             document.addEventListener('click', async (ev) => {
                 const target = ev.target;
                 if (!target) return;
-                const action = target.dataset && target.dataset.action ? target.dataset.action : null;
+                // Only handle clicks that originate from within the scenario table body.
+                // This prevents duplicate handling when other modules (e.g. data_management)
+                // also listen for the same data-action values on the same page.
+                const trigger = target.closest('[data-action]');
+                if (!trigger) return;
+                const tableEl = scenarioTable();
+                if (!tableEl || !tableEl.contains(trigger)) return; // ignore clicks outside our table
+                const action = trigger.dataset && trigger.dataset.action ? trigger.dataset.action : null;
                 if (!action) return;
                 if (!['view-scenario', 'edit-scenario', 'add-case', 'delete-scenario'].includes(action)) return;
-                const sid = target.dataset && target.dataset.scenarioId ? target.dataset.scenarioId : null;
+                const sid = trigger.dataset && trigger.dataset.scenarioId ? trigger.dataset.scenarioId : null;
                 if (!sid) return;
                 ev.preventDefault();
                 if (action === 'view-scenario' || action === 'edit-scenario') {
@@ -1835,7 +1877,7 @@
                     }
                 } else if (action === 'delete-scenario') {
                     // confirm and delete
-                    if (!confirm('Delete this scenario? This cannot be undone.')) return;
+                    if (!confirm('Are you sure you want to delete this scenario?')) return;
                     try {
                         const delUrl = `${apiEndpoints.scenarios || '/api/core/test-scenarios/'}${sid}/`;
                         const resp = await fetch(delUrl, { method: 'DELETE', credentials: 'same-origin', headers: { 'X-CSRFToken': getCsrfToken() } });
