@@ -29,16 +29,18 @@
                 <table class="table-modern automation-table" aria-label="Test modules register">
                     <thead>
                         <tr>
+                            <th scope="col" class="col-collapse" aria-hidden="true"></th>
                             <th scope="col">Title</th>
                             <th scope="col">Description</th>
                             <th scope="col">Plan</th>
+                            <th scope="col">Created</th>
                             <th scope="col">Updated</th>
                             <th scope="col">Actions</th>
                         </tr>
                     </thead>
                     <tbody data-role="test-modules-list">
                         <tr>
-                            <td colspan="5" class="empty">No test modules registered yet. Add one to the registry.</td>
+                            <td colspan="7" class="empty">No test modules registered yet. Add one to the registry.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -84,6 +86,49 @@
                 <div class="form-actions">
                     <button type="submit" class="btn-primary" data-role="test-modules-submit">Save</button>
                     <button type="button" class="btn-secondary" data-action="close-test-modules-modal">Close</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add Scenario modal (used for adding a scenario directly to a module) -->
+    <div class="automation-modal" data-role="module-add-scenario-modal" hidden>
+        <div class="automation-modal__backdrop" data-action="close-module-add-scenario-modal"></div>
+        <div class="automation-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="module-add-scenario-modal-title">
+            <header class="automation-modal__header">
+                <h2 id="module-add-scenario-modal-title">Add Scenario to Module</h2>
+                <button type="button" class="automation-modal__close" data-action="close-module-add-scenario-modal" aria-label="Close">&times;</button>
+            </header>
+            <form id="module-add-scenario-form" class="automation-form" autocomplete="off">
+                <fieldset>
+                    <legend class="sr-only">New scenario</legend>
+                    <input type="hidden" id="module-add-scenario-module-id" name="module">
+                    <div class="form-row">
+                        <label for="module-add-scenario-title">Title<span aria-hidden="true">*</span></label>
+                        <input type="text" id="module-add-scenario-title" name="title" required maxlength="150" placeholder="Scenario title">
+                    </div>
+                    <div class="form-row">
+                        <label for="module-add-scenario-description">Description</label>
+                        <textarea id="module-add-scenario-description" name="description" rows="3" placeholder="Short summary"></textarea>
+                    </div>
+                    <div class="form-row inline">
+                        <div>
+                            <label for="module-add-scenario-preconditions">Preconditions</label>
+                            <textarea id="module-add-scenario-preconditions" name="preconditions" rows="2"></textarea>
+                        </div>
+                        <div>
+                            <label for="module-add-scenario-postconditions">Postconditions</label>
+                            <textarea id="module-add-scenario-postconditions" name="postconditions" rows="2"></textarea>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <label for="module-add-scenario-tags">Tags</label>
+                        <input type="text" id="module-add-scenario-tags" name="tags" placeholder="comma,separated">
+                    </div>
+                </fieldset>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">Save Scenario</button>
+                    <button type="button" class="btn-secondary" data-action="close-module-add-scenario-modal">Cancel</button>
                 </div>
             </form>
         </div>

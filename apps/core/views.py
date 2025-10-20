@@ -326,6 +326,9 @@ class TestScenarioViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(plan_id=int(plan_id))
             except (TypeError, ValueError) as exc:
                 raise ValidationError({"plan": "Plan must be an integer."}) from exc
+        module = self.request.query_params.get("module")
+        if module:
+            queryset = queryset.filter(module_id=module)
         return queryset
 
 
@@ -575,6 +578,7 @@ def automation_test_plans(request):
 @login_required
 def automation_test_scenarios(request):
     data = _prepare_automation_data()
+    # include initial modules so the scenarios page can show module filters/selects
     context = {
         "initial_plans": data["plans"],
         "initial_metrics": data["metrics"],
@@ -582,6 +586,12 @@ def automation_test_scenarios(request):
         "initial_selected_plan": data["selected_plan"],
         "initial_selected_scenario": data["selected_scenario"],
     }
+    try:
+        context["initial_modules"] = serializers.TestModulesSerializer(
+            models.TestModules.objects.all(), many=True
+        ).data
+    except Exception:
+        context["initial_modules"] = []
     return render(request, "core/automation_test_scenarios.html", context)
 
 

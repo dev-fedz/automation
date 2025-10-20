@@ -392,12 +392,21 @@ class TestCaseSerializer(serializers.ModelSerializer):
 class TestScenarioSerializer(serializers.ModelSerializer):
     cases = TestCaseSerializer(many=True, read_only=True)
     tags = serializers.ListField(child=serializers.CharField(), required=False)
+    module = serializers.PrimaryKeyRelatedField(
+        queryset=models.TestModules.objects.all(),
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
+    module_id = serializers.IntegerField(source="module.id", read_only=True)
 
     class Meta:
         model = models.TestScenario
         fields = [
             "id",
             "plan",
+            "module",
+            "module_id",
             "title",
             "description",
             "preconditions",

@@ -17,6 +17,12 @@
             <div class="panel-header">
                 <h2 id="headline-scenarios">Scenarios</h2>
                 <p class="panel-meta">Linked to: <span data-role="selected-plan-name">{{ initial_selected_plan.name|default:"—" }}</span></p>
+                <div class="panel-controls">
+                    <label for="module-filter" class="sr-only">Filter by module</label>
+                    <select id="module-filter" class="inline-select" data-action="module-filter">
+                        <option value="">All modules</option>
+                    </select>
+                </div>
             </div>
             <div class="automation-list" data-role="scenario-list" aria-live="polite">
                 {% if initial_selected_plan and initial_selected_plan.scenarios %}
@@ -69,6 +75,12 @@
                             <label for="scenario-tags">Tags</label>
                             <input type="text" id="scenario-tags" name="tags" placeholder="billing,critical">
                         </div>
+                        <div class="form-row">
+                            <label for="scenario-module">Test Module</label>
+                            <select id="scenario-module" name="module">
+                                <option value="">(none)</option>
+                            </select>
+                        </div>
                     </fieldset>
                     <div class="form-actions">
                         <button type="submit" class="btn-primary">Save Scenario</button>
@@ -80,6 +92,7 @@
     </div>
 
     {{ initial_plans|json_script:"automation-initial-plans" }}
+    {{ initial_modules|json_script:"automation-initial-modules" }}
     {{ api_endpoints|json_script:"automation-api-endpoints" }}
     {{ initial_metrics|json_script:"automation-initial-metrics" }}
 </div>

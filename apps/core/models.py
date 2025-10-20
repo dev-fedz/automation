@@ -458,6 +458,13 @@ class TestScenario(TimeStampedModel):
     """Concrete scenario derived from the test plan, grouping related test cases."""
 
     plan = models.ForeignKey(TestPlan, on_delete=models.CASCADE, related_name="scenarios")
+    module = models.ForeignKey(
+        "TestModules",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="scenarios",
+    )
     title = models.CharField(max_length=150)
     description = models.TextField(blank=True)
     preconditions = models.TextField(blank=True)

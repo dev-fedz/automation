@@ -402,6 +402,8 @@
 
         const normalizePlans = (plans) => (Array.isArray(plans) ? plans.map(normalizePlan) : []);
 
+        const initialModules = readScriptJson('automation-initial-modules') || [];
+
         const state = {
             plans: normalizePlans(initialPlans),
             selectedPlanId: null,
@@ -432,6 +434,37 @@
             els.status.dataset.variant = variant;
             els.status.textContent = message;
         };
+
+        // populate module filter and scenario form module select
+        const populateModuleSelects = () => {
+            try {
+                const filter = document.getElementById('module-filter');
+                const select = document.getElementById('scenario-module');
+                if (!Array.isArray(initialModules)) return;
+                // clear existing options except the placeholder
+                if (filter) {
+                    // keep first option (All modules)
+                    const first = filter.querySelector('option');
+                    filter.innerHTML = '';
+                    if (first) filter.appendChild(first);
+                    const opt = document.createElement('option'); opt.value = ''; opt.textContent = 'All modules'; filter.appendChild(opt); // ensure placeholder
+                }
+                if (select) {
+                    select.innerHTML = '';
+                    const none = document.createElement('option'); none.value = ''; none.textContent = '(none)'; select.appendChild(none);
+                }
+                initialModules.forEach((m) => {
+                    const option = document.createElement('option');
+                    option.value = m.id;
+                    option.textContent = m.title || `Module ${m.id}`;
+                    if (filter) filter.appendChild(option.cloneNode(true));
+                    if (select) select.appendChild(option.cloneNode(true));
+                });
+            } catch (e) { /* ignore */ }
+        };
+
+        // call once on init
+        populateModuleSelects();
 
         const focusPlanRow = (planId) => {
             if (!els.planList || typeof planId === 'undefined' || planId === null) {
@@ -1488,6 +1521,7 @@
             try {
                 const payload = {
                     plan: plan.id,
+                    module: (document.getElementById('scenario-module') && document.getElementById('scenario-module').value) || null,
                     title: (inputs.scenario.title.value || '').trim(),
                     description: inputs.scenario.description.value || '',
                     preconditions: inputs.scenario.preconditions.value || '',

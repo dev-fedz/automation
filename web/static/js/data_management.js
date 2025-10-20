@@ -447,19 +447,30 @@
                 filtered = filtered.filter((m) => Number(m.plan_id) === planVal);
             }
             if (!filtered.length) {
-                els.testModulesList.innerHTML = '<tr><td colspan="5" class="empty">No test modules match the current filters.</td></tr>';
+                els.testModulesList.innerHTML = '<tr><td colspan="7" class="empty">No test modules match the current filters.</td></tr>';
                 return;
             }
+            // render modules as collapsible rows with a nested sublist for scenarios
             const rows = filtered
                 .map((m) => {
                     const plan = initialPlans.find((p) => Number(p.id) === Number(m.plan_id));
                     const planLabel = plan ? (plan.name || plan.title || `Plan ${plan.id}`) : "";
+                    const scenarios = Array.isArray(m.scenarios) ? m.scenarios : [];
+                    const scenarioRows = scenarios
+                        .map((s) => `
+                            <li class="module-scenario-item" data-scenario-id="${s.id}"><strong>${escapeHtml(s.title || '')}</strong> <small>${escapeHtml(s.updated_at || '')}</small></li>
+                        `)
+                        .join("");
                     return `
-                    <tr data-module-id="${m.id}">
+                    <tr class="module-row" data-module-id="${m.id}">
+                        <td class="col-collapse">
+                            <button type="button" class="btn-icon module-toggle" aria-expanded="false" data-action="toggle-module" data-module-id="${m.id}" aria-label="Toggle scenarios for ${escapeHtml(m.title || '')}">▸</button>
+                        </td>
                         <td>${escapeHtml(m.title || "")}</td>
                         <td>${escapeHtml(m.description || "")}</td>
                         <td>${escapeHtml(planLabel)}</td>
-                        <td>${escapeHtml(m.updated_at || "--")}</td>
+                        <td>${escapeHtml(formatDateTime(m.created_at || null))}</td>
+                        <td>${escapeHtml(formatDateTime(m.updated_at || null))}</td>
                         <td>
                             <div class="table-action-group">
                                 <button type="button" class="action-button" data-action="view-test-module" data-module-id="${m.id}">View</button>
@@ -468,10 +479,116 @@
                             </div>
                         </td>
                     </tr>
+                    <tr class="module-row-body" data-module-body-for="${m.id}" hidden>
+                        <td colspan="7">
+                            <div class="module-body">
+                                <div class="module-body-actions">
+                                    <button type="button" class="action-button" data-action="add-scenario-to-module" data-module-id="${m.id}">Add Scenario</button>
+                                </div>
+                                <ul class="module-scenarios-list">
+                                    ${scenarioRows || '<li class="empty">No scenarios yet.</li>'}
+                                </ul>
+                            </div>
+                        </td>
+                    </tr>
                 `;
                 })
                 .join("");
             els.testModulesList.innerHTML = rows;
+        };
+
+        // Toggle module collapse/expand
+        const toggleModule = (moduleId, expand) => {
+            const row = els.testModulesList.querySelector(`[data-module-id="${moduleId}"]`);
+            if (!row) return;
+            const btn = row.querySelector('[data-action="toggle-module"]');
+            // the body is rendered in the following sibling tr with data-module-body-for
+            const bodyRow = els.testModulesList.querySelector(`tr.module-row-body[data-module-body-for="${moduleId}"]`);
+            const body = bodyRow ? bodyRow.querySelector('.module-body') : null;
+            if (!body || !btn) return;
+            const isExpanded = btn.getAttribute('aria-expanded') === 'true';
+            const willExpand = typeof expand === 'boolean' ? expand : !isExpanded;
+            if (willExpand) {
+                bodyRow.hidden = false;
+                btn.setAttribute('aria-expanded', 'true');
+                btn.textContent = '▾';
+            } else {
+                bodyRow.hidden = true;
+                btn.setAttribute('aria-expanded', 'false');
+                btn.textContent = '▸';
+            }
+        };
+
+        // Open add-scenario modal for a given module id
+        const openModuleAddScenarioModal = (moduleId) => {
+            const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
+            if (!modal) return;
+            const input = document.getElementById('module-add-scenario-module-id');
+            if (input) input.value = moduleId;
+            modal.hidden = false;
+            body.classList.add('automation-modal-open');
+            const title = document.getElementById('module-add-scenario-title');
+            if (title) title.focus();
+        };
+
+        const closeModuleAddScenarioModal = () => {
+            const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
+            if (!modal) return;
+            modal.hidden = true;
+            body.classList.remove('automation-modal-open');
+            const form = document.getElementById('module-add-scenario-form');
+            if (form) form.reset();
+        };
+
+        const handleModuleAddScenarioSubmit = async (event) => {
+            event.preventDefault();
+            const form = document.getElementById('module-add-scenario-form');
+            if (!form) return;
+            const moduleInput = document.getElementById('module-add-scenario-module-id');
+            const titleInput = document.getElementById('module-add-scenario-title');
+            const descInput = document.getElementById('module-add-scenario-description');
+            const preInput = document.getElementById('module-add-scenario-preconditions');
+            const postInput = document.getElementById('module-add-scenario-postconditions');
+            const tagsInput = document.getElementById('module-add-scenario-tags');
+            const moduleId = moduleInput && moduleInput.value ? Number(moduleInput.value) : null;
+            if (!moduleId) {
+                setStatus('Module id missing for scenario.', 'error');
+                return;
+            }
+            const payload = {
+                module: moduleId,
+                title: (titleInput && titleInput.value || '').trim(),
+                description: descInput && descInput.value || '',
+                preconditions: preInput && preInput.value || '',
+                postconditions: postInput && postInput.value || '',
+                tags: tagsInput && tagsInput.value ? tagsInput.value.split(/[,\n]/).map(s => s.trim()).filter(Boolean) : [],
+                plan: null,
+            };
+            // try to infer plan from module if available
+            const moduleObj = state.testModules.find((m) => Number(m.id) === Number(moduleId));
+            if (moduleObj && moduleObj.plan_id) payload.plan = moduleObj.plan_id;
+            try {
+                setStatus('Saving scenario…', 'info');
+                const url = endpoints.scenarios || (apiEndpoints.scenarios ? ensureTrailingSlash(apiEndpoints.scenarios) : '/api/core/test-scenarios/');
+                const created = await request(url, { method: 'POST', body: JSON.stringify(payload) });
+                // insert scenario into module's sublist in state and DOM
+                if (moduleObj) {
+                    moduleObj.scenarios = moduleObj.scenarios || [];
+                    moduleObj.scenarios.unshift(created);
+                    // re-render modules list to reflect changes
+                    renderTestModulesList();
+                    // expand this module to show the new scenario
+                    toggleModule(moduleId, true);
+                } else {
+                    // fallback: reload modules from server
+                    await loadTestModules();
+                }
+                closeModuleAddScenarioModal();
+                setStatus('Scenario saved.', 'success');
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Unable to create scenario.';
+                setStatus(message, 'error');
+            }
         };
 
         const loadTestTools = async () => {
@@ -780,10 +897,6 @@
                 return;
             }
             const target = event.target;
-            if (target === els.environmentName) {
-                state.environmentForm.name = target.value;
-                return;
-            }
             if (target === els.environmentDescription) {
                 state.environmentForm.description = target.value;
                 return;
@@ -1346,6 +1459,23 @@
                     }
                     break;
                 }
+                case "add-scenario-to-module": {
+                    event.preventDefault();
+                    if (!id) break;
+                    openModuleAddScenarioModal(id);
+                    break;
+                }
+                case "toggle-module": {
+                    event.preventDefault();
+                    if (!id) break;
+                    toggleModule(id);
+                    break;
+                }
+                case "close-module-add-scenario-modal": {
+                    event.preventDefault();
+                    closeModuleAddScenarioModal();
+                    break;
+                }
 
                 case "edit-test-tool": {
                     event.preventDefault();
@@ -1752,6 +1882,12 @@
                 } else if (els.riskModal && !els.riskModal.hidden) {
                     closeRiskModal();
                 }
+            }
+
+            // wire module add scenario form submit (used by Test Modules rows)
+            const moduleAddScenarioForm = document.getElementById('module-add-scenario-form');
+            if (moduleAddScenarioForm) {
+                moduleAddScenarioForm.addEventListener('submit', handleModuleAddScenarioSubmit);
             }
         });
 
