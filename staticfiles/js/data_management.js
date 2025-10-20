@@ -329,6 +329,7 @@
             moduleScenarioSearch: {},
             moduleScenarioModalMode: 'create',
             moduleScenarioCurrentId: null,
+            moduleScenarioSubmitting: false,
         };
 
         const setStatus = (message, variant = "info") => {
@@ -617,6 +618,9 @@
 
         // Ensure a module row is expanded after a render (keeps UI stable after updates)
         const ensureModuleExpanded = (moduleId) => {
+            // defensive: if the modules list element is not present on the page,
+            // bail out early to avoid calling querySelector on null.
+            if (!els.testModulesList) return;
             // find the row/button in the current DOM and expand it
             const row = els.testModulesList.querySelector(`[data-module-id="${moduleId}"]`);
             if (!row) return;
@@ -720,6 +724,18 @@
 
         const handleModuleAddScenarioSubmit = async (event) => {
             console.debug('[data-management] handleModuleAddScenarioSubmit fired', { mode: state.moduleScenarioModalMode, currentId: state.moduleScenarioCurrentId });
+            // prevent double-submit
+            if (state.moduleScenarioSubmitting) {
+                try { console.info('[data-management] submit ignored: already submitting'); } catch (e) { }
+                event && event.preventDefault && event.preventDefault();
+                return;
+            }
+            state.moduleScenarioSubmitting = true;
+            // disable the Save button while submitting
+            const saveBtn = (() => {
+                try { return document.querySelector('[data-role="module-add-scenario-modal"] button[type="submit"], #module-add-scenario-form button[type="submit"]'); } catch (e) { return null; }
+            })();
+            if (saveBtn) saveBtn.disabled = true;
             event.preventDefault();
             const form = document.getElementById('module-add-scenario-form');
             if (!form) return;
@@ -745,55 +761,140 @@
                 tags: tagsInput && tagsInput.value ? tagsInput.value.split(/[,\n]/).map(s => s.trim()).filter(Boolean) : [],
                 plan: null,
             };
+            // Basic client-side validation: title required
+            const titleVal = payload.title ? String(payload.title).trim() : '';
+            if (!titleVal) {
+                setStatus('Scenario title is required.', 'error');
+                try { const t = document.getElementById('module-add-scenario-title'); if (t) { t.focus(); } } catch (e) { }
+                return;
+            }
             // try to infer plan from module if available
             const moduleObj = moduleId ? state.testModules.find((m) => Number(m.id) === Number(moduleId)) : null;
             if (moduleObj && moduleObj.plan_id) {
                 payload.plan = moduleObj.plan_id;
             }
+            // Prevent duplicate scenario titles within the same plan (client-side)
+            try {
+                if (moduleObj && Array.isArray(moduleObj.scenarios)) {
+                    const exists = moduleObj.scenarios.some((s) => {
+                        if (!s) return false;
+                        const sTitle = String(s.title || '').trim().toLowerCase();
+                        const newTitle = titleVal.toLowerCase();
+                        // If editing, allow the same title for the current scenario id
+                        if (state.moduleScenarioModalMode === 'edit' && state.moduleScenarioCurrentId && Number(state.moduleScenarioCurrentId) === Number(s.id)) {
+                            return false;
+                        }
+                        return sTitle === newTitle;
+                    });
+                    if (exists) {
+                        setStatus('A scenario with that title already exists in the selected plan. Choose a different title.', 'error');
+                        try { console.info('[data-management] duplicate scenario title prevented (client-side)'); } catch (e) { }
+                        const t = document.getElementById('module-add-scenario-title'); if (t) { t.focus(); t.select(); }
+                        return;
+                    }
+                }
+            } catch (e) { /* ignore */ }
             try {
                 setStatus('Saving scenario…', 'info');
+                try { console.info('[data-management] submitting scenario', { payloadPreview: { module: payload.module, title: payload.title, plan: payload.plan } }); } catch (e) { }
                 const urlBase = endpoints.scenarios || (apiEndpoints.scenarios ? ensureTrailingSlash(apiEndpoints.scenarios) : '/api/core/test-scenarios/');
                 if (state.moduleScenarioModalMode === 'edit' && state.moduleScenarioCurrentId) {
                     // update existing scenario
                     const editUrl = `${urlBase}${state.moduleScenarioCurrentId}/`;
                     const updated = await request(editUrl, { method: 'PATCH', body: JSON.stringify(payload) });
-                    // update in state
-                    if (moduleObj && Array.isArray(moduleObj.scenarios)) {
-                        const normalizedUpdated = normalizeScenario(updated);
-                        const idx = moduleObj.scenarios.findIndex((s) => Number(s.id) === Number(normalizedUpdated.id));
-                        if (idx > -1) {
-                            moduleObj.scenarios[idx] = normalizedUpdated;
-                        } else {
-                            moduleObj.scenarios.unshift(normalizedUpdated);
+                    // close modal immediately to ensure it hides even if later
+                    // UI updates throw. Then refresh authoritative state first
+                    // and ensure the module stays expanded so the collapsible
+                    // does not close unexpectedly.
+                    try { closeModuleScenarioModal(); } catch (e) { /* ignore */ }
+                    try {
+                        // Update the scenario in-place in local state so we don't
+                        // replace the whole modules list (which can be filtered on
+                        // the server and remove records unexpectedly).
+                        if (moduleObj && Array.isArray(moduleObj.scenarios)) {
+                            const normalizedUpdated = normalizeScenario(updated);
+                            const idx = moduleObj.scenarios.findIndex((s) => Number(s.id) === Number(normalizedUpdated.id));
+                            if (idx > -1) {
+                                moduleObj.scenarios[idx] = normalizedUpdated;
+                            } else {
+                                moduleObj.scenarios.unshift(normalizedUpdated);
+                            }
+                            // re-render to show the updated row
+                            renderTestModulesList();
+                            // ensure module remains expanded
+                            if (moduleId) ensureModuleExpanded(moduleId);
                         }
-                        renderTestModulesList();
-                        ensureModuleExpanded(moduleId);
-                    } else {
-                        await loadTestModules();
+                        try { document.dispatchEvent(new CustomEvent('test-modules-changed', { detail: { moduleId } })); } catch (e) { }
+                    } catch (e) {
+                        try { console.info('[data-management] error updating state after update', { error: e && (e.message || e) }); } catch (err) { }
                     }
-                    closeModuleScenarioModal();
                     setStatus('Scenario updated.', 'success');
                 } else {
                     const created = await request(urlBase, { method: 'POST', body: JSON.stringify(payload) });
                     // insert scenario into module's sublist in state and DOM
-                    if (moduleObj) {
+                    // close modal immediately to ensure it hides even if later
+                    // UI updates throw. Then update client state and refresh.
+                    try { closeModuleScenarioModal(); } catch (e) { /* ignore */ }
+                    try {
+                        // Insert created scenario into local module state when possible
                         const normalizedCreated = normalizeScenario(created);
-                        moduleObj.scenarios = moduleObj.scenarios || [];
-                        moduleObj.scenarios.unshift(normalizedCreated);
-                        // re-render modules list to reflect changes
-                        renderTestModulesList();
-                        // keep this module expanded so the new scenario is visible
-                        ensureModuleExpanded(moduleId);
-                    } else {
-                        // fallback: reload modules from server
-                        await loadTestModules();
+                        if (moduleObj) {
+                            moduleObj.scenarios = moduleObj.scenarios || [];
+                            moduleObj.scenarios.unshift(normalizedCreated);
+                            // re-render modules list and keep module expanded
+                            renderTestModulesList();
+                            if (moduleId) ensureModuleExpanded(moduleId);
+                            try { document.dispatchEvent(new CustomEvent('test-modules-changed', { detail: { moduleId } })); } catch (e) { }
+                        } else {
+                            // fallback: reload authoritative modules list
+                            try { await loadTestModules(); } catch (e) { /* ignore */ }
+                            try { if (moduleId) ensureModuleExpanded(moduleId); } catch (e) { }
+                            try { document.dispatchEvent(new CustomEvent('test-modules-changed', { detail: { moduleId } })); } catch (e) { }
+                        }
+                    } catch (e) {
+                        try { console.info('[data-management] error in create flow', { error: e && (e.message || e) }); } catch (err) { }
                     }
-                    closeModuleScenarioModal();
                     setStatus('Scenario saved.', 'success');
                 }
             } catch (error) {
                 const message = error instanceof Error ? error.message : 'Unable to save scenario.';
-                setStatus(message, 'error');
+                // If the API returned a unique constraint error like "The fields plan, title must make a unique set.",
+                // surface a clearer message and focus the title input.
+                if (message && (/unique set/i.test(message) || /fields\s+plan,\s*title/i.test(message))) {
+                    setStatus('A scenario with that title already exists in the selected plan. Choose a different title.', 'error');
+                    try { console.info('[data-management] server-side unique constraint detected'); } catch (e) { }
+                    const t = document.getElementById('module-add-scenario-title'); if (t) { t.focus(); t.select(); }
+                    // Refresh scenarios from the server for the current plan/module
+                    try {
+                        const scenariosBase = apiEndpoints.scenarios || '/api/core/test-scenarios/';
+                        // prefer fetching by plan if we have it, otherwise by module
+                        const fetchUrl = payload && payload.plan ? `${scenariosBase}?plan=${encodeURIComponent(payload.plan)}` : `${scenariosBase}?module=${encodeURIComponent(moduleId)}`;
+                        try { console.info('[data-management] fetching latest scenarios after unique constraint', { fetchUrl }); } catch (e) { }
+                        const latest = await request(fetchUrl, { method: 'GET' });
+                        const normalized = Array.isArray(latest) ? latest.map(normalizeScenario) : [];
+                        // update moduleObj.scenarios if possible
+                        try {
+                            const freshModuleObj = moduleId ? state.testModules.find((m) => Number(m.id) === Number(moduleId)) : null;
+                            if (freshModuleObj) {
+                                // if we fetched by plan, filter to this module
+                                freshModuleObj.scenarios = Array.isArray(normalized) ? normalized.filter((s) => Number(s.module) === Number(moduleId)) : [];
+                                renderTestModulesList();
+                                ensureModuleExpanded(moduleId);
+                            } else {
+                                // fallback: reload full modules list
+                                await loadTestModules();
+                            }
+                        } catch (e) { /* ignore */ }
+                    } catch (e) {
+                        try { console.info('[data-management] failed to refresh scenarios after unique constraint', { error: e && (e.message || e) }); } catch (err) { }
+                    }
+                } else {
+                    setStatus(message, 'error');
+                }
+            } finally {
+                // clear submitting state and re-enable button
+                state.moduleScenarioSubmitting = false;
+                try { if (saveBtn) saveBtn.disabled = false; } catch (e) { }
             }
         };
 
@@ -1635,6 +1736,23 @@
             if (!trigger) {
                 return;
             }
+            // Only handle clicks that originated inside this module root to avoid
+            // duplicate handling when multiple modules are mounted on the same page
+            // (for example, automation.js + data_management.js). If the trigger is
+            // not contained within our root, ignore it and allow other listeners to run.
+            if (!root.contains(trigger)) {
+                return;
+            }
+            // If the click originated inside the automation scenario table, let
+            // the automation.js handler deal with it to avoid duplicate prompts
+            // and duplicate DELETE requests. This supports pages where both
+            // modules are mounted (automation + data-management).
+            try {
+                const automationScenarioTable = document.querySelector('[data-role="scenario-table-body"]');
+                if (automationScenarioTable && automationScenarioTable.contains(trigger)) {
+                    return;
+                }
+            } catch (e) { /* ignore */ }
             const action = trigger.dataset.action;
             // some tables use data-id, test-tools uses data-tool-id and modules use data-module-id — support all
             const rawId = trigger.dataset.id || trigger.dataset.toolId || trigger.dataset.moduleId || trigger.getAttribute('data-tool-id') || trigger.getAttribute('data-module-id');
@@ -1788,6 +1906,7 @@
                         // keep parent module expanded if known
                         if (parentModuleId) ensureModuleExpanded(parentModuleId);
                         setStatus('Scenario deleted.', 'success');
+                        try { document.dispatchEvent(new CustomEvent('test-modules-changed', { detail: { moduleId: parentModuleId } })); } catch (e) { }
                     } catch (err) {
                         setStatus(err instanceof Error ? err.message : 'Unable to delete scenario.', 'error');
                     }

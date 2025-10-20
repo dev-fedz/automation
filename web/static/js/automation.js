@@ -166,6 +166,17 @@
             scenarioSearch: document.getElementById('scenario-search'),
             scenarioPlan: document.getElementById('scenario-plan'),
             caseForm: document.getElementById('automation-case-form'),
+            casePlanSelect: document.getElementById('case-plan-select'),
+            caseModuleSelect: document.getElementById('case-module-select'),
+            caseScenarioSelect: document.getElementById('case-scenario-select'),
+            // modal elements (selectors present in Test Cases template)
+            caseSelectionModal: document.querySelector('[data-role="case-selection-modal"]'),
+            caseSelectionModalDialog: document.querySelector('[data-role="case-selection-modal-dialog"]'),
+            modalCasePlan: document.querySelector('[data-role="modal-case-plan"]'),
+            modalCaseModule: document.querySelector('[data-role="modal-case-module"]'),
+            modalCaseScenario: document.querySelector('[data-role="modal-case-scenario"]'),
+            caseSelectionContinue: document.getElementById('case-selection-continue'),
+            caseSelectedScenarioHidden: document.getElementById('case-selected-scenario-id'),
             maintenanceForm: document.getElementById('automation-maintenance-form'),
             planModal: root.querySelector('[data-role="plan-modal"]'),
             planModalDialog: root.querySelector('[data-role="plan-modal-dialog"]'),
@@ -222,6 +233,286 @@
                 updates: document.getElementById('maintenance-updates'),
             },
         };
+
+        // Helper: populate cascading selects for creating a case
+        const populateCasePlanModuleScenarioSelects = () => {
+            try {
+                const planSelect = els.casePlanSelect;
+                const moduleSelect = els.caseModuleSelect;
+                const scenarioSelect = els.caseScenarioSelect;
+                // populate plans
+                if (planSelect) {
+                    planSelect.innerHTML = '';
+                    const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = '(select a plan)'; planSelect.appendChild(placeholder);
+                    state.plans.forEach((p) => {
+                        const opt = document.createElement('option'); opt.value = p.id; opt.textContent = p.name || `Plan ${p.id}`; planSelect.appendChild(opt);
+                    });
+                }
+                // clear modules/scenarios
+                if (moduleSelect) {
+                    moduleSelect.innerHTML = '';
+                    const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = '(select module)'; moduleSelect.appendChild(placeholder);
+                    moduleSelect.disabled = true;
+                }
+                if (scenarioSelect) {
+                    scenarioSelect.innerHTML = '';
+                    const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = '(select scenario)'; scenarioSelect.appendChild(placeholder);
+                    scenarioSelect.disabled = true;
+                }
+            } catch (e) { /* ignore */ }
+        };
+
+        // Populate modal selects (separate elements) using state.plans and initialModules
+        const populateModalCaseSelects = () => {
+            try {
+                const planSelect = els.modalCasePlan;
+                const moduleSelect = els.modalCaseModule;
+                const scenarioSelect = els.modalCaseScenario;
+                if (planSelect) {
+                    planSelect.innerHTML = '';
+                    const ph = document.createElement('option'); ph.value = ''; ph.textContent = '(select a plan)'; planSelect.appendChild(ph);
+                    state.plans.forEach((p) => {
+                        const opt = document.createElement('option'); opt.value = p.id; opt.textContent = p.name || `Plan ${p.id}`; planSelect.appendChild(opt);
+                    });
+                }
+                if (moduleSelect) {
+                    moduleSelect.innerHTML = '';
+                    const ph2 = document.createElement('option'); ph2.value = ''; ph2.textContent = '(select module)'; moduleSelect.appendChild(ph2);
+                    moduleSelect.disabled = true;
+                }
+                if (scenarioSelect) {
+                    scenarioSelect.innerHTML = '';
+                    const ph3 = document.createElement('option'); ph3.value = ''; ph3.textContent = '(select scenario)'; scenarioSelect.appendChild(ph3);
+                    scenarioSelect.disabled = true;
+                }
+            } catch (e) { /* ignore */ }
+        };
+
+        const openCaseSelectionModal = () => {
+            try {
+                if (!els.caseSelectionModal) return;
+                // populate options freshly
+                populateModalCaseSelects();
+                // show modal
+                els.caseSelectionModal.hidden = false;
+                document.body.classList.add('automation-modal-open');
+                // focus first control
+                window.requestAnimationFrame(() => {
+                    if (els.modalCasePlan) els.modalCasePlan.focus();
+                });
+            } catch (e) { /* ignore */ }
+        };
+
+        const closeCaseSelectionModal = () => {
+            try {
+                if (!els.caseSelectionModal) return;
+                els.caseSelectionModal.hidden = true;
+                document.body.classList.remove('automation-modal-open');
+            } catch (e) { /* ignore */ }
+        };
+
+        // update module options when plan changes
+        const updateCaseModulesForPlan = (planId) => {
+            try {
+                const moduleSelect = els.caseModuleSelect;
+                const scenarioSelect = els.caseScenarioSelect;
+                if (!moduleSelect) return;
+                moduleSelect.innerHTML = '';
+                const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = '(select module)'; moduleSelect.appendChild(placeholder);
+                // Gather modules referenced by scenarios for the plan, or fall back to initialModules
+                let modules = [];
+                const planObj = state.plans.find((p) => String(p.id) === String(planId));
+                if (planObj && Array.isArray(planObj.scenarios)) {
+                    const seen = new Set();
+                    planObj.scenarios.forEach((s) => {
+                        const mid = s && (s.module || s.module_id);
+                        if (mid && !seen.has(String(mid))) {
+                            seen.add(String(mid));
+                            const m = initialModules.find((im) => String(im.id) === String(mid));
+                            if (m) modules.push(m);
+                        }
+                    });
+                }
+                // If no modules found via scenarios, include all initialModules
+                if (!modules.length) modules = Array.isArray(initialModules) ? initialModules.slice() : [];
+                modules.forEach((m) => {
+                    const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.title || `Module ${m.id}`; moduleSelect.appendChild(opt);
+                });
+                moduleSelect.disabled = !modules.length;
+                // reset scenarios
+                if (scenarioSelect) {
+                    scenarioSelect.innerHTML = '';
+                    const ph = document.createElement('option'); ph.value = ''; ph.textContent = '(select scenario)'; scenarioSelect.appendChild(ph);
+                    scenarioSelect.disabled = true;
+                }
+            } catch (e) { /* ignore */ }
+        };
+
+        const updateCaseScenariosForModule = (planId, moduleId) => {
+            try {
+                const scenarioSelect = els.caseScenarioSelect;
+                if (!scenarioSelect) return;
+                scenarioSelect.innerHTML = '';
+                const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = '(select scenario)'; scenarioSelect.appendChild(placeholder);
+                let scenarios = [];
+                const planObj = state.plans.find((p) => String(p.id) === String(planId));
+                if (planObj && Array.isArray(planObj.scenarios)) {
+                    scenarios = planObj.scenarios.filter((s) => String(s.module || s.module_id || '') === String(moduleId));
+                }
+                scenarios.forEach((s) => {
+                    const opt = document.createElement('option'); opt.value = s.id; opt.textContent = s.title || `Scenario ${s.id}`; scenarioSelect.appendChild(opt);
+                });
+                scenarioSelect.disabled = !scenarios.length;
+            } catch (e) { /* ignore */ }
+        };
+
+        // Modal-specific change listeners
+        try {
+            if (els.modalCasePlan) {
+                els.modalCasePlan.addEventListener('change', (ev) => {
+                    const pid = els.modalCasePlan.value || null;
+                    // reuse logic: update modal module list based on plan
+                    try {
+                        const moduleSelect = els.modalCaseModule;
+                        if (!moduleSelect) return;
+                        moduleSelect.innerHTML = '';
+                        const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = '(select module)'; moduleSelect.appendChild(placeholder);
+                        let modules = [];
+                        const planObj = state.plans.find((p) => String(p.id) === String(pid));
+                        if (planObj && Array.isArray(planObj.scenarios)) {
+                            const seen = new Set();
+                            planObj.scenarios.forEach((s) => {
+                                const mid = s && (s.module || s.module_id);
+                                if (mid && !seen.has(String(mid))) {
+                                    seen.add(String(mid));
+                                    const m = initialModules.find((im) => String(im.id) === String(mid));
+                                    if (m) modules.push(m);
+                                }
+                            });
+                        }
+                        if (!modules.length) modules = Array.isArray(initialModules) ? initialModules.slice() : [];
+                        modules.forEach((m) => {
+                            const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.title || `Module ${m.id}`; moduleSelect.appendChild(opt);
+                        });
+                        moduleSelect.disabled = !modules.length;
+                        // reset scenario select
+                        if (els.modalCaseScenario) {
+                            els.modalCaseScenario.innerHTML = '';
+                            const ph = document.createElement('option'); ph.value = ''; ph.textContent = '(select scenario)'; els.modalCaseScenario.appendChild(ph);
+                            els.modalCaseScenario.disabled = true;
+                        }
+                    } catch (e) { /* ignore */ }
+                });
+            }
+            if (els.modalCaseModule) {
+                els.modalCaseModule.addEventListener('change', (ev) => {
+                    const pid = els.modalCasePlan && els.modalCasePlan.value ? els.modalCasePlan.value : null;
+                    const mid = els.modalCaseModule.value || null;
+                    if (!mid) {
+                        if (els.modalCaseScenario) els.modalCaseScenario.disabled = true;
+                        return;
+                    }
+                    try {
+                        const scenarios = [];
+                        const planObj = state.plans.find((p) => String(p.id) === String(pid));
+                        if (planObj && Array.isArray(planObj.scenarios)) {
+                            planObj.scenarios.forEach((s) => {
+                                if (String(s.module || s.module_id || '') === String(mid)) scenarios.push(s);
+                            });
+                        }
+                        if (els.modalCaseScenario) {
+                            els.modalCaseScenario.innerHTML = '';
+                            const ph = document.createElement('option'); ph.value = ''; ph.textContent = '(select scenario)'; els.modalCaseScenario.appendChild(ph);
+                            scenarios.forEach((s) => {
+                                const opt = document.createElement('option'); opt.value = s.id; opt.textContent = s.title || `Scenario ${s.id}`; els.modalCaseScenario.appendChild(opt);
+                            });
+                            els.modalCaseScenario.disabled = !scenarios.length;
+                        }
+                    } catch (e) { /* ignore */ }
+                });
+            }
+            if (els.caseSelectionContinue) {
+                els.caseSelectionContinue.addEventListener('click', (ev) => {
+                    try {
+                        const selectedScenario = els.modalCaseScenario && els.modalCaseScenario.value ? els.modalCaseScenario.value : null;
+                        if (!selectedScenario) {
+                            setStatus('Please select a scenario before continuing.', 'error');
+                            return;
+                        }
+                        // set hidden input used by form submit
+                        if (els.caseSelectedScenarioHidden) els.caseSelectedScenarioHidden.value = selectedScenario;
+                        // also set the visible caseScenarioSelect if present (for compatibility)
+                        if (els.caseScenarioSelect) {
+                            // ensure option exists
+                            const exists = Array.from(els.caseScenarioSelect.options).some((o) => String(o.value) === String(selectedScenario));
+                            if (!exists) {
+                                // try to find label from state
+                                let label = `Scenario ${selectedScenario}`;
+                                for (const p of state.plans) {
+                                    if (Array.isArray(p.scenarios)) {
+                                        const s = p.scenarios.find((sc) => String(sc.id) === String(selectedScenario));
+                                        if (s) { label = s.title || label; break; }
+                                    }
+                                }
+                                const opt = document.createElement('option'); opt.value = selectedScenario; opt.textContent = label; els.caseScenarioSelect.appendChild(opt);
+                            }
+                            els.caseScenarioSelect.value = selectedScenario;
+                            els.caseScenarioSelect.disabled = false;
+                        }
+                        // enable form fieldset
+                        if (els.caseForm) {
+                            const fieldset = els.caseForm.querySelector('fieldset'); if (fieldset) fieldset.disabled = false;
+                        }
+                        // show the test cases panel container if hidden
+                        try {
+                            const panel = document.getElementById('test-cases-panel-container');
+                            if (panel) panel.style.display = '';
+                        } catch (ie) { /* ignore */ }
+                        // close modal
+                        closeCaseSelectionModal();
+                        // focus title input
+                        if (inputs.case.title) inputs.case.title.focus();
+                        setStatus('Scenario selected. You may now fill and save the test case.', 'success');
+                    } catch (e) { /* ignore */ }
+                });
+            }
+            // Prevent closing the selection modal by clicking outside or on 'close' actions.
+            // The modal is intentionally modal — user must choose a scenario and click Continue.
+            root.addEventListener('click', (ev) => {
+                if (!els.caseSelectionModal || els.caseSelectionModal.hidden) return;
+                const close = ev.target.closest('[data-action="close-case-selection"]');
+                if (close) {
+                    // ignore close clicks while our modal is open
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                }
+                // prevent clicks on the overlay from closing the modal
+                const insideDialog = ev.target.closest('[data-role="case-selection-modal-dialog"]');
+                if (!insideDialog) {
+                    // absorb the click
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                }
+            });
+
+            // Prevent Escape key from closing the modal when it's open
+            document.addEventListener('keydown', (ev) => {
+                if (!els.caseSelectionModal || els.caseSelectionModal.hidden) return;
+                if (ev.key === 'Escape' || ev.key === 'Esc') {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    setStatus('Please select a scenario and click Continue to proceed.', 'info');
+                }
+            });
+            // wire open modal button if present on page
+            const openModalBtn = document.getElementById('open-case-selection-modal');
+            if (openModalBtn) {
+                openModalBtn.addEventListener('click', (ev) => {
+                    ev.preventDefault();
+                    openCaseSelectionModal();
+                });
+            }
+        } catch (e) { /* ignore */ }
 
         // populate plan and module selects for scenarios panel
         const populateScenarioPlanAndModule = () => {
@@ -598,6 +889,15 @@
         // call once on init
         populateModuleSelects();
         populateScenarioPlanAndModule();
+
+        // Hide Test Cases panel on init if no scenario is selected
+        try {
+            const panel = document.getElementById('test-cases-panel-container');
+            if (panel) {
+                const selected = getSelectedScenario();
+                if (!selected) panel.style.display = 'none';
+            }
+        } catch (e) { /* ignore */ }
 
         const focusPlanRow = (planId) => {
             if (!els.planList || typeof planId === 'undefined' || planId === null) {
@@ -2090,7 +2390,24 @@
             if (!els.caseForm) {
                 return;
             }
-            const scenario = getSelectedScenario();
+            // Allow using a selected scenario from the cascading selects if present,
+            // otherwise fallback to the current selected scenario in the main UI.
+            let scenario = null;
+            try {
+                const sel = els.caseScenarioSelect && els.caseScenarioSelect.value ? els.caseScenarioSelect.value : null;
+                if (sel) {
+                    // find scenario in state.plans
+                    for (const p of state.plans) {
+                        if (Array.isArray(p.scenarios)) {
+                            const found = p.scenarios.find((s) => String(s.id) === String(sel));
+                            if (found) { scenario = found; break; }
+                        }
+                    }
+                }
+            } catch (e) { /* ignore */ }
+            if (!scenario) {
+                scenario = getSelectedScenario();
+            }
             if (!scenario) {
                 setStatus('Select a scenario to attach the test case.', 'error');
                 return;
@@ -2190,6 +2507,41 @@
         if (els.maintenanceForm) {
             els.maintenanceForm.addEventListener('submit', handleMaintenanceSubmit);
         }
+        // Wire cascading selects for case creation: Plan -> Module -> Scenario
+        try {
+            if (els.casePlanSelect) {
+                els.casePlanSelect.addEventListener('change', (ev) => {
+                    const val = els.casePlanSelect.value || null;
+                    if (!val) {
+                        if (els.caseModuleSelect) els.caseModuleSelect.disabled = true;
+                        if (els.caseScenarioSelect) els.caseScenarioSelect.disabled = true;
+                        return;
+                    }
+                    updateCaseModulesForPlan(val);
+                });
+            }
+            if (els.caseModuleSelect) {
+                els.caseModuleSelect.addEventListener('change', (ev) => {
+                    const planVal = els.casePlanSelect && els.casePlanSelect.value ? els.casePlanSelect.value : null;
+                    const mod = els.caseModuleSelect.value || null;
+                    if (!mod) {
+                        if (els.caseScenarioSelect) els.caseScenarioSelect.disabled = true;
+                        return;
+                    }
+                    updateCaseScenariosForModule(planVal, mod);
+                });
+            }
+            if (els.caseScenarioSelect) {
+                els.caseScenarioSelect.addEventListener('change', (ev) => {
+                    // Enable or disable the case form depending on selection
+                    const chosen = els.caseScenarioSelect.value;
+                    const fieldset = els.caseForm ? els.caseForm.querySelector('fieldset') : null;
+                    if (fieldset) fieldset.disabled = !chosen;
+                });
+            }
+            // initialize selects
+            populateCasePlanModuleScenarioSelects();
+        } catch (e) { /* ignore */ }
         if (els.planModalTrigger) {
             els.planModalTrigger.addEventListener('click', (event) => {
                 event.preventDefault();

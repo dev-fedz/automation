@@ -805,6 +805,69 @@ body.automation-modal-open {
     overflow: hidden;
 }
 
+/* Case selection modal: remove backdrop, border and shadow */
+[data-role="case-selection-modal"] {
+    /* keep positioning but no backdrop color */
+    background: transparent;
+}
+
+/* Gray overlay when modal is visible */
+[data-role="case-selection-modal"]:not([hidden]) {
+    position: fixed;
+}
+[data-role="case-selection-modal"]:not([hidden])::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.16); /* subtle gray overlay */
+    z-index: 1998;
+}
+
+[data-role="case-selection-modal"] .modal-dialog[data-role="case-selection-modal-dialog"],
+[data-role="case-selection-modal"] [data-role="case-selection-modal-dialog"] {
+    position: relative;
+    z-index: 1999; /* above the overlay */
+}
+
+[data-role="case-selection-modal"] .automation-modal__backdrop,
+[data-role="case-selection-modal"] .modal-backdrop {
+    display: none !important;
+}
+
+[data-role="case-selection-modal-dialog"],
+[data-role="case-selection-modal-dialog"].modal-dialog {
+    /* white surface with a subtle shadow, no dark border line */
+    background: #ffffff !important;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.08) !important;
+    border: none !important;
+    border-radius: 10px !important;
+    padding: 0.5rem !important;
+}
+
+/* inner container: keep transparent so children control spacing and background */
+[data-role="case-selection-modal-dialog"] > * {
+    background: transparent;
+    border-radius: 0;
+    padding: 0.25rem 0.5rem;
+}
+
+/* Remove default dialog border/outline that some browsers render as a black frame */
+[data-role="case-selection-modal"] {
+    outline: none !important;
+}
+[data-role="case-selection-modal"]::-webkit-backdrop {
+    background: transparent !important;
+}
+[data-role="case-selection-modal"]::backdrop {
+    background: transparent !important;
+}
+[data-role="case-selection-modal"] {
+    -webkit-appearance: none;
+    appearance: none;
+    border: none !important;
+    box-shadow: none !important;
+}
+
 [data-role="plan-list"],
 [data-role="scenario-list"],
 [data-role="case-list"],

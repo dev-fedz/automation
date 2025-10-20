@@ -13,6 +13,7 @@
 
     <div class="automation-grid">
 
+        <div id="test-cases-panel-container" {% if not initial_selected_scenario %}style="display:none;"{% endif %}>
         <section class="automation-panel" data-panel="cases" aria-labelledby="headline-cases">
             <div class="panel-header">
                 <h2 id="headline-cases">Test Cases</h2>
@@ -123,6 +124,11 @@ payload.plan=premium"></textarea>
                             <label for="case-request">Related API Request ID (optional)</label>
                             <input type="number" id="case-request" name="request" min="1" step="1" placeholder="123">
                         </div>
+                        <!-- Button to open selection modal (Plan -> Module -> Scenario) -->
+                        <div class="form-row">
+                            <button type="button" id="open-case-selection-modal" class="btn-secondary">Select Plan · Module · Scenario</button>
+                            <small class="form-hint">Choose Plan → Module → Scenario before saving. You can also select a scenario from the main Scenarios table.</small>
+                        </div>
                     </fieldset>
                     <div class="form-actions">
                         <button type="submit" class="btn-primary">Save Test Case</button>
@@ -132,6 +138,43 @@ payload.plan=premium"></textarea>
             </details>
         </section>
     </div>
+
+    <!-- Modal: Select Plan -> Module -> Scenario for creating a case -->
+    <dialog class="automation-modal" data-role="case-selection-modal" aria-hidden="true">
+        <div class="modal-dialog" data-role="case-selection-modal-dialog">
+            <header>
+                <h3>Select Plan · Module · Scenario</h3>
+            </header>
+            <div class="modal-body">
+                <div class="form-row">
+                    <label for="modal-case-plan">Test Plan</label>
+                    <select id="modal-case-plan" data-role="modal-case-plan">
+                        <option value="">(select a plan)</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label for="modal-case-module">Test Module</label>
+                    <select id="modal-case-module" data-role="modal-case-module" disabled>
+                        <option value="">(select module)</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label for="modal-case-scenario">Test Scenario</label>
+                    <select id="modal-case-scenario" data-role="modal-case-scenario" disabled>
+                        <option value="">(select scenario)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-primary" id="case-selection-continue">Continue</button>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- Hidden field used to set selected scenario id when modal continues -->
+    <input type="hidden" id="case-selected-scenario-id" name="selected_scenario_id" value="">
+
+    </div> {# end #test-cases-panel-container #}
 
     {{ initial_plans|json_script:"automation-initial-plans" }}
     {{ api_endpoints|json_script:"automation-api-endpoints" }}
