@@ -815,15 +815,13 @@ body.automation-modal-open {
 [data-role="case-selection-modal"]:not([hidden]) {
     position: fixed;
 }
-[data-role="case-selection-modal"]:not([hidden])::before {
-    content: '';
+[data-role="case-selection-modal"] [data-role="case-selection-overlay"] {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.16); /* subtle gray overlay */
+    background: rgba(0,0,0,0.16);
     z-index: 1998;
 }
 
-[data-role="case-selection-modal"] .modal-dialog[data-role="case-selection-modal-dialog"],
 [data-role="case-selection-modal"] [data-role="case-selection-modal-dialog"] {
     position: relative;
     z-index: 1999; /* above the overlay */

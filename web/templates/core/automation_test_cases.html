@@ -140,10 +140,13 @@ payload.plan=premium"></textarea>
     </div>
 
     <!-- Modal: Select Plan -> Module -> Scenario for creating a case -->
-    <dialog class="automation-modal" data-role="case-selection-modal" aria-hidden="true">
-        <div class="modal-dialog" data-role="case-selection-modal-dialog">
+    <!-- Note: aria-hidden is controlled by JS; the dialog container exposes role/aria-modal and is focusable. -->
+    <dialog class="automation-modal" data-role="case-selection-modal">
+        <!-- explicit overlay element (toggled by JS) -->
+        <div data-role="case-selection-overlay" hidden></div>
+        <div class="modal-dialog" data-role="case-selection-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="case-selection-title" tabindex="-1">
             <header>
-                <h3>Select Plan · Module · Scenario</h3>
+                <h3 id="case-selection-title">Select Plan · Module · Scenario</h3>
             </header>
             <div class="modal-body">
                 <div class="form-row">
