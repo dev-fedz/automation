@@ -2708,6 +2708,7 @@
                         const priorityInput = document.getElementById('module-add-case-priority');
                         const ownerInput = document.getElementById('module-add-case-owner');
                         const requestInput = document.getElementById('module-add-case-request');
+                        const testcaseIdInput = document.getElementById('module-add-case-testcase-id');
                         const sid = scenarioInput && scenarioInput.value ? Number(scenarioInput.value) : null;
                         if (!sid) {
                             setStatus('Scenario id missing for test case.', 'error');
@@ -2733,8 +2734,12 @@
                         }
                         setStatus('Saving test case…', 'info');
                         const base = apiEndpoints.cases || '/api/core/test-cases/';
-                        const resp = await fetch(base, {
-                            method: 'POST',
+                        // If a testcase id is present, perform an update (PUT) instead of create (POST)
+                        const isEdit = testcaseIdInput && testcaseIdInput.value;
+                        const method = isEdit ? 'PUT' : 'POST';
+                        const url = isEdit ? `${base}${encodeURIComponent(testcaseIdInput.value)}/` : base;
+                        const resp = await fetch(url, {
+                            method,
                             credentials: 'same-origin',
                             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
                             body: JSON.stringify(payload),
@@ -2743,15 +2748,17 @@
                             const body = await resp.text().catch(() => null);
                             throw new Error(`Failed to save test case: ${resp.status}${body ? ' - ' + body : ''}`);
                         }
-                        const created = await resp.json().catch(() => null);
+                        const result = await resp.json().catch(() => null);
                         // close modal and reset
                         const modal = document.querySelector('[data-role="module-add-case-modal"]');
                         if (modal) {
                             modal.hidden = true; body.classList.remove('automation-modal-open');
                         }
+                        // clear edit marker if present
+                        if (testcaseIdInput) testcaseIdInput.value = '';
                         moduleAddCaseForm.reset();
                         setStatus('Test case saved.', 'success');
-                        // Refresh plans/scenarios so the new case appears in the table
+                        // Refresh plans/scenarios so the case updates appear in the table
                         try {
                             await refreshPlans({ silent: true });
                         } catch (e) {
@@ -2759,6 +2766,85 @@
                         }
                     } catch (err) {
                         setStatus(err instanceof Error ? err.message : 'Unable to save test case.', 'error');
+                    }
+                });
+            }
+        } catch (e) { /* ignore */ }
+
+        // Delegated event handling for case table action buttons (view/edit/delete)
+        try {
+            const caseTable = () => document.querySelector('[data-role="case-table-body"]');
+            if (caseTable) {
+                document.addEventListener('click', async (ev) => {
+                    const target = ev.target;
+                    if (!target) return;
+                    const trigger = target.closest && target.closest('[data-action]');
+                    if (!trigger) return;
+                    const tableEl = caseTable();
+                    if (!tableEl || !tableEl.contains(trigger)) return; // ignore clicks outside our table
+                    const action = trigger.dataset && trigger.dataset.action ? trigger.dataset.action : null;
+                    if (!action) return;
+                    if (!['view-case', 'edit-case', 'delete-case'].includes(action)) return;
+                    const cid = trigger.dataset && trigger.dataset.caseId ? trigger.dataset.caseId : null;
+                    if (!cid) return;
+                    ev.preventDefault();
+                    if (action === 'delete-case') {
+                        if (!confirm('Are you sure you want to delete this test case?')) return;
+                        try {
+                            const delUrl = `${apiEndpoints.cases || '/api/core/test-cases/'}${cid}/`;
+                            const resp = await fetch(delUrl, { method: 'DELETE', credentials: 'same-origin', headers: { 'X-CSRFToken': getCsrfToken() } });
+                            if (resp && (resp.status === 204 || resp.ok)) {
+                                setStatus('Test case deleted.', 'success');
+                                await refreshPlans({ silent: true });
+                            } else {
+                                setStatus('Failed to delete test case.', 'error');
+                            }
+                        } catch (err) {
+                            setStatus('Failed to delete test case.', 'error');
+                        }
+                        return;
+                    }
+                    // For view/edit, fetch case detail and populate modal
+                    try {
+                        const url = `${apiEndpoints.cases || '/api/core/test-cases/'}${cid}/`;
+                        const resp = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                        if (!resp.ok) throw new Error('Failed to load test case.');
+                        const data = await resp.json();
+                        const caseModal = document.querySelector('[data-role="module-add-case-modal"]');
+                        const form = document.getElementById('module-add-case-form');
+                        if (!caseModal || !form) {
+                            setStatus('Unable to open test case editor.', 'error');
+                            return;
+                        }
+                        // ensure hidden testcase id exists on form
+                        let hid = document.getElementById('module-add-case-testcase-id');
+                        if (!hid) {
+                            hid = document.createElement('input'); hid.type = 'hidden'; hid.id = 'module-add-case-testcase-id'; hid.name = 'testcase_id'; form.appendChild(hid);
+                        }
+                        hid.value = data && (data.id || data.pk) ? (data.id || data.pk) : '';
+                        // populate fields
+                        const scenarioInput = document.getElementById('module-add-case-scenario-id'); if (scenarioInput) scenarioInput.value = data && (data.scenario || data.scenario_id) ? (data.scenario || data.scenario_id) : '';
+                        const titleInput = document.getElementById('module-add-case-title'); if (titleInput) titleInput.value = data && data.title ? data.title : '';
+                        const descInput = document.getElementById('module-add-case-description'); if (descInput) descInput.value = data && data.description ? data.description : '';
+                        const stepsInput = document.getElementById('module-add-case-steps'); if (stepsInput) stepsInput.value = Array.isArray(data && data.steps ? data.steps : []) ? (data.steps || []).join('\n') : (data.steps || '');
+                        const expectedInput = document.getElementById('module-add-case-expected'); if (expectedInput) {
+                            if (Array.isArray(data && data.expected_results ? data.expected_results : [])) {
+                                expectedInput.value = (data.expected_results || []).map((r) => (r && (r.note || r) ? (r.note || r) : '')).filter(Boolean).join('\n');
+                            } else {
+                                expectedInput.value = data.expected_results || '';
+                            }
+                        }
+                        const priorityInput = document.getElementById('module-add-case-priority'); if (priorityInput) priorityInput.value = data && data.priority ? data.priority : '';
+                        const ownerInput = document.getElementById('module-add-case-owner'); if (ownerInput) ownerInput.value = data && data.owner ? data.owner : '';
+                        const requestInput = document.getElementById('module-add-case-request'); if (requestInput) requestInput.value = data && (data.related_api_request || data.related_api_request_id) ? (data.related_api_request || data.related_api_request_id) : '';
+                        // show modal
+                        caseModal.hidden = false; body.classList.add('automation-modal-open');
+                        // set read-only if view
+                        const isView = action === 'view-case';
+                        [titleInput, descInput, stepsInput, expectedInput, priorityInput, ownerInput, requestInput].forEach((n) => { if (n) { n.readOnly = isView; n.disabled = isView; } });
+                        const submit = form.querySelector('button[type="submit"]'); if (submit) submit.hidden = isView;
+                    } catch (err) {
+                        setStatus(err instanceof Error ? err.message : 'Unable to open test case.', 'error');
                     }
                 });
             }
