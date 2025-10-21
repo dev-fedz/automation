@@ -355,7 +355,25 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         except Exception:
             # ignore failures to inspect instance; proceed to allow serializer to handle
             pass
-        return super().update(request, *args, **kwargs)
+        response = super().update(request, *args, **kwargs)
+        # Post-update: ensure owner is set when an authenticated user made
+        # the update but the instance has no owner (client may have sent
+        # an empty owner value). We do this after the serializer has saved
+        # to avoid interfering with normal update validation and behavior.
+        try:
+            inst = self.get_object()
+            if (
+                inst is not None
+                and getattr(request, 'user', None)
+                and request.user.is_authenticated
+                and getattr(inst, 'owner', None) is None
+            ):
+                inst.owner = request.user
+                inst.save(update_fields=['owner'])
+        except Exception:
+            # Don't let fallback failures break the response
+            pass
+        return response
 
     def partial_update(self, request, *args, **kwargs):
         try:
@@ -375,7 +393,21 @@ class TestCaseViewSet(viewsets.ModelViewSet):
             raise
         except Exception:
             pass
-        return super().partial_update(request, *args, **kwargs)
+        response = super().partial_update(request, *args, **kwargs)
+        # same post-update owner assignment for partial updates
+        try:
+            inst = self.get_object()
+            if (
+                inst is not None
+                and getattr(request, 'user', None)
+                and request.user.is_authenticated
+                and getattr(inst, 'owner', None) is None
+            ):
+                inst.owner = request.user
+                inst.save(update_fields=['owner'])
+        except Exception:
+            pass
+        return response
 
     def get_queryset(self):
         queryset = selectors.test_case_list()
@@ -446,6 +478,23 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         except TypeError:
             # Fallback if serializer.save doesn't accept owner (older behavior)
             self.perform_create(serializer)
+        # Ensure owner is set on the saved instance when the client did not
+        # provide an owner id (or provided an empty value). Some clients may
+        # send an empty string for 'owner' which should be treated as absent.
+        try:
+            inst = getattr(serializer, 'instance', None)
+            if (
+                inst is not None
+                and getattr(request, 'user', None)
+                and request.user.is_authenticated
+                and getattr(inst, 'owner', None) is None
+            ):
+                inst.owner = request.user
+                # save only owner field to avoid touching other fields
+                inst.save(update_fields=['owner'])
+        except Exception:
+            # don't let a logging/save failure break the response
+            pass
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
