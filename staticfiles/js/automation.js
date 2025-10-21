@@ -224,7 +224,6 @@
                 dynamic: document.getElementById('case-dynamic'),
                 priority: document.getElementById('case-priority'),
                 owner: document.getElementById('case-owner'),
-                request: document.getElementById('case-request'),
             },
             maintenance: {
                 version: document.getElementById('maintenance-version'),
@@ -323,38 +322,6 @@
                 // existing change handlers (declared elsewhere) will handle module/scenario updates
             }
         } catch (e) { /* ignore */ }
-
-        // Delegated handler: ensure any input with class 'automation-search' triggers
-        // the case search logic even if the input was injected after script ran.
-        document.addEventListener('input', debounce(async (ev) => {
-            try {
-                const el = ev.target;
-                if (!el || !el.classList || !el.classList.contains('automation-search')) return;
-                // Only handle #case-search for now (other automation-search uses can be added)
-                if (String(el.id || '') !== 'case-search') return;
-                const q = (el.value || '').trim();
-                state._caseSearch = q.toLowerCase();
-                if (!q) {
-                    state._caseSearchResults = null;
-                    try { renderCaseList(); } catch (e) { /* ignore */ }
-                    return;
-                }
-                try {
-                    setStatus('Searching cases...', 'info');
-                    const base = apiEndpoints.cases || '/api/core/test-cases/';
-                    const url = (function () { try { const params = new URLSearchParams(); params.append('search', String(q)); if (state && state.selectedScenarioId) params.append('scenario', String(state.selectedScenarioId)); const qstr = params.toString(); return qstr ? `${base}?${qstr}` : base; } catch (err) { return `${base}?search=${encodeURIComponent(q)}`; } })();
-                    const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-                    if (!resp.ok) throw new Error('Search failed');
-                    const data = await resp.json();
-                    state._caseSearchResults = Array.isArray(data) ? data : [];
-                    setStatus('', 'info');
-                    try { renderCaseList(); } catch (e) { /* ignore */ }
-                } catch (err) {
-                    setStatus('Case search failed.', 'error');
-                    try { console.error('[automation] delegated case search error', err); } catch (e) { /* ignore */ }
-                }
-            } catch (e) { /* ignore */ }
-        }, 300));
 
         // Accessibility helpers: manage inert (or fallback) on background when modal is open.
         const _inertTargets = [];
@@ -944,7 +911,19 @@
                             try {
                                 setStatus('Searching cases...', 'info');
                                 const base = apiEndpoints.cases || '/api/core/test-cases/';
-                                const url = (function () { try { const params = new URLSearchParams(); params.append('search', String(q)); if (state && state.selectedScenarioId) params.append('scenario', String(state.selectedScenarioId)); const qstr = params.toString(); return qstr ? `${base}?${qstr}` : base; } catch (err) { return `${base}?search=${encodeURIComponent(q)}`; } })();
+                                // include scenario filter when available
+                                try {
+                                    const params = new URLSearchParams();
+                                    params.append('search', String(q));
+                                    if (state && state.selectedScenarioId) params.append('scenario', String(state.selectedScenarioId));
+                                    const query = params.toString();
+                                    const computed = query ? `${base}?${query}` : base;
+                                    // store computed URL on window as a fallback for other scopes
+                                    window.__automation_case_search_url = computed;
+                                } catch (e) {
+                                    window.__automation_case_search_url = `${base}?search=${encodeURIComponent(q)}`;
+                                }
+                                const url = window.__automation_case_search_url;
                                 const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
                                 if (!resp.ok) throw new Error('Search failed');
                                 const data = await resp.json();
@@ -1469,7 +1448,18 @@
                     try {
                         setStatus('Searching cases...', 'info');
                         const base = apiEndpoints.cases || '/api/core/test-cases/';
-                        const url = (function () { try { const params = new URLSearchParams(); params.append('search', String(q)); if (state && state.selectedScenarioId) params.append('scenario', String(state.selectedScenarioId)); const qstr = params.toString(); return qstr ? `${base}?${qstr}` : base; } catch (err) { return `${base}?search=${encodeURIComponent(q)}`; } })();
+                        // include scenario filter when available
+                        try {
+                            const params = new URLSearchParams();
+                            params.append('search', String(q));
+                            if (state && state.selectedScenarioId) params.append('scenario', String(state.selectedScenarioId));
+                            const query = params.toString();
+                            const computed = query ? `${base}?${query}` : base;
+                            window.__automation_case_search_url = computed;
+                        } catch (e) {
+                            window.__automation_case_search_url = `${base}?search=${encodeURIComponent(q)}`;
+                        }
+                        const url = window.__automation_case_search_url || (function () { try { const p = new URLSearchParams(); p.append('search', String(q)); if (state && state.selectedScenarioId) p.append('scenario', String(state.selectedScenarioId)); const qstr = p.toString(); return qstr ? `${base}?${qstr}` : base; } catch (err) { return `${base}?search=${encodeURIComponent(q)}`; } })();
                         const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
                         if (!resp.ok) throw new Error('Search failed');
                         const data = await resp.json();
@@ -1483,6 +1473,39 @@
                 }, 300));
             }
         } catch (e) { /* ignore */ }
+
+        // Delegated handler: ensure any input with class 'automation-search' triggers
+        // the case search logic even if the input was injected after script ran.
+        document.addEventListener('input', debounce(async (ev) => {
+            try {
+                const el = ev.target;
+                if (!el || !el.classList || !el.classList.contains('automation-search')) return;
+                // Only handle #case-search for now (other automation-search uses can be added)
+                if (String(el.id || '') !== 'case-search') return;
+                const q = (el.value || '').trim();
+                state._caseSearch = q.toLowerCase();
+                if (!q) {
+                    state._caseSearchResults = null;
+                    try { renderCaseList(); } catch (e) { /* ignore */ }
+                    return;
+                }
+                try {
+                    setStatus('Searching cases...', 'info');
+                    const base = apiEndpoints.cases || '/api/core/test-cases/';
+                    // include scenario filter when available
+                    const url = (function () { try { const params = new URLSearchParams(); params.append('search', String(q)); if (state && state.selectedScenarioId) params.append('scenario', String(state.selectedScenarioId)); const qstr = params.toString(); return qstr ? `${base}?${qstr}` : base; } catch (err) { return `${base}?search=${encodeURIComponent(q)}`; } })();
+                    const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                    if (!resp.ok) throw new Error('Search failed');
+                    const data = await resp.json();
+                    state._caseSearchResults = Array.isArray(data) ? data : [];
+                    setStatus('', 'info');
+                    try { renderCaseList(); } catch (e) { /* ignore */ }
+                } catch (err) {
+                    setStatus('Case search failed.', 'error');
+                    try { console.error('[automation] delegated case search error', err); } catch (e) { /* ignore */ }
+                }
+            } catch (e) { /* ignore */ }
+        }, 300));
 
         // New Scenario button should use the same modal flow as Add Scenario in Data Management
         const openNewScenarioButton = document.getElementById('open-new-scenario');
@@ -1809,6 +1832,7 @@
                                             try {
                                                 setStatus('Searching cases...', 'info');
                                                 const base = apiEndpoints.cases || '/api/core/test-cases/';
+                                                // include scenario filter when available
                                                 const url = (function () { try { const params = new URLSearchParams(); params.append('search', String(q)); if (state && state.selectedScenarioId) params.append('scenario', String(state.selectedScenarioId)); const qstr = params.toString(); return qstr ? `${base}?${qstr}` : base; } catch (err) { return `${base}?search=${encodeURIComponent(q)}`; } })();
                                                 const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
                                                 if (!resp.ok) throw new Error('Search failed');
@@ -2555,7 +2579,6 @@
                 const steps = Array.isArray(testCase.steps) ? testCase.steps : [];
                 const expected = Array.isArray(testCase.expected_results) ? testCase.expected_results : [];
                 const dynamic = testCase.dynamic_variables || {};
-                const relatedRequest = testCase.related_api_request ? `Linked request: #${testCase.related_api_request}` : '';
                 card.innerHTML = `
                     <header>
                         <h3>${escapeHtml(testCase.title || 'Untitled case')}</h3>
@@ -2565,7 +2588,6 @@
                     ${steps.length ? `<div><strong>Steps</strong><ol class="case-detail-list">${steps.map((step, index) => `<li>Step ${index + 1}: ${escapeHtml(formatStructuredValue(step))}</li>`).join('')}</ol></div>` : ''}
                     ${expected.length ? `<div><strong>Expected</strong><ul class="case-detail-list">${expected.map((item) => `<li>${escapeHtml(formatStructuredValue(item))}</li>`).join('')}</ul></div>` : ''}
                     ${Object.keys(dynamic).length ? `<div><strong>Dynamic variables</strong><pre>${escapeHtml(JSON.stringify(dynamic, null, 2))}</pre></div>` : ''}
-                    ${relatedRequest ? `<div><small>${escapeHtml(relatedRequest)}</small></div>` : ''}
                 `;
                 wrapper.appendChild(card);
             });
@@ -2850,8 +2872,7 @@
                         const expectedInput = document.getElementById('module-add-case-expected');
                         const priorityInput = document.getElementById('module-add-case-priority');
                         const ownerInput = document.getElementById('module-add-case-owner');
-                        const collectionSelect = document.getElementById('module-add-case-collection');
-                        const requestInput = document.getElementById('module-add-case-request');
+                        // collection/request UI removed from modal
                         const testcaseIdInput = document.getElementById('module-add-case-testcase-id');
                         const sid = scenarioInput && scenarioInput.value ? Number(scenarioInput.value) : null;
                         if (!sid) {
@@ -2869,11 +2890,20 @@
                             precondition: (document.getElementById('module-add-case-precondition') && document.getElementById('module-add-case-precondition').value) || '',
                             requirements: (document.getElementById('module-add-case-requirements') && document.getElementById('module-add-case-requirements').value) || '',
                         };
-                        // If a request dropdown is selected, use that id
-                        if (requestInput && requestInput.value) {
-                            const parsed = Number(requestInput.value);
-                            if (!Number.isNaN(parsed) && parsed > 0) payload.related_api_request = parsed;
-                        }
+                        // If the API Explorer selection exists, force-sync label -> hidden
+                        // and include related_api_request in the payload.
+                        try {
+                            const hidden = document.getElementById('module-add-case-related-api-request-id');
+                            const label = document.getElementById('module-related-api-request-label');
+                            if (label && label.dataset && label.dataset.requestId) {
+                                if (hidden) hidden.value = label.dataset.requestId;
+                            }
+                            if (hidden && hidden.value) {
+                                const parsed = Number(hidden.value);
+                                if (!Number.isNaN(parsed) && parsed > 0) payload.related_api_request = parsed;
+                            }
+                            try { console.debug('[automation][module] creating case payload.related_api_request=', payload.related_api_request); } catch (e) { /* ignore */ }
+                        } catch (e) { /* ignore */ }
                         if (!payload.title) {
                             setStatus('Test case title is required.', 'error');
                             return;
@@ -2914,6 +2944,17 @@
                         setStatus(err instanceof Error ? err.message : 'Unable to save test case.', 'error');
                     }
                 });
+                // Safety-net: ensure module related_api_request hidden input is synced
+                // from visible label before any submit handlers run (capture phase).
+                moduleAddCaseForm.addEventListener('submit', (ev) => {
+                    try {
+                        const hidden = document.getElementById('module-add-case-related-api-request-id');
+                        const label = document.getElementById('module-related-api-request-label');
+                        if (label && label.dataset && label.dataset.requestId) {
+                            if (hidden) hidden.value = label.dataset.requestId;
+                        }
+                    } catch (e) { /* ignore */ }
+                }, true);
             }
         } catch (e) { /* ignore */ }
 
@@ -2991,7 +3032,23 @@
                         const ownerInput = document.getElementById('module-add-case-owner'); if (ownerInput) ownerInput.value = data && data.owner ? data.owner : '';
                         const preconditionsInput = document.getElementById('module-add-case-precondition'); if (preconditionsInput) preconditionsInput.value = data && data.precondition ? data.precondition : '';
                         const requirementsInput = document.getElementById('module-add-case-requirements'); if (requirementsInput) requirementsInput.value = data && data.requirements ? data.requirements : '';
-                        const requestInput = document.getElementById('module-add-case-request'); if (requestInput) requestInput.value = data && (data.related_api_request || data.related_api_request_id) ? (data.related_api_request || data.related_api_request_id) : '';
+                        // Populate related_api_request hidden input and visible label
+                        try {
+                            const relatedId = (data && (data.related_api_request || data.related_api_request_id)) ? (data.related_api_request || data.related_api_request_id) : null;
+                            const hiddenRelated = document.getElementById('module-add-case-related-api-request-id');
+                            const relatedLabel = document.getElementById('module-related-api-request-label');
+                            if (hiddenRelated) hiddenRelated.value = relatedId ? String(relatedId) : '';
+                            if (relatedLabel) {
+                                if (relatedId) {
+                                    // show a minimal label if name not provided
+                                    relatedLabel.textContent = data.related_api_request_name || `Request #${relatedId}`;
+                                    relatedLabel.dataset.requestId = relatedId;
+                                } else {
+                                    relatedLabel.textContent = 'No API request selected';
+                                    delete relatedLabel.dataset.requestId;
+                                }
+                            }
+                        } catch (e) { /* ignore */ }
                         // show modal
                         caseModal.hidden = false; body.classList.add('automation-modal-open');
                         // set read-only if view
@@ -3022,6 +3079,314 @@
                 const form = document.getElementById('module-add-case-form');
                 if (form) form.reset();
             } catch (e) { /* ignore */ }
+        });
+
+        // API Explorer: modal to browse collections/directories/requests and select one
+        const openApiExplorer = async (opts = {}) => {
+            // opts.success: callback(requestId, label)
+            // Create modal elements lazily
+            let modal = document.querySelector('[data-role="api-explorer-modal"]');
+            if (!modal) {
+                modal = document.createElement('dialog');
+                modal.className = 'automation-modal';
+                modal.setAttribute('data-role', 'api-explorer-modal');
+                modal.innerHTML = `
+                    <div class="automation-modal__backdrop" data-action="close-api-explorer"></div>
+                    <div class="automation-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="api-explorer-title">
+                        <header class="automation-modal__header">
+                            <h2 id="api-explorer-title">API Collections</h2>
+                            <button type="button" class="automation-modal__close" data-action="close-api-explorer" aria-label="Close">&times;</button>
+                        </header>
+                        <div class="automation-modal__body" style="max-height:60vh; overflow:auto; padding:1rem;">
+                            <div id="api-explorer-tree">Loading…</div>
+                        </div>
+                        <div class="automation-modal__footer">
+                            <button type="button" class="btn-secondary" data-action="clear-api-selection">Clear</button>
+                            <button type="button" class="btn-primary" data-action="confirm-api-selection">Select</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            }
+            const treeContainer = modal.querySelector('#api-explorer-tree');
+            let selectedNode = null;
+
+            const renderTree = (collections) => {
+                treeContainer.innerHTML = '';
+                const ul = document.createElement('ul');
+                ul.className = 'api-explorer-root';
+                collections.forEach((col) => {
+                    const colLi = document.createElement('li');
+                    colLi.className = 'api-collection-node';
+                    const colHeader = document.createElement('div');
+                    colHeader.className = 'node-header';
+                    const toggle = document.createElement('button');
+                    toggle.type = 'button';
+                    toggle.className = 'node-toggle';
+                    toggle.textContent = '▸';
+                    const title = document.createElement('span');
+                    title.textContent = col.name || `Collection ${col.id}`;
+                    title.style.marginLeft = '0.5rem';
+                    colHeader.appendChild(toggle);
+                    colHeader.appendChild(title);
+                    colLi.appendChild(colHeader);
+                    const colChildren = document.createElement('div');
+                    colChildren.className = 'node-children';
+                    colChildren.style.display = 'none';
+                    // directories
+                    const dirs = Array.isArray(col.directories) ? col.directories : [];
+                    // group top-level requests (no directory) and directories
+                    const topRequests = (Array.isArray(col.requests) ? col.requests : []).filter((r) => !r.directory_id);
+                    const createRequestList = (requests) => {
+                        const rUl = document.createElement('ul');
+                        requests.forEach((r) => {
+                            const rLi = document.createElement('li');
+                            rLi.className = 'api-request-node';
+                            rLi.dataset.requestId = r.id;
+                            // checkbox for single selection
+                            const cb = document.createElement('input');
+                            cb.type = 'checkbox';
+                            cb.className = 'request-checkbox';
+                            cb.id = `api-request-${r.id}`;
+                            cb.dataset.requestId = r.id;
+                            // plain text label (not styled as a button)
+                            const label = document.createElement('label');
+                            label.htmlFor = cb.id;
+                            label.className = 'request-label';
+                            label.textContent = `${r.name || ('Request ' + r.id)} ${r.method ? '(' + r.method + ')' : ''}`;
+                            // when checkbox changes, enforce single-select behavior
+                            cb.addEventListener('change', (ev) => {
+                                try {
+                                    const allCheckboxes = modal.querySelectorAll('.request-checkbox');
+                                    const allToggles = modal.querySelectorAll('.node-toggle');
+                                    const colNode = cb.closest('.api-collection-node');
+                                    if (cb.checked) {
+                                        // set selection
+                                        selectedNode = rLi;
+                                        // disable all other checkboxes
+                                        allCheckboxes.forEach((other) => {
+                                            if (other !== cb) {
+                                                other.disabled = true;
+                                                const otherLabel = modal.querySelector(`label[for="${other.id}"]`);
+                                                if (otherLabel) otherLabel.classList.add('disabled');
+                                            }
+                                        });
+                                        // disable toggles for collections/folders outside this collection
+                                        allToggles.forEach((t) => {
+                                            const parentCol = t.closest('.api-collection-node');
+                                            if (parentCol && parentCol !== colNode) {
+                                                t.disabled = true;
+                                                t.classList.add('disabled');
+                                            } else {
+                                                t.disabled = false;
+                                                t.classList.remove('disabled');
+                                            }
+                                        });
+                                        label.classList.add('selected');
+                                    } else {
+                                        // clear selection and re-enable everything
+                                        selectedNode = null;
+                                        allCheckboxes.forEach((other) => {
+                                            other.disabled = false;
+                                            const otherLabel = modal.querySelector(`label[for="${other.id}"]`);
+                                            if (otherLabel) otherLabel.classList.remove('disabled');
+                                        });
+                                        allToggles.forEach((t) => { t.disabled = false; t.classList.remove('disabled'); });
+                                        label.classList.remove('selected');
+                                    }
+                                } catch (e) { /* ignore */ }
+                            });
+
+                            rLi.appendChild(cb);
+                            rLi.appendChild(label);
+                            rUl.appendChild(rLi);
+                        });
+                        return rUl;
+                    };
+                    if (topRequests.length) {
+                        const h = document.createElement('div'); h.className = 'node-section-title'; h.textContent = 'Requests (root)'; colChildren.appendChild(h);
+                        colChildren.appendChild(createRequestList(topRequests));
+                    }
+                    // build directory tree (flat list with parent references) into nested structure
+                    const dirMap = new Map();
+                    dirs.forEach((d) => { dirMap.set(d.id, Object.assign({}, d, { children: [] })); });
+                    dirs.forEach((d) => { if (d.parent_id && dirMap.has(d.parent_id)) { dirMap.get(d.parent_id).children.push(dirMap.get(d.id)); } });
+                    // find roots
+                    const dirRoots = Array.from(dirMap.values()).filter((d) => !d.parent_id);
+                    const requestsByDir = {};
+                    (Array.isArray(col.requests) ? col.requests : []).forEach((r) => {
+                        if (r.directory_id) {
+                            requestsByDir[r.directory_id] = requestsByDir[r.directory_id] || [];
+                            requestsByDir[r.directory_id].push(r);
+                        }
+                    });
+
+                    const renderDirectory = (d) => {
+                        const li = document.createElement('li');
+                        li.className = 'api-dir-node';
+                        const header = document.createElement('div'); header.className = 'node-header';
+                        const toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'node-toggle'; toggle.textContent = '▸';
+                        const name = document.createElement('span'); name.textContent = d.name || ('Dir ' + d.id); name.style.marginLeft = '0.5rem';
+                        header.appendChild(toggle); header.appendChild(name);
+                        li.appendChild(header);
+                        const inner = document.createElement('div'); inner.className = 'node-children'; inner.style.display = 'none';
+                        // requests in this dir
+                        const reqs = requestsByDir[d.id] || [];
+                        if (reqs.length) inner.appendChild(createRequestList(reqs));
+                        if (Array.isArray(d.children) && d.children.length) {
+                            const dirUl = document.createElement('ul');
+                            d.children.forEach((child) => dirUl.appendChild(renderDirectory(child)));
+                            inner.appendChild(dirUl);
+                        }
+                        li.appendChild(inner);
+                        // toggling
+                        toggle.addEventListener('click', () => {
+                            if (inner.style.display === 'none') { inner.style.display = ''; toggle.textContent = '▾'; } else { inner.style.display = 'none'; toggle.textContent = '▸'; }
+                        });
+                        return li;
+                    };
+
+                    if (dirRoots.length) {
+                        const dirSection = document.createElement('div'); dirSection.className = 'node-section';
+                        const du = document.createElement('ul'); dirRoots.forEach((dr) => du.appendChild(renderDirectory(dr)));
+                        colChildren.appendChild(du);
+                    }
+
+                    colLi.appendChild(colChildren);
+                    // header toggle
+                    toggle.addEventListener('click', () => {
+                        if (colChildren.style.display === 'none') { colChildren.style.display = ''; toggle.textContent = '▾'; } else { colChildren.style.display = 'none'; toggle.textContent = '▸'; }
+                    });
+
+                    // selection is handled by checkboxes on request nodes; no click handler needed here
+
+                    ul.appendChild(colLi);
+                });
+                treeContainer.appendChild(ul);
+            };
+
+            // fetch collections
+            try {
+                treeContainer.textContent = 'Loading API collections…';
+                const resp = await fetch((apiEndpoints.collections || '/api/core/collections/'), { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                if (!resp.ok) throw new Error('Failed to load collections');
+                const data = await resp.json();
+                const normalized = Array.isArray(data) ? data : [];
+                renderTree(normalized);
+                // initialize selection from form hidden inputs so reopening preserves choice
+                try {
+                    const origin = opts.origin || 'case';
+                    const hiddenId = origin === 'module' ? 'module-add-case-related-api-request-id' : 'case-related-api-request-id';
+                    const hidden = document.getElementById(hiddenId);
+                    if (hidden && hidden.value) {
+                        const parsed = Number(hidden.value);
+                        if (!Number.isNaN(parsed) && parsed > 0) {
+                            const cb = modal.querySelector(`#api-request-${parsed}`);
+                            if (cb) {
+                                cb.checked = true;
+                                const rLi = cb.closest('.api-request-node');
+                                selectedNode = rLi;
+                                const allCheckboxes = modal.querySelectorAll('.request-checkbox');
+                                const allToggles = modal.querySelectorAll('.node-toggle');
+                                const colNode = cb.closest('.api-collection-node');
+                                allCheckboxes.forEach((other) => {
+                                    if (other !== cb) {
+                                        other.disabled = true;
+                                        const otherLabel = modal.querySelector(`label[for="${other.id}"]`);
+                                        if (otherLabel) otherLabel.classList.add('disabled');
+                                    }
+                                });
+                                allToggles.forEach((t) => {
+                                    const parentCol = t.closest('.api-collection-node');
+                                    if (parentCol && parentCol !== colNode) {
+                                        t.disabled = true; t.classList.add('disabled');
+                                    } else { t.disabled = false; t.classList.remove('disabled'); }
+                                });
+                                const label = rLi.querySelector('.request-label'); if (label) label.classList.add('selected');
+                            }
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+            } catch (err) {
+                treeContainer.textContent = 'Unable to load API collections.';
+            }
+
+            // open modal
+            modal.hidden = false; body.classList.add('automation-modal-open');
+
+            // Clear / Confirm handlers
+            const confirmBtn = modal.querySelector('[data-action="confirm-api-selection"]');
+            const clearBtn = modal.querySelector('[data-action="clear-api-selection"]');
+            const closeHandler = (ev) => {
+                const trigger = ev.target && ev.target.closest && ev.target.closest('[data-action="close-api-explorer"]');
+                if (!trigger) return;
+                modal.hidden = true; body.classList.remove('automation-modal-open');
+            };
+            modal.addEventListener('click', closeHandler);
+            if (clearBtn) {
+                clearBtn.onclick = () => {
+                    try {
+                        // clear modal selection
+                        const allCheckboxes = modal.querySelectorAll('.request-checkbox');
+                        allCheckboxes.forEach((cb) => { cb.checked = false; cb.disabled = false; const lab = modal.querySelector(`label[for="${cb.id}"]`); if (lab) { lab.classList.remove('disabled'); lab.classList.remove('selected'); } });
+                        const allToggles = modal.querySelectorAll('.node-toggle'); allToggles.forEach((t) => { t.disabled = false; t.classList.remove('disabled'); });
+                        selectedNode = null;
+                        // clear associated form hidden input and visible label
+                        const origin = opts.origin || 'case';
+                        if (origin === 'module') {
+                            const hidden = document.getElementById('module-add-case-related-api-request-id');
+                            const label = document.getElementById('module-related-api-request-label');
+                            if (hidden) hidden.value = '';
+                            if (label) label.textContent = 'No API request selected';
+                        } else {
+                            const hidden = document.getElementById('case-related-api-request-id');
+                            const label = document.getElementById('case-related-api-request-label');
+                            if (hidden) hidden.value = '';
+                            if (label) label.textContent = 'No API request selected';
+                        }
+                    } catch (e) { /* ignore */ }
+                };
+            }
+            if (confirmBtn) {
+                confirmBtn.onclick = () => {
+                    if (!selectedNode) {
+                        // nothing selected
+                        modal.hidden = true; body.classList.remove('automation-modal-open');
+                        return;
+                    }
+                    const rid = selectedNode.dataset.requestId;
+                    // grab the visible label from the selected node (name + method)
+                    const visibleLabel = (selectedNode.querySelector('.request-label') && selectedNode.querySelector('.request-label').textContent) || `Request #${rid}`;
+                    // determine which form opened the explorer
+                    const origin = opts.origin || 'case';
+                    if (origin === 'module') {
+                        const hidden = document.getElementById('module-add-case-related-api-request-id');
+                        const label = document.getElementById('module-related-api-request-label');
+                        if (hidden) hidden.value = rid;
+                        if (label) { label.textContent = visibleLabel; label.dataset.requestId = rid; }
+                        console.log('[api-explorer] confirm origin=module rid=', rid, 'hiddenExists=', !!hidden, 'labelExists=', !!label);
+                        if (label && label.dataset) console.log('[api-explorer] module label.dataset.requestId=', label.dataset.requestId);
+                    } else {
+                        const hidden = document.getElementById('case-related-api-request-id');
+                        const label = document.getElementById('case-related-api-request-label');
+                        if (hidden) hidden.value = rid;
+                        if (label) { label.textContent = visibleLabel; label.dataset.requestId = rid; }
+                        console.log('[api-explorer] confirm origin=case rid=', rid, 'hiddenExists=', !!hidden, 'labelExists=', !!label);
+                        if (label && label.dataset) console.log('[api-explorer] case label.dataset.requestId=', label.dataset.requestId);
+                    }
+                    modal.hidden = true; body.classList.remove('automation-modal-open');
+                    if (typeof opts.success === 'function') opts.success(rid);
+                };
+            }
+        };
+
+        // Open explorer from page buttons
+        document.addEventListener('click', (ev) => {
+            const btn = ev.target && ev.target.closest && (ev.target.closest('#open-api-explorer') || ev.target.closest('#module-open-api-explorer'));
+            if (!btn) return;
+            ev.preventDefault();
+            const origin = btn.id === 'module-open-api-explorer' ? 'module' : 'case';
+            openApiExplorer({ origin });
         });
 
         const handlePlanSubmit = async (event) => {
@@ -3228,17 +3593,33 @@
                     precondition: (document.getElementById('case-precondition') && document.getElementById('case-precondition').value) || '',
                     requirements: (document.getElementById('case-requirements') && document.getElementById('case-requirements').value) || '',
                 };
-                // related_api_request is selected via collection/request dropdowns
-                const requestIdRaw = inputs.case.request.value;
-                if (requestIdRaw) {
-                    const parsedId = Number(requestIdRaw);
-                    if (!Number.isNaN(parsedId) && parsedId > 0) {
-                        payload.related_api_request = parsedId;
+                // If an API request was selected via the explorer, include it.
+                // Force-sync visible label.dataset.requestId into the hidden input
+                // to guard against other code clearing the hidden input between
+                // explorer confirm and form serialization.
+                try {
+                    const hidden = document.getElementById('case-related-api-request-id');
+                    const label = document.getElementById('case-related-api-request-label');
+                    // prefer the hidden input if present
+                    if (label && label.dataset && label.dataset.requestId) {
+                        // write back into hidden input (force-sync)
+                        if (hidden) hidden.value = label.dataset.requestId;
                     }
-                }
+                    // now read from hidden input
+                    if (hidden && hidden.value) {
+                        const parsedId = Number(hidden.value);
+                        if (!Number.isNaN(parsedId) && parsedId > 0) {
+                            payload.related_api_request = parsedId;
+                        }
+                    }
+                    console.log('[handleCaseSubmit] after sync hidden value=', hidden && hidden.value, 'label.dataset.requestId=', label && label.dataset && label.dataset.requestId);
+                    try { console.debug('[automation] creating case payload.related_api_request=', payload.related_api_request); } catch (e) { /* ignore */ }
+                } catch (e) { /* ignore */ }
                 if (!payload.title) {
                     throw new Error('Test case title is required.');
                 }
+                // DEBUG ALERT: show exact payload being sent (temporary)
+                try { alert('[DEBUG] Sending payload to /api/core/test-cases/ :\n' + JSON.stringify(payload, null, 2)); } catch (e) { /* ignore */ }
                 await submitJson(apiEndpoints.cases || '/api/core/test-cases/', payload);
                 els.caseForm.reset();
                 setStatus('Test case added.', 'success');
@@ -3306,6 +3687,17 @@
         }
         if (els.caseForm) {
             els.caseForm.addEventListener('submit', handleCaseSubmit);
+            // Safety-net: ensure hidden related_api_request is synced from visible label
+            // before any submit handler runs (capture phase).
+            els.caseForm.addEventListener('submit', (ev) => {
+                try {
+                    const hidden = document.getElementById('case-related-api-request-id');
+                    const label = document.getElementById('case-related-api-request-label');
+                    if (label && label.dataset && label.dataset.requestId) {
+                        if (hidden) hidden.value = label.dataset.requestId;
+                    }
+                } catch (e) { /* ignore */ }
+            }, true);
         }
         if (els.maintenanceForm) {
             els.maintenanceForm.addEventListener('submit', handleMaintenanceSubmit);

@@ -365,6 +365,12 @@ class TestCaseSerializer(serializers.ModelSerializer):
     priority = serializers.CharField(required=False, allow_blank=True)
     owner_id = serializers.IntegerField(source="owner.id", read_only=True)
     owner = serializers.StringRelatedField(read_only=True)
+    # Allow clients to select a related API request by id
+    related_api_request = serializers.PrimaryKeyRelatedField(
+        queryset=models.ApiRequest.objects.all(),
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = models.TestCase
@@ -393,6 +399,28 @@ class TestCaseSerializer(serializers.ModelSerializer):
         # validators: uniqueness is checked in validate() only when a
         # testcase_id is supplied (so missing/testcase generation flows
         # are allowed)
+
+    def create(self, validated_data: dict[str, Any]) -> models.TestCase:
+        """
+        Ensure that a provided related_api_request is applied to the created
+        TestCase instance. Some callers or custom create flows may not set the
+        FK during the initial model creation; set it explicitly afterward to
+        guarantee persistence.
+        """
+        related = validated_data.pop('related_api_request', None)
+        # Use the default ModelSerializer.create behavior to construct the
+        # instance (which will call model.save() and trigger auto-generation
+        # of testcase_id when needed).
+        instance = super().create(validated_data)
+        if related is not None:
+            try:
+                instance.related_api_request = related
+                instance.save(update_fields=['related_api_request'])
+            except Exception:
+                # Do not raise here — validation and response have already
+                # succeeded; best-effort persistence only.
+                pass
+        return instance
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         testcase_id = attrs.get("testcase_id")

@@ -504,6 +504,46 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         except Exception:
             # don't let a logging/save failure break the response
             pass
+        # Defensive: ensure related_api_request from the incoming payload is
+        # persisted on the instance. Some clients or serializer behaviors may
+        # omit saving this FK during the initial create step; explicitly set
+        # it here if provided in the request data.
+        try:
+            inst = getattr(serializer, 'instance', None)
+            if inst is not None:
+                # Prefer the local `data` dict (copied/normalized above) but
+                # fall back to request.data if needed.
+                incoming_related = None
+                try:
+                    incoming_related = data.get('related_api_request') if isinstance(data, dict) else None
+                except Exception:
+                    incoming_related = None
+                if incoming_related is None and hasattr(request, 'data'):
+                    incoming_related = getattr(request.data, 'get', lambda k, d=None: d)('related_api_request', None)
+                # Normalize to integer id or None
+                try:
+                    if incoming_related in ('', None):
+                        rid = None
+                    else:
+                        rid = int(incoming_related)
+                except Exception:
+                    rid = None
+                if rid and getattr(inst, 'related_api_request_id', None) != rid:
+                    try:
+                        inst.related_api_request_id = rid
+                        inst.save(update_fields=['related_api_request'])
+                    except Exception:
+                        # ignore failures here to avoid breaking the response
+                        pass
+                elif rid is None and getattr(inst, 'related_api_request_id', None) is not None:
+                    try:
+                        inst.related_api_request = None
+                        inst.save(update_fields=['related_api_request'])
+                    except Exception:
+                        pass
+        except Exception:
+            # never fail the request response because of this best-effort step
+            pass
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 

@@ -2474,7 +2474,7 @@
                 const expectedInput = document.getElementById('module-add-case-expected');
                 const priorityInput = document.getElementById('module-add-case-priority');
                 const ownerInput = document.getElementById('module-add-case-owner');
-                const requestInput = document.getElementById('module-add-case-request');
+                // request input removed from module add case form
                 const sid = scenarioInput && scenarioInput.value ? Number(scenarioInput.value) : null;
                 if (!sid) {
                     setStatus('Scenario id missing for test case.', 'error');
@@ -2489,10 +2489,21 @@
                     priority: priorityInput && priorityInput.value ? priorityInput.value : '',
                     owner: ownerInput && ownerInput.value ? ownerInput.value : '',
                 };
-                if (requestInput && requestInput.value) {
-                    const parsed = Number(requestInput.value);
-                    if (!Number.isNaN(parsed) && parsed > 0) payload.related_api_request = parsed;
-                }
+                // If an API request was selected via the explorer, include it.
+                // Force-sync visible label.dataset.requestId into hidden input
+                // to ensure the value is present at serialization time.
+                try {
+                    const hidden = document.getElementById('module-add-case-related-api-request-id');
+                    const label = document.getElementById('module-related-api-request-label');
+                    if (label && label.dataset && label.dataset.requestId) {
+                        if (hidden) hidden.value = label.dataset.requestId;
+                    }
+                    if (hidden && hidden.value) {
+                        const parsed = Number(hidden.value);
+                        if (!Number.isNaN(parsed) && parsed > 0) payload.related_api_request = parsed;
+                    }
+                    try { console.debug('[staticfiles][data-management] payload.related_api_request=', payload.related_api_request); } catch (e) { }
+                } catch (e) { /* ignore */ }
                 if (!payload.title) {
                     setStatus('Test case title is required.', 'error');
                     return;
@@ -2522,6 +2533,17 @@
                     setStatus(err instanceof Error ? err.message : 'Unable to save test case.', 'error');
                 }
             });
+            // Safety-net: ensure module related_api_request hidden input is synced
+            // from visible label before any submit handler runs (capture phase).
+            moduleAddCaseForm.addEventListener('submit', (ev) => {
+                try {
+                    const hidden = document.getElementById('module-add-case-related-api-request-id');
+                    const label = document.getElementById('module-related-api-request-label');
+                    if (label && label.dataset && label.dataset.requestId) {
+                        if (hidden) hidden.value = label.dataset.requestId;
+                    }
+                } catch (e) { /* ignore */ }
+            }, true);
         }
 
         // wire open/close triggers for test tools

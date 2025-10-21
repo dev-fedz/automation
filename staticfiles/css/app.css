@@ -398,6 +398,22 @@ body.auth-layout { background:#f5f7fb; min-height:100dvh; display:flex; justify-
 .request-tree .request-list .request-select {padding-left:.65rem;}
 .env-pill-group {display:flex;flex-wrap:wrap;gap:.35rem;}
 .api-tester__environments {grid-column:1;}
+
+/* API Explorer styles: plain text labels and disabled/selected states */
+.api-request-node { display:flex; align-items:center; gap:0.5rem; }
+.request-checkbox { margin:0; }
+.request-label { margin-left:0; cursor:pointer; color: #3b2a00; font-weight:600; }
+.request-label.disabled { opacity:0.45; cursor:not-allowed; }
+.request-label.selected { background: linear-gradient(90deg,#fff4c7,#fff9e0); padding:0.15rem 0.4rem; border-radius:6px; }
+.node-toggle.disabled { opacity:0.45; cursor:not-allowed; }
+/* Explorer accent color */
+.node-toggle { color: #D19000; border-color: rgba(209,145,0,0.12); background: transparent; }
+.request-checkbox { accent-color: #D19000; }
+
+/* Hover variants */
+.node-toggle:hover { color: #D19000; background: rgba(209,145,0,0.06); border-color: rgba(209,145,0,0.18); }
+.request-label:hover { color: #D19000; }
+.request-checkbox:hover { box-shadow: 0 0 0 3px rgba(209,145,0,0.08); }
 .api-tester__environments header {margin-bottom:.75rem;}
 .api-tester__environments .environment-hint {margin:0;font-size:.75rem;color:#7b6a3a;}
 .environment-layout {display:flex;flex-direction:column;gap:1.1rem;flex:1;min-height:0;}

@@ -172,10 +172,12 @@
                             <input type="text" id="module-add-case-owner" name="owner" placeholder="owner@example.com">
                         </div>
                     </div>
-                    <div class="form-row">
-                        <label for="module-add-case-request">Related API Request ID (optional)</label>
-                        <input type="number" id="module-add-case-request" name="request" min="1" step="1" placeholder="123">
-                    </div>
+                                <!-- Related API Request input removed: use explorer to choose a request -->
+                                <input type="hidden" id="module-add-case-related-api-request-id" name="related_api_request" value="">
+                                <div class="form-row">
+                                    <button type="button" id="module-open-api-explorer" class="btn-secondary">Choose Related API Request</button>
+                                    <small id="module-related-api-request-label" class="form-hint">No API request selected</small>
+                                </div>
                 </fieldset>
                 <div class="form-actions">
                     <button type="submit" class="btn-primary">Save Test Case</button>

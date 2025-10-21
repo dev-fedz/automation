@@ -123,17 +123,11 @@ payload.plan=premium"></textarea>
                                 </select>
                             </div>
                         </div>
+                        <!-- Related API request removed: field retained in DB but not exposed in create/edit UI -->
+                        <input type="hidden" id="case-related-api-request-id" name="related_api_request" value="">
                         <div class="form-row">
-                            <label for="case-collection">Related API Collection (optional)</label>
-                            <select id="case-collection" name="collection">
-                                <option value="">(select collection)</option>
-                            </select>
-                        </div>
-                        <div class="form-row">
-                            <label for="case-request">Related API Request (optional)</label>
-                            <select id="case-request" name="request">
-                                <option value="">(select request)</option>
-                            </select>
+                            <button type="button" id="open-api-explorer" class="btn-secondary">Choose Related API Request</button>
+                            <small id="case-related-api-request-label" class="form-hint">No API request selected</small>
                         </div>
                         <!-- Button to open selection modal (Plan -> Module -> Scenario) -->
                         <div class="form-row">
@@ -238,17 +232,10 @@ payload.plan=premium"></textarea>
                             </select>
                         </div>
                     </div>
+                    <input type="hidden" id="module-add-case-related-api-request-id" name="related_api_request" value="">
                     <div class="form-row">
-                        <label for="module-add-case-collection">Related API Collection (optional)</label>
-                        <select id="module-add-case-collection" name="collection">
-                            <option value="">(select collection)</option>
-                        </select>
-                    </div>
-                    <div class="form-row">
-                        <label for="module-add-case-request">Related API Request (optional)</label>
-                        <select id="module-add-case-request" name="request">
-                            <option value="">(select request)</option>
-                        </select>
+                        <button type="button" id="module-open-api-explorer" class="btn-secondary">Choose Related API Request</button>
+                        <small id="module-related-api-request-label" class="form-hint">No API request selected</small>
                     </div>
                 </fieldset>
                 <div class="form-actions">
