@@ -364,7 +364,7 @@ class TestCaseSerializer(serializers.ModelSerializer):
     dynamic_variables = serializers.DictField(child=serializers.JSONField(), required=False)
     priority = serializers.CharField(required=False, allow_blank=True)
     owner_id = serializers.IntegerField(source="owner.id", read_only=True)
-    owner = serializers.StringRelatedField(source="owner", read_only=True)
+    owner = serializers.StringRelatedField(read_only=True)
 
     class Meta:
         model = models.TestCase
