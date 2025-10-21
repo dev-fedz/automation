@@ -1920,6 +1920,9 @@
                     const input = document.getElementById('module-add-case-scenario-id');
                     if (input) input.value = sid;
                     if (modal) {
+                        // ensure modal title reflects creation
+                        const modalTitle = document.getElementById('module-add-case-modal-title');
+                        if (modalTitle) modalTitle.textContent = 'Add Test Case';
                         modal.hidden = false;
                         body.classList.add('automation-modal-open');
                         const title = document.getElementById('module-add-case-title');

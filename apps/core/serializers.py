@@ -371,6 +371,8 @@ class TestCaseSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    # Read-only convenience field exposing the related ApiRequest's name
+    related_api_request_name = serializers.CharField(source='related_api_request.name', read_only=True)
 
     class Meta:
         model = models.TestCase
@@ -389,6 +391,7 @@ class TestCaseSerializer(serializers.ModelSerializer):
             "owner",
             "owner_id",
             "related_api_request",
+            "related_api_request_name",
             "created_at",
             "updated_at",
         ]

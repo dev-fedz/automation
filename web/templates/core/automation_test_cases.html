@@ -57,8 +57,8 @@
                                     <td>{{ test_case.updated_at }}</td>
                                     <td>
                                         <div class="table-action-group">
-                                            <button type="button" class="action-button" data-action="view-case" data-case-id="{{ test_case.id }}">View</button>
-                                            <button type="button" class="action-button" data-action="edit-case" data-case-id="{{ test_case.id }}">Edit</button>
+                                            <button type="button" class="action-button" data-action="view-case" data-case-id="{{ test_case.id }}" data-related-api-request-name="{{ test_case.related_api_request.name|default:'' }}">View</button>
+                                            <button type="button" class="action-button" data-action="edit-case" data-case-id="{{ test_case.id }}" data-related-api-request-name="{{ test_case.related_api_request.name|default:'' }}">Edit</button>
                                             <button type="button" class="action-button" data-action="delete-case" data-case-id="{{ test_case.id }}" data-variant="danger">Delete</button>
                                         </div>
                                     </td>

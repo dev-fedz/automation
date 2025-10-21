@@ -853,6 +853,9 @@
                                                 const caseModal = document.querySelector('[data-role="module-add-case-modal"]');
                                                 if (caseModal) {
                                                     const hid = document.getElementById('module-add-case-scenario-id'); if (hid) hid.value = sid || '';
+                                                    // ensure modal title reflects creation
+                                                    const modalTitle = document.getElementById('module-add-case-modal-title');
+                                                    if (modalTitle) modalTitle.textContent = 'Add Test Case';
                                                     caseModal.hidden = false; body.classList.add('automation-modal-open');
                                                     const titleInput = document.getElementById('module-add-case-title'); if (titleInput) titleInput.focus();
                                                 } else {
@@ -2555,8 +2558,8 @@
                             <td>${updated}</td>
                             <td>
                                 <div class="table-action-group">
-                                    <button type="button" class="action-button" data-action="view-case" data-case-id="${testCase.id || ''}">View</button>
-                                    <button type="button" class="action-button" data-action="edit-case" data-case-id="${testCase.id || ''}">Edit</button>
+                                    <button type="button" class="action-button" data-action="view-case" data-case-id="${testCase.id || ''}" data-related-api-request-name="${escapeHtml(testCase.related_api_request_name || '')}">View</button>
+                                    <button type="button" class="action-button" data-action="edit-case" data-case-id="${testCase.id || ''}" data-related-api-request-name="${escapeHtml(testCase.related_api_request_name || '')}">Edit</button>
                                     <button type="button" class="action-button" data-action="delete-case" data-case-id="${testCase.id || ''}" data-variant="danger">Delete</button>
                                 </div>
                             </td>
@@ -2786,6 +2789,14 @@
                     const caseModal = document.querySelector('[data-role="module-add-case-modal"]');
                     if (caseModal) {
                         const hid = document.getElementById('module-add-case-scenario-id'); if (hid) hid.value = sid;
+                        // If the trigger included a related API request name, show it
+                        try {
+                            const name = trigger && trigger.dataset && trigger.dataset.relatedApiRequestName ? trigger.dataset.relatedApiRequestName : null;
+                            const relatedLabel = document.getElementById('module-related-api-request-label');
+                            if (name && relatedLabel) {
+                                relatedLabel.textContent = `Selected API Request: ${name}`;
+                            }
+                        } catch (e) { /* ignore */ }
                         caseModal.hidden = false; body.classList.add('automation-modal-open');
                     }
                 } else if (action === 'delete-scenario') {
@@ -3040,8 +3051,10 @@
                             if (hiddenRelated) hiddenRelated.value = relatedId ? String(relatedId) : '';
                             if (relatedLabel) {
                                 if (relatedId) {
-                                    // show a minimal label if name not provided
-                                    relatedLabel.textContent = data.related_api_request_name || `Request #${relatedId}`;
+                                    // Prefer server-supplied name; if missing, fall back to any
+                                    // value the trigger may have provided on click.
+                                    const triggerName = trigger && trigger.dataset && trigger.dataset.relatedApiRequestName ? trigger.dataset.relatedApiRequestName : null;
+                                    relatedLabel.textContent = data.related_api_request_name || triggerName || `Request #${relatedId}`;
                                     relatedLabel.dataset.requestId = relatedId;
                                 } else {
                                     relatedLabel.textContent = 'No API request selected';
@@ -3049,10 +3062,28 @@
                                 }
                             }
                         } catch (e) { /* ignore */ }
+                        // set modal title based on action
+                        const modalTitle = document.getElementById('module-add-case-modal-title');
+                        if (modalTitle) modalTitle.textContent = (action === 'view-case') ? 'Test Case Details' : 'Update Test Case';
                         // show modal
                         caseModal.hidden = false; body.classList.add('automation-modal-open');
                         // set read-only if view
                         const isView = action === 'view-case';
+                        // hide API Explorer button when viewing a case and update label format
+                        try {
+                            const openApiBtn = document.getElementById('module-open-api-explorer');
+                            const relatedLabelElem = document.getElementById('module-related-api-request-label');
+                            const hiddenRelated = document.getElementById('module-add-case-related-api-request-id');
+                            if (isView) {
+                                if (openApiBtn) openApiBtn.hidden = true;
+                                if (relatedLabelElem) {
+                                    const name = (data && (data.related_api_request_name)) ? data.related_api_request_name : (hiddenRelated && hiddenRelated.value ? `Request #${hiddenRelated.value}` : 'No API request selected');
+                                    relatedLabelElem.textContent = `Selected API Request: ${name}`;
+                                }
+                            } else {
+                                if (openApiBtn) openApiBtn.hidden = false;
+                            }
+                        } catch (e) { /* ignore */ }
                         [titleInput, descInput, stepsInput, expectedInput, priorityInput, ownerInput, requestInput].forEach((n) => { if (n) { n.readOnly = isView; n.disabled = isView; } });
                         const submit = form.querySelector('button[type="submit"]'); if (submit) submit.hidden = isView;
                     } catch (err) {
