@@ -644,7 +644,7 @@
             // populate fields
             const titleInput = document.getElementById('module-add-scenario-title');
             const descInput = document.getElementById('module-add-scenario-description');
-            const preInput = document.getElementById('module-add-scenario-preconditions');
+            const preInput = document.getElementById('module-add-scenario-precondition');
             const postInput = document.getElementById('module-add-scenario-postconditions');
             const tagsInput = document.getElementById('module-add-scenario-tags');
             if (scenario) {
@@ -742,7 +742,7 @@
             const moduleInput = document.getElementById('module-add-scenario-module-id');
             const titleInput = document.getElementById('module-add-scenario-title');
             const descInput = document.getElementById('module-add-scenario-description');
-            const preInput = document.getElementById('module-add-scenario-preconditions');
+            const preInput = document.getElementById('module-add-scenario-precondition');
             const postInput = document.getElementById('module-add-scenario-postconditions');
             const tagsInput = document.getElementById('module-add-scenario-tags');
             const moduleId = moduleInput && moduleInput.value ? Number(moduleInput.value) : null;
@@ -756,7 +756,7 @@
                 module: moduleId,
                 title: (titleInput && titleInput.value || '').trim(),
                 description: descInput && descInput.value || '',
-                preconditions: preInput && preInput.value || '',
+                precondition: preInput && preInput.value || '',
                 postconditions: postInput && postInput.value || '',
                 tags: tagsInput && tagsInput.value ? tagsInput.value.split(/[,\n]/).map(s => s.trim()).filter(Boolean) : [],
                 plan: null,

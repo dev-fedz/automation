@@ -219,7 +219,7 @@
                 description: document.getElementById('case-description'),
                 steps: document.getElementById('case-steps'),
                 expected: document.getElementById('case-expected'),
-                preconditions: document.getElementById('case-preconditions'),
+                precondition: document.getElementById('case-precondition'),
                 requirements: document.getElementById('case-requirements'),
                 dynamic: document.getElementById('case-dynamic'),
                 priority: document.getElementById('case-priority'),
@@ -2600,7 +2600,7 @@
                                         const moduleInput = document.getElementById('module-add-scenario-module-id'); if (moduleInput) moduleInput.value = normalizedScenario.module || '';
                                         const titleInput = document.getElementById('module-add-scenario-title'); if (titleInput) titleInput.value = normalizedScenario.title || '';
                                         const descInput = document.getElementById('module-add-scenario-description'); if (descInput) descInput.value = normalizedScenario.description || '';
-                                        const pre = document.getElementById('module-add-scenario-preconditions'); if (pre) pre.value = normalizedScenario.preconditions || '';
+                                        const pre = document.getElementById('module-add-scenario-precondition'); if (pre) pre.value = normalizedScenario.preconditions || '';
                                         const post = document.getElementById('module-add-scenario-postconditions'); if (post) post.value = normalizedScenario.postconditions || '';
                                         const tags = document.getElementById('module-add-scenario-tags'); if (tags) tags.value = Array.isArray(normalizedScenario.tags) ? normalizedScenario.tags.join(',') : (normalizedScenario.tags || '');
                                         // set readonly for view
@@ -2725,7 +2725,7 @@
                             expected_results: expectedInput && expectedInput.value ? expectedInput.value.split(/\n/).map((s) => ({ note: s.trim() })).filter(Boolean) : [],
                             priority: priorityInput && priorityInput.value ? priorityInput.value : '',
                             owner: ownerInput && ownerInput.value ? ownerInput.value : '',
-                            preconditions: (document.getElementById('module-add-case-preconditions') && document.getElementById('module-add-case-preconditions').value) || '',
+                            precondition: (document.getElementById('module-add-case-precondition') && document.getElementById('module-add-case-precondition').value) || '',
                             requirements: (document.getElementById('module-add-case-requirements') && document.getElementById('module-add-case-requirements').value) || '',
                         };
                         // If a request dropdown is selected, use that id
@@ -2848,7 +2848,7 @@
                         }
                         const priorityInput = document.getElementById('module-add-case-priority'); if (priorityInput) priorityInput.value = data && data.priority ? data.priority : '';
                         const ownerInput = document.getElementById('module-add-case-owner'); if (ownerInput) ownerInput.value = data && data.owner ? data.owner : '';
-                        const preconditionsInput = document.getElementById('module-add-case-preconditions'); if (preconditionsInput) preconditionsInput.value = data && data.preconditions ? data.preconditions : '';
+                        const preconditionsInput = document.getElementById('module-add-case-precondition'); if (preconditionsInput) preconditionsInput.value = data && data.precondition ? data.precondition : '';
                         const requirementsInput = document.getElementById('module-add-case-requirements'); if (requirementsInput) requirementsInput.value = data && data.requirements ? data.requirements : '';
                         const requestInput = document.getElementById('module-add-case-request'); if (requestInput) requestInput.value = data && (data.related_api_request || data.related_api_request_id) ? (data.related_api_request || data.related_api_request_id) : '';
                         // show modal
@@ -3084,7 +3084,7 @@
                     dynamic_variables: dynamic,
                     priority: inputs.case.priority.value || '',
                     owner: inputs.case.owner.value || '',
-                    preconditions: (document.getElementById('case-preconditions') && document.getElementById('case-preconditions').value) || '',
+                    precondition: (document.getElementById('case-precondition') && document.getElementById('case-precondition').value) || '',
                     requirements: (document.getElementById('case-requirements') && document.getElementById('case-requirements').value) || '',
                 };
                 // related_api_request is selected via collection/request dropdowns

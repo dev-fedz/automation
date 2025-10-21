@@ -435,6 +435,8 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                 serializer.is_valid(raise_exception=True)
             else:
                 raise
+        
+
         # Save using perform_create but ensure owner is set to authenticated user
         try:
             if getattr(request, 'user', None) and request.user.is_authenticated:
