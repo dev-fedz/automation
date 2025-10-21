@@ -912,7 +912,19 @@
                             try {
                                 setStatus('Searching cases...', 'info');
                                 const base = apiEndpoints.cases || '/api/core/test-cases/';
-                                const url = `${base}?search=${encodeURIComponent(q)}`;
+                                // include scenario filter when available
+                                try {
+                                    const params = new URLSearchParams();
+                                    params.append('search', String(q));
+                                    if (state && state.selectedScenarioId) params.append('scenario', String(state.selectedScenarioId));
+                                    const query = params.toString();
+                                    const computed = query ? `${base}?${query}` : base;
+                                    // store computed URL on window as a fallback for other scopes
+                                    window.__automation_case_search_url = computed;
+                                } catch (e) {
+                                    window.__automation_case_search_url = `${base}?search=${encodeURIComponent(q)}`;
+                                }
+                                const url = window.__automation_case_search_url;
                                 const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
                                 if (!resp.ok) throw new Error('Search failed');
                                 const data = await resp.json();
@@ -1437,7 +1449,18 @@
                     try {
                         setStatus('Searching cases...', 'info');
                         const base = apiEndpoints.cases || '/api/core/test-cases/';
-                        const url = `${base}?search=${encodeURIComponent(q)}`;
+                        // include scenario filter when available
+                        try {
+                            const params = new URLSearchParams();
+                            params.append('search', String(q));
+                            if (state && state.selectedScenarioId) params.append('scenario', String(state.selectedScenarioId));
+                            const query = params.toString();
+                            const computed = query ? `${base}?${query}` : base;
+                            window.__automation_case_search_url = computed;
+                        } catch (e) {
+                            window.__automation_case_search_url = `${base}?search=${encodeURIComponent(q)}`;
+                        }
+                        const url = window.__automation_case_search_url || (function () { try { const p = new URLSearchParams(); p.append('search', String(q)); if (state && state.selectedScenarioId) p.append('scenario', String(state.selectedScenarioId)); const qstr = p.toString(); return qstr ? `${base}?${qstr}` : base; } catch (err) { return `${base}?search=${encodeURIComponent(q)}`; } })();
                         const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
                         if (!resp.ok) throw new Error('Search failed');
                         const data = await resp.json();
@@ -1470,7 +1493,8 @@
                 try {
                     setStatus('Searching cases...', 'info');
                     const base = apiEndpoints.cases || '/api/core/test-cases/';
-                    const url = `${base}?search=${encodeURIComponent(q)}`;
+                    // include scenario filter when available
+                    const url = (function () { try { const params = new URLSearchParams(); params.append('search', String(q)); if (state && state.selectedScenarioId) params.append('scenario', String(state.selectedScenarioId)); const qstr = params.toString(); return qstr ? `${base}?${qstr}` : base; } catch (err) { return `${base}?search=${encodeURIComponent(q)}`; } })();
                     const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
                     if (!resp.ok) throw new Error('Search failed');
                     const data = await resp.json();
@@ -1809,7 +1833,8 @@
                                             try {
                                                 setStatus('Searching cases...', 'info');
                                                 const base = apiEndpoints.cases || '/api/core/test-cases/';
-                                                const url = `${base}?search=${encodeURIComponent(q)}`;
+                                                // include scenario filter when available
+                                                const url = (function () { try { const params = new URLSearchParams(); params.append('search', String(q)); if (state && state.selectedScenarioId) params.append('scenario', String(state.selectedScenarioId)); const qstr = params.toString(); return qstr ? `${base}?${qstr}` : base; } catch (err) { return `${base}?search=${encodeURIComponent(q)}`; } })();
                                                 const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
                                                 if (!resp.ok) throw new Error('Search failed');
                                                 const data = await resp.json();
