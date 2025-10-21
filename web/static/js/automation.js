@@ -2764,6 +2764,25 @@
             }
         } catch (e) { /* ignore */ }
 
+        // Close handler for Add Test Case modal when page uses automation.js (Test Cases page)
+        // The template uses data-action="close-module-add-case-modal" on backdrop/close/cancel
+        // but automation.js did not previously listen for it. Add a small delegated handler
+        // so the modal closes and the form resets when those elements are clicked.
+        document.addEventListener('click', (ev) => {
+            try {
+                const trigger = ev.target && ev.target.closest && ev.target.closest('[data-action="close-module-add-case-modal"]');
+                if (!trigger) return;
+                ev.preventDefault();
+                const modal = document.querySelector('[data-role="module-add-case-modal"]');
+                if (modal) {
+                    modal.hidden = true;
+                    body.classList.remove('automation-modal-open');
+                }
+                const form = document.getElementById('module-add-case-form');
+                if (form) form.reset();
+            } catch (e) { /* ignore */ }
+        });
+
         const handlePlanSubmit = async (event) => {
             event.preventDefault();
             if (!els.planForm) {
