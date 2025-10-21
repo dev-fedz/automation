@@ -394,6 +394,17 @@ class TestCaseSerializer(serializers.ModelSerializer):
                 raise ValidationError({"testcase_id": "Test case ID must be unique per scenario."})
         return attrs
 
+    def update(self, instance: models.TestCase, validated_data: dict[str, Any]) -> models.TestCase:
+        """
+        Prevent clients from changing the testcase_id via update requests.
+        The testcase_id must be generated once by the model on create and
+        should remain immutable afterwards.
+        """
+        # remove testcase_id if present in update payload to preserve existing value
+        if 'testcase_id' in validated_data:
+            validated_data.pop('testcase_id', None)
+        return super().update(instance, validated_data)
+
 
 class TestScenarioSerializer(serializers.ModelSerializer):
     cases = TestCaseSerializer(many=True, read_only=True)

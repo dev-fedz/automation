@@ -2718,7 +2718,6 @@
                             scenario: sid,
                             title: (titleInput && titleInput.value || '').trim(),
                             description: descInput && descInput.value || '',
-                            testcase_id: null,
                             steps: stepsInput && stepsInput.value ? stepsInput.value.split(/\n/).map((s) => s.trim()).filter(Boolean) : [],
                             expected_results: expectedInput && expectedInput.value ? expectedInput.value.split(/\n/).map((s) => ({ note: s.trim() })).filter(Boolean) : [],
                             priority: priorityInput && priorityInput.value ? priorityInput.value : '',
@@ -2819,7 +2818,14 @@
                         // ensure hidden testcase id exists on form
                         let hid = document.getElementById('module-add-case-testcase-id');
                         if (!hid) {
-                            hid = document.createElement('input'); hid.type = 'hidden'; hid.id = 'module-add-case-testcase-id'; hid.name = 'testcase_id'; form.appendChild(hid);
+                            hid = document.createElement('input');
+                            hid.type = 'hidden';
+                            hid.id = 'module-add-case-testcase-id';
+                            // Do NOT set name to 'testcase_id' — we must not send the
+                            // model's testcase_id field in the request body. This
+                            // hidden input is only used client-side to indicate
+                            // edit mode and store the case PK for the URL.
+                            form.appendChild(hid);
                         }
                         hid.value = data && (data.id || data.pk) ? (data.id || data.pk) : '';
                         // populate fields
@@ -3065,7 +3071,6 @@
                     scenario: scenario.id,
                     title: (inputs.case.title.value || '').trim(),
                     description: inputs.case.description.value || '',
-                    testcase_id: null,
                     steps,
                     expected_results: expected,
                     dynamic_variables: dynamic,

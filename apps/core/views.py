@@ -336,6 +336,47 @@ class TestCaseViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.TestCaseSerializer
     permission_classes = [IsAuthenticated]
 
+    def update(self, request, *args, **kwargs):
+        try:
+            user = getattr(request, 'user', None)
+            user_repr = getattr(user, 'email', None) or getattr(user, 'username', None) or str(user)
+            ip = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR'))
+            logger.debug('[core] TestCaseViewSet.update incoming data: user=%s ip=%s data=%s', user_repr, ip, getattr(request, 'data', None))
+        except Exception:
+            pass
+        # Defensive: prevent clients from changing the testcase_id on update
+        try:
+            instance = self.get_object()
+            incoming = getattr(request, 'data', {}) or {}
+            if 'testcase_id' in incoming and incoming.get('testcase_id') not in (None, '', str(instance.testcase_id)):
+                raise ValidationError({'testcase_id': 'testcase_id cannot be changed once created.'})
+        except ValidationError:
+            raise
+        except Exception:
+            # ignore failures to inspect instance; proceed to allow serializer to handle
+            pass
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        try:
+            user = getattr(request, 'user', None)
+            user_repr = getattr(user, 'email', None) or getattr(user, 'username', None) or str(user)
+            ip = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR'))
+            logger.debug('[core] TestCaseViewSet.partial_update incoming data: user=%s ip=%s data=%s', user_repr, ip, getattr(request, 'data', None))
+        except Exception:
+            pass
+        # Defensive: prevent clients from changing the testcase_id on partial update
+        try:
+            instance = self.get_object()
+            incoming = getattr(request, 'data', {}) or {}
+            if 'testcase_id' in incoming and incoming.get('testcase_id') not in (None, '', str(instance.testcase_id)):
+                raise ValidationError({'testcase_id': 'testcase_id cannot be changed once created.'})
+        except ValidationError:
+            raise
+        except Exception:
+            pass
+        return super().partial_update(request, *args, **kwargs)
+
     def get_queryset(self):
         queryset = selectors.test_case_list()
         search = self.request.query_params.get("search")
