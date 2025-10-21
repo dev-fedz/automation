@@ -268,12 +268,30 @@
                 const planSelect = els.modalCasePlan || document.getElementById('modal-case-plan');
                 const moduleSelect = els.modalCaseModule || document.getElementById('modal-case-module');
                 const scenarioSelect = els.modalCaseScenario || document.getElementById('modal-case-scenario');
+                // If we don't have plans from the initial payload, try to fetch them now.
+                const ensurePlans = async () => {
+                    if (Array.isArray(state.plans) && state.plans.length) return;
+                    try {
+                        setStatus('Loading plans…', 'info');
+                        const resp = await fetch(apiEndpoints.plans || '/api/core/test-plans/', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                        if (!resp.ok) throw new Error('Failed to load plans');
+                        const data = await resp.json();
+                        state.plans = normalizePlans(Array.isArray(data) ? data : []);
+                        setStatus('', 'info');
+                    } catch (err) {
+                        setStatus('Unable to load plans.', 'error');
+                    }
+                };
+                // kick off fetch if needed and wait for it to finish before populating
+                const ready = Array.isArray(state.plans) && state.plans.length ? Promise.resolve() : ensurePlans();
                 if (planSelect) {
                     planSelect.innerHTML = '';
                     const ph = document.createElement('option'); ph.value = ''; ph.textContent = '(select a plan)'; planSelect.appendChild(ph);
-                    (state.plans || []).forEach((p) => {
-                        const opt = document.createElement('option'); opt.value = p.id; opt.textContent = p.name || `Plan ${p.id}`; planSelect.appendChild(opt);
-                    });
+                    ready.then(() => {
+                        (state.plans || []).forEach((p) => {
+                            const opt = document.createElement('option'); opt.value = p.id; opt.textContent = p.name || `Plan ${p.id}`; planSelect.appendChild(opt);
+                        });
+                    }).catch(() => { /* ignore */ });
                 }
                 if (moduleSelect) {
                     moduleSelect.innerHTML = '';
@@ -285,13 +303,14 @@
                     const ph3 = document.createElement('option'); ph3.value = ''; ph3.textContent = '(select scenario)'; scenarioSelect.appendChild(ph3);
                     scenarioSelect.disabled = true;
                 }
-            } catch (e) { console.debug('[automation] populateModalCaseSelects error', e); }
+            } catch (e) { /* ignore */ }
         };
 
         // Mirror behavior of test-modules plan filter: populate modal plan select
         try {
             const modalPlanEl = els.modalCasePlan || document.getElementById('modal-case-plan');
             if (modalPlanEl) {
+                // clear then populate using initialPlans for consistency with Data Management
                 modalPlanEl.innerHTML = '<option value="">(select a plan)</option>';
                 (initialPlans || []).forEach((p) => {
                     const opt = document.createElement('option');
@@ -363,32 +382,54 @@
 
         const openCaseSelectionModal = () => {
             try {
+                try { console.debug('[automation] openCaseSelectionModal invoked'); } catch (e) { }
                 if (!els.caseSelectionModal) return;
-                // populate options freshly
-                populateModalCaseSelects();
-                // remember currently focused element so we can restore focus on close
-                _previouslyFocused = document.activeElement;
-                // show modal element (make it focusable)
-                els.caseSelectionModal.hidden = false;
-                // show explicit overlay (if present)
-                try { const overlay = els.caseSelectionModal.querySelector('[data-role="case-selection-overlay"]'); if (overlay) overlay.hidden = false; } catch (e) { }
-                document.body.classList.add('automation-modal-open');
-                // focus the modal dialog container first (so activeElement is inside modal)
-                window.requestAnimationFrame(() => {
+                // Fetch latest plans from API before populating modal so the
+                // options reflect the current server state. We do this even if
+                // state.plans exists to ensure freshness.
+                (async () => {
+                    try { console.debug('[automation] fetching plans for modal from', apiEndpoints.plans || '/api/core/test-plans/'); } catch (e) { }
                     try {
-                        if (els.caseSelectionModal && els.caseSelectionModal.focus) {
-                            els.caseSelectionModal.focus();
-                        } else if (els.caseSelectionModalDialog && els.caseSelectionModalDialog.focus) {
-                            els.caseSelectionModalDialog.focus();
+                        setStatus('Loading test plans…', 'info');
+                        const resp = await fetch(apiEndpoints.plans || '/api/core/test-plans/', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                        if (resp.ok) {
+                            const data = await resp.json();
+                            state.plans = normalizePlans(Array.isArray(data) ? data : []);
+                        } else {
+                            console.warn('[automation] fetch plans failed', resp.status);
                         }
-                    } catch (e) { /* ignore */ }
-                    // after focus has moved into the modal, mark background inert
+                    } catch (err) {
+                        setStatus('Unable to load test plans.', 'error');
+                    } finally {
+                        setStatus('', 'info');
+                    }
+                    // populate options freshly (will use state.plans)
+                    try { populateModalCaseSelects(); } catch (e) { console.debug('[automation] populateModalCaseSelects error', e); }
+                    try { console.debug('[automation] modal open - state.plans length', Array.isArray(state.plans) ? state.plans.length : 0, 'initialModules length', Array.isArray(initialModules) ? initialModules.length : 0); } catch (e) { }
+                    // remember currently focused element so we can restore focus on close
+                    _previouslyFocused = document.activeElement;
+                    // show modal element (make it focusable)
+                    els.caseSelectionModal.hidden = false;
+                    // show explicit overlay (if present)
+                    try { const overlay = els.caseSelectionModal.querySelector('[data-role="case-selection-overlay"]'); if (overlay) overlay.hidden = false; } catch (e) { }
+                    document.body.classList.add('automation-modal-open');
+                    // focus the modal dialog container first (so activeElement is inside modal)
                     window.requestAnimationFrame(() => {
-                        _applyInert(document.body, true);
-                        // then focus the first control inside modal
-                        try { if (els.modalCasePlan) els.modalCasePlan.focus(); } catch (e) { /* ignore */ }
+                        try {
+                            if (els.caseSelectionModal && els.caseSelectionModal.focus) {
+                                els.caseSelectionModal.focus();
+                            } else if (els.caseSelectionModalDialog && els.caseSelectionModalDialog.focus) {
+                                els.caseSelectionModalDialog.focus();
+                            }
+                        } catch (e) { /* ignore */ }
+                        // after focus has moved into the modal, mark background inert
+                        window.requestAnimationFrame(() => {
+                            _applyInert(document.body, true);
+                            // then focus the first control inside modal
+                            try { if (els.modalCasePlan) els.modalCasePlan.focus(); } catch (e) { /* ignore */ }
+                        });
                     });
-                });
+                })();
             } catch (e) { /* ignore */ }
         };
 
@@ -473,10 +514,20 @@
             if (modalPlanEl) {
                 modalPlanEl.addEventListener('change', (ev) => {
                     const pid = (ev.currentTarget && ev.currentTarget.value) ? ev.currentTarget.value : (modalPlanEl.value || null);
-                    console.debug('[automation] modal plan changed', { pid });
+                    try { console.debug('[automation] modalPlan change invoked', { pid: pid, statePlansLength: Array.isArray(state.plans) ? state.plans.length : 0 }); } catch (e) { }
+                    // update state selected plan similar to main scenarioPlan handler
+                    try {
+                        if (!pid) {
+                            state.selectedPlanId = null;
+                        } else {
+                            state.selectedPlanId = Number(pid);
+                        }
+                    } catch (ie) { /* ignore */ }
                     // reuse logic: update modal module list based on plan
                     try {
-                        const moduleSelect = modalModuleEl;
+                        // re-query elements at handler time to avoid stale references
+                        const moduleSelect = document.getElementById('modal-case-module') || modalModuleEl;
+                        const modalScenarioElLocal = document.getElementById('modal-case-scenario') || modalScenarioEl;
                         if (!moduleSelect) return;
                         moduleSelect.innerHTML = '';
                         const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = '(select module)'; moduleSelect.appendChild(placeholder);
@@ -494,36 +545,174 @@
                             });
                         }
                         if (!modules.length) modules = Array.isArray(initialModules) ? initialModules.slice() : [];
+                        try { console.debug('[automation] modalPlan computed modules', { modulesCount: modules.length, modulesSample: modules.length ? modules.slice(0, 3) : [] }); } catch (e) { }
                         modules.forEach((m) => {
                             const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.title || `Module ${m.id}`; moduleSelect.appendChild(opt);
                         });
-                        moduleSelect.disabled = !modules.length;
-                        // reset scenario select
-                        if (modalScenarioEl) {
-                            modalScenarioEl.innerHTML = '';
-                            const ph = document.createElement('option'); ph.value = ''; ph.textContent = '(select scenario)'; modalScenarioEl.appendChild(ph);
-                            modalScenarioEl.disabled = true;
+                        // enable module select when a plan is selected (mirror main page behaviour)
+                        try {
+                            moduleSelect.disabled = !pid ? !modules.length : false;
+                        } catch (_err) {
+                            moduleSelect.disabled = !modules.length;
                         }
+                        // reset scenario select
+                        if (modalScenarioElLocal) {
+                            modalScenarioElLocal.innerHTML = '';
+                            const ph = document.createElement('option'); ph.value = ''; ph.textContent = '(select scenario)'; modalScenarioElLocal.appendChild(ph);
+                            modalScenarioElLocal.disabled = true;
+                        }
+                        // fetch scenarios for this plan from API and attach to state so scenario options are accurate
+                        (async () => {
+                            try {
+                                if (!state.selectedPlanId) return;
+                                const base = apiEndpoints.scenarios || '/api/core/test-scenarios/';
+                                const url = `${base}?plan=${encodeURIComponent(state.selectedPlanId)}`;
+                                const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                                if (!resp.ok) throw new Error(`Failed to fetch scenarios: ${resp.status}`);
+                                const data = await resp.json();
+                                const normalized = Array.isArray(data) ? data.map(normalizeScenario) : [];
+                                try { console.debug('[automation] modalPlan fetched scenarios', { url, count: normalized.length, sample: normalized.length ? normalized[0] : null }); } catch (e) { }
+                                // attach to the plan in state; if the plan isn't present
+                                // create a minimal plan entry so downstream code (module
+                                // computation) can use the attached scenarios.
+                                let p = state.plans.find((pp) => Number(pp.id) === Number(state.selectedPlanId));
+                                if (p) {
+                                    p.scenarios = normalized;
+                                } else if (state.selectedPlanId) {
+                                    try {
+                                        const newPlan = normalizePlan({ id: Number(state.selectedPlanId), name: `Plan ${state.selectedPlanId}`, scenarios: normalized });
+                                        state.plans.push(newPlan);
+                                        p = newPlan;
+                                    } catch (err) { /* ignore */ }
+                                }
+                                // Recompute modules from the newly attached scenarios and populate the module select
+                                try {
+                                    const moduleSelectRef = moduleSelect; // re-queried earlier in handler
+                                    if (moduleSelectRef && p && Array.isArray(p.scenarios)) {
+                                        // collect unique module ids from scenarios
+                                        const seen3 = new Set();
+                                        const moduleIds = [];
+                                        p.scenarios.forEach((s) => {
+                                            const mid2 = s && (s.module || s.module_id);
+                                            if (mid2 && !seen3.has(String(mid2))) {
+                                                seen3.add(String(mid2));
+                                                moduleIds.push(String(mid2));
+                                            }
+                                        });
+                                        // map to initialModules or fallback to minimal objects built from ids
+                                        const modulesFromFetch = moduleIds.map((mid) => {
+                                            const m = initialModules.find((im) => String(im.id) === String(mid));
+                                            if (m) return m;
+                                            return { id: mid, title: `Module ${mid}` };
+                                        });
+                                        moduleSelectRef.innerHTML = '';
+                                        const placeholder2 = document.createElement('option'); placeholder2.value = ''; placeholder2.textContent = '(select module)'; moduleSelectRef.appendChild(placeholder2);
+                                        modulesFromFetch.forEach((m) => {
+                                            const opt2 = document.createElement('option'); opt2.value = m.id; opt2.textContent = m.title || `Module ${m.id}`; moduleSelectRef.appendChild(opt2);
+                                        });
+                                        try { moduleSelectRef.disabled = !state.selectedPlanId ? !modulesFromFetch.length : false; } catch (_err) { moduleSelectRef.disabled = !modulesFromFetch.length; }
+                                    }
+                                } catch (err) { /* ignore */ }
+                            } catch (err) { /* ignore */ }
+                        })();
                     } catch (e) { /* ignore */ }
                 });
             }
             if (modalModuleEl) {
                 modalModuleEl.addEventListener('change', (ev) => {
-                    const pid = (modalPlanEl && modalPlanEl.value) ? modalPlanEl.value : null;
-                    const mid = (ev.currentTarget && ev.currentTarget.value) ? ev.currentTarget.value : (modalModuleEl.value || null);
-                    console.debug('[automation] modal module changed', { pid, mid });
+                    // re-query elements to ensure handlers operate on current DOM
+                    const modalPlanElLocal = document.getElementById('modal-case-plan') || modalPlanEl;
+                    const modalModuleElLocal = document.getElementById('modal-case-module') || modalModuleEl;
+                    const modalScenarioElLocal = document.getElementById('modal-case-scenario') || modalScenarioEl;
+                    const pid = (modalPlanElLocal && modalPlanElLocal.value) ? modalPlanElLocal.value : null;
+                    const mid = (ev.currentTarget && ev.currentTarget.value) ? ev.currentTarget.value : (modalModuleElLocal.value || null);
                     if (!mid) {
-                        if (modalScenarioEl) modalScenarioEl.disabled = true;
+                        if (modalScenarioElLocal) modalScenarioElLocal.disabled = true;
                         return;
                     }
                     try {
-                        const scenarios = [];
+                        // try to load scenarios from cached plan data
+                        let scenarios = [];
                         const planObj = state.plans.find((p) => String(p.id) === String(pid));
                         if (planObj && Array.isArray(planObj.scenarios)) {
                             planObj.scenarios.forEach((s) => {
                                 if (String(s.module || s.module_id || '') === String(mid)) scenarios.push(s);
                             });
                         }
+                        // If no scenarios available locally, fetch from API filtered by module and plan
+                        if (!scenarios.length) {
+                            (async () => {
+                                try {
+                                    const base = apiEndpoints.scenarios || '/api/core/test-scenarios/';
+                                    const params = new URLSearchParams();
+                                    if (mid) params.append('module', String(mid));
+                                    if (pid) params.append('plan', String(pid));
+                                    const url = params.toString() ? `${base}?${params.toString()}` : base;
+                                    try { console.debug('[automation] modal module fetch', { pid, mid, url }); } catch (e) { }
+                                    const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                                    if (!resp.ok) throw new Error(`Failed to fetch scenarios for module: ${resp.status}`);
+                                    const data = await resp.json();
+                                    const normalized = Array.isArray(data) ? data.map(normalizeScenario) : [];
+                                    scenarios = normalized;
+                                    try { console.debug('[automation] modal module fetch result', { count: normalized.length, sample: normalized.length ? normalized[0] : null }); } catch (e) { }
+                                    // attach to plan if selected
+                                    if (pid) {
+                                        const p = state.plans.find((pp) => Number(pp.id) === Number(pid));
+                                        if (p) p.scenarios = normalized;
+                                        // Recompute modules from the newly attached scenarios and
+                                        // populate the module select so the user sees options
+                                        // immediately after the fetch completes.
+                                        try {
+                                            let modulesFromFetch = [];
+                                            if (p && Array.isArray(p.scenarios)) {
+                                                const seen2 = new Set();
+                                                p.scenarios.forEach((s) => {
+                                                    const mid2 = s && (s.module || s.module_id);
+                                                    if (mid2 && !seen2.has(String(mid2))) {
+                                                        seen2.add(String(mid2));
+                                                        const m2 = initialModules.find((im) => String(im.id) === String(mid2));
+                                                        if (m2) modulesFromFetch.push(m2);
+                                                    }
+                                                });
+                                            }
+                                            if (!modulesFromFetch.length) modulesFromFetch = Array.isArray(initialModules) ? initialModules.slice() : [];
+                                            try { console.debug('[automation] modalPlan populate modules after fetch', { modulesCount: modulesFromFetch.length, sample: modulesFromFetch.slice(0, 3) }); } catch (e) { }
+                                            if (modalModuleElLocal) {
+                                                modalModuleElLocal.innerHTML = '';
+                                                const placeholder2 = document.createElement('option'); placeholder2.value = ''; placeholder2.textContent = '(select module)'; modalModuleElLocal.appendChild(placeholder2);
+                                                modulesFromFetch.forEach((m) => {
+                                                    const opt2 = document.createElement('option'); opt2.value = m.id; opt2.textContent = m.title || `Module ${m.id}`; modalModuleElLocal.appendChild(opt2);
+                                                });
+                                                try {
+                                                    modalModuleElLocal.disabled = !state.selectedPlanId ? !modulesFromFetch.length : false;
+                                                } catch (_err2) {
+                                                    modalModuleElLocal.disabled = !modulesFromFetch.length;
+                                                }
+                                            }
+                                            if (modalScenarioElLocal) {
+                                                modalScenarioElLocal.innerHTML = '';
+                                                const ph2 = document.createElement('option'); ph2.value = ''; ph2.textContent = '(select scenario)'; modalScenarioElLocal.appendChild(ph2);
+                                                modalScenarioElLocal.disabled = true;
+                                            }
+                                        } catch (err) { /* ignore */ }
+                                    }
+                                } catch (err) {
+                                    console.debug('[automation] modal module fetch error', err);
+                                } finally {
+                                    // populate modal scenario select
+                                    if (modalScenarioEl) {
+                                        modalScenarioEl.innerHTML = '';
+                                        const ph = document.createElement('option'); ph.value = ''; ph.textContent = '(select scenario)'; modalScenarioEl.appendChild(ph);
+                                        scenarios.forEach((s) => {
+                                            const opt = document.createElement('option'); opt.value = s.id; opt.textContent = s.title || `Scenario ${s.id}`; modalScenarioEl.appendChild(opt);
+                                        });
+                                        modalScenarioEl.disabled = !scenarios.length;
+                                    }
+                                }
+                            })();
+                            return; // async path will populate select
+                        }
+                        // populate from local scenarios
                         if (modalScenarioEl) {
                             modalScenarioEl.innerHTML = '';
                             const ph = document.createElement('option'); ph.value = ''; ph.textContent = '(select scenario)'; modalScenarioEl.appendChild(ph);
@@ -616,6 +805,16 @@
                     openCaseSelectionModal();
                 });
             }
+            // Delegated fallback: catch clicks on the open modal button even if
+            // the direct binding above was not executed or the element was
+            // dynamic. This ensures the modal opens on click.
+            root.addEventListener('click', (ev) => {
+                const btn = ev.target.closest && ev.target.closest('#open-case-selection-modal');
+                if (btn) {
+                    try { ev.preventDefault(); } catch (e) { }
+                    try { openCaseSelectionModal(); } catch (e) { /* ignore */ }
+                }
+            });
         } catch (e) { /* ignore */ }
 
         // populate plan and module selects for scenarios panel
@@ -908,6 +1107,12 @@
             selectedScenarioId: null,
             editingPlan: false,
         };
+
+        // Debug: expose the initial plans we were given server-side so we can
+        // confirm in browser console whether the payload arrived correctly.
+        try {
+            console.debug('[automation] initialPlans length:', (state.plans || []).length, 'sample:', (state.plans || []).slice(0, 3));
+        } catch (e) { /* ignore */ }
 
         const getSelectedPlan = () => state.plans.find((plan) => Number(plan.id) === Number(state.selectedPlanId)) || null;
 
