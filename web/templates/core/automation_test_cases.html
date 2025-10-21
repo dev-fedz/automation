@@ -36,50 +36,36 @@
             </div>
             <div class="automation-list" data-role="case-list" aria-live="polite">
                 {% if initial_selected_scenario and initial_selected_scenario.cases %}
-                    <div class="automation-case-list">
-                        {% for test_case in initial_selected_scenario.cases %}
-                            <article class="automation-case-card">
-                                <header>
-                                    <h3>{{ test_case.title|default:"Untitled case" }}</h3>
-                                    <div class="case-meta">Priority: {{ test_case.priority|default:"—" }} · Owner: {{ test_case.owner|default:"—" }}</div>
-                                </header>
-                                {% if test_case.description %}<p>{{ test_case.description }}</p>{% endif %}
-                                {% if test_case.steps %}
-                                    <div>
-                                        <strong>Steps</strong>
-                                        <ol class="case-detail-list">
-                                            {% for step in test_case.steps %}
-                                                <li>Step {{ forloop.counter }}: {{ step.action|default:step }}</li>
-                                            {% endfor %}
-                                        </ol>
-                                    </div>
-                                {% endif %}
-                                {% if test_case.expected_results %}
-                                    <div>
-                                        <strong>Expected</strong>
-                                        <ul class="case-detail-list">
-                                            {% for expect in test_case.expected_results %}
-                                                <li>{{ expect.note|default:expect }}</li>
-                                            {% endfor %}
-                                        </ul>
-                                    </div>
-                                {% endif %}
-                                {% if test_case.dynamic_variables %}
-                                    <div>
-                                        <strong>Dynamic variables</strong>
-                                        <ul class="case-detail-list">
-                                            {% for key, value in test_case.dynamic_variables.items %}
-                                                <li>{{ key }}: {{ value }}</li>
-                                            {% endfor %}
-                                        </ul>
-                                    </div>
-                                {% endif %}
-                                {% if test_case.related_api_request %}
-                                    <div><small>Linked request: #{{ test_case.related_api_request }}</small></div>
-                                {% endif %}
-                            </article>
-                        {% endfor %}
-                    </div>
+                    <table class="table-modern automation-table" aria-label="Test cases">
+                        <thead>
+                            <tr>
+                                <th scope="col">ID</th>
+                                <th scope="col">Title</th>
+                                <th scope="col">Description</th>
+                                <th scope="col">Created</th>
+                                <th scope="col">Updated</th>
+                                <th scope="col">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody data-role="case-table-body">
+                            {% for test_case in initial_selected_scenario.cases %}
+                                <tr data-case-id="{{ test_case.id }}">
+                                    <td>{{ test_case.testcase_id|default:test_case.id }}</td>
+                                    <td>{{ test_case.title|default:"Untitled case" }}</td>
+                                    <td>{{ test_case.description|truncatechars:120 }}</td>
+                                    <td>{{ test_case.created_at }}</td>
+                                    <td>{{ test_case.updated_at }}</td>
+                                    <td>
+                                        <div class="table-action-group">
+                                            <button type="button" class="action-button" data-action="view-case" data-case-id="{{ test_case.id }}">View</button>
+                                            <button type="button" class="action-button" data-action="edit-case" data-case-id="{{ test_case.id }}">Edit</button>
+                                            <button type="button" class="action-button" data-action="delete-case" data-case-id="{{ test_case.id }}" data-variant="danger">Delete</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 {% elif initial_selected_scenario %}
                     <p class="empty">No test cases found. Capture one using the form below.</p>
                 {% else %}
@@ -113,6 +99,14 @@ payload.plan=premium"></textarea>
                             </div>
                         </div>
                         <div class="form-row">
+                            <label for="case-preconditions">Preconditions</label>
+                            <textarea id="case-preconditions" name="preconditions" rows="2" placeholder="Any setup or state required before executing this test."></textarea>
+                        </div>
+                        <div class="form-row">
+                            <label for="case-requirements">Requirements</label>
+                            <textarea id="case-requirements" name="requirements" rows="2" placeholder="Linked requirement IDs or description."></textarea>
+                        </div>
+                        <div class="form-row">
                             <label for="case-dynamic">Dynamic variables (JSON)</label>
                             <textarea id="case-dynamic" name="dynamic" rows="3" placeholder='{"expected_status": 200, "expected_plan": "premium"}'></textarea>
                             <p class="form-hint">Provide key-value pairs used during API validation. Must be valid JSON.</p>
@@ -124,12 +118,22 @@ payload.plan=premium"></textarea>
                             </div>
                             <div>
                                 <label for="case-owner">Owner</label>
-                                <input type="text" id="case-owner" name="owner" placeholder="planner@example.com">
+                                <select id="case-owner" name="owner">
+                                    <option value="">(assignment by server)</option>
+                                </select>
                             </div>
                         </div>
                         <div class="form-row">
-                            <label for="case-request">Related API Request ID (optional)</label>
-                            <input type="number" id="case-request" name="request" min="1" step="1" placeholder="123">
+                            <label for="case-collection">Related API Collection (optional)</label>
+                            <select id="case-collection" name="collection">
+                                <option value="">(select collection)</option>
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label for="case-request">Related API Request (optional)</label>
+                            <select id="case-request" name="request">
+                                <option value="">(select request)</option>
+                            </select>
                         </div>
                         <!-- Button to open selection modal (Plan -> Module -> Scenario) -->
                         <div class="form-row">
@@ -214,6 +218,14 @@ payload.plan=premium"></textarea>
                         <label for="module-add-case-expected">Expected results (one per line)</label>
                         <textarea id="module-add-case-expected" name="expected" rows="4"></textarea>
                     </div>
+                    <div class="form-row">
+                        <label for="module-add-case-preconditions">Preconditions</label>
+                        <textarea id="module-add-case-preconditions" name="preconditions" rows="2" placeholder="Any setup or state required before executing this test."></textarea>
+                    </div>
+                    <div class="form-row">
+                        <label for="module-add-case-requirements">Requirements</label>
+                        <textarea id="module-add-case-requirements" name="requirements" rows="2" placeholder="Linked requirement IDs or description."></textarea>
+                    </div>
                     <div class="form-row inline">
                         <div>
                             <label for="module-add-case-priority">Priority</label>
@@ -221,12 +233,22 @@ payload.plan=premium"></textarea>
                         </div>
                         <div>
                             <label for="module-add-case-owner">Owner</label>
-                            <input type="text" id="module-add-case-owner" name="owner" placeholder="owner@example.com">
+                            <select id="module-add-case-owner" name="owner">
+                                <option value="">(assignment by server)</option>
+                            </select>
                         </div>
                     </div>
                     <div class="form-row">
-                        <label for="module-add-case-request">Related API Request ID (optional)</label>
-                        <input type="number" id="module-add-case-request" name="request" min="1" step="1" placeholder="123">
+                        <label for="module-add-case-collection">Related API Collection (optional)</label>
+                        <select id="module-add-case-collection" name="collection">
+                            <option value="">(select collection)</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label for="module-add-case-request">Related API Request (optional)</label>
+                        <select id="module-add-case-request" name="request">
+                            <option value="">(select request)</option>
+                        </select>
                     </div>
                 </fieldset>
                 <div class="form-actions">
