@@ -792,9 +792,9 @@
                                         <table class="table-modern automation-table" aria-label="Test cases">
                                             <thead>
                                                 <tr>
+                                                    <th scope="col">ID</th>
                                                     <th scope="col">Title</th>
                                                     <th scope="col">Description</th>
-                                                    <th scope="col">Module</th>
                                                     <th scope="col">Created</th>
                                                     <th scope="col">Updated</th>
                                                     <th scope="col">Actions</th>

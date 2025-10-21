@@ -414,6 +414,12 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
         if 'testcase_id' not in data or data.get('testcase_id') in (None, ''):
             data['testcase_id'] = None
+        # If owner not provided, set to the authenticated user
+        try:
+            if not data.get('owner') and getattr(request, 'user', None) and request.user.is_authenticated:
+                data['owner'] = request.user.id
+        except Exception:
+            pass
         serializer = self.get_serializer(data=data)
         try:
             serializer.is_valid(raise_exception=True)
@@ -429,7 +435,15 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                 serializer.is_valid(raise_exception=True)
             else:
                 raise
-        self.perform_create(serializer)
+        # Save using perform_create but ensure owner is set to authenticated user
+        try:
+            if getattr(request, 'user', None) and request.user.is_authenticated:
+                serializer.save(owner=request.user)
+            else:
+                self.perform_create(serializer)
+        except TypeError:
+            # Fallback if serializer.save doesn't accept owner (older behavior)
+            self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 

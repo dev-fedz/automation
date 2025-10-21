@@ -357,8 +357,14 @@ class ApiRunSerializer(serializers.ModelSerializer):
 class TestCaseSerializer(serializers.ModelSerializer):
     # Allow API clients to omit testcase_id; it will be generated in model.save()
     testcase_id = serializers.CharField(required=False, allow_blank=True, allow_null=True, default=None)
-    title = serializers.CharField(source="testcase_id", read_only=True)
+    # Title is a human-friendly field, editable by clients
+    title = serializers.CharField(required=False, allow_blank=True)
+    steps = serializers.ListField(child=serializers.JSONField(), required=False)
     expected_results = serializers.ListField(child=serializers.JSONField(), required=False)
+    dynamic_variables = serializers.DictField(child=serializers.JSONField(), required=False)
+    priority = serializers.CharField(required=False, allow_blank=True)
+    owner_id = serializers.IntegerField(source="owner.id", read_only=True)
+    owner = serializers.StringRelatedField(source="owner", read_only=True)
 
     class Meta:
         model = models.TestCase
@@ -367,15 +373,20 @@ class TestCaseSerializer(serializers.ModelSerializer):
             "scenario",
             "testcase_id",
             "title",
+            "steps",
             "description",
             "precondition",
             "requirements",
             "expected_results",
+            "dynamic_variables",
+            "priority",
+            "owner",
+            "owner_id",
             "related_api_request",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at", "title"]
+        read_only_fields = ["id", "created_at", "updated_at"]
         extra_kwargs = {
             "testcase_id": {"required": False, "allow_null": True, "allow_blank": True}
         }

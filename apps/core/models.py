@@ -483,13 +483,29 @@ class TestCase(TimeStampedModel):
     """Executable test case with dynamic variables for API validation."""
 
     scenario = models.ForeignKey(TestScenario, on_delete=models.CASCADE, related_name="cases")
+    # human-friendly title for the case
+    title = models.CharField(max_length=150, blank=True)
     # allow blank so forms/serializers won't require the field; it will be
     # auto-generated in save() when missing
     testcase_id = models.CharField(max_length=50, blank=True)
+    # Steps can be stored as a list of strings or structured objects
+    steps = models.JSONField(default=list, blank=True)
     description = models.TextField(blank=True)
+    # Expected results are already present further down (kept for compatibility)
+    expected_results = models.JSONField(default=list, blank=True)
+    # Dynamic variables attached to this case (key/value map)
+    dynamic_variables = models.JSONField(default=dict, blank=True)
+    # Priority and owner metadata
+    priority = models.CharField(max_length=20, blank=True)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="test_cases",
+    )
     precondition = models.TextField(blank=True)
     requirements = models.TextField(blank=True)
-    expected_results = models.JSONField(default=list, blank=True)
     related_api_request = models.ForeignKey(ApiRequest, on_delete=models.SET_NULL, null=True, blank=True, related_name="test_cases")
 
     class Meta:
