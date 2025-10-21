@@ -360,6 +360,38 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                 raise ValidationError({"plan": "Plan must be an integer."}) from exc
         return queryset
 
+    def create(self, request, *args, **kwargs):
+        # Defensive: some clients or parsers may omit the 'testcase_id' key
+        # entirely which can cause certain validators or upstream code to
+        # treat the field as required. Ensure the incoming data contains the
+        # key set to None so the serializer can accept it and the model's
+        # save() will auto-generate the id when appropriate.
+        try:
+            logger.debug('[core] TestCaseViewSet.create incoming data: %s', getattr(request, 'data', None))
+        except Exception:
+            pass
+        data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+        if 'testcase_id' not in data or data.get('testcase_id') in (None, ''):
+            data['testcase_id'] = None
+        serializer = self.get_serializer(data=data)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except ValidationError as exc:
+            # Defensive: if the only error is that testcase_id is required,
+            # inject a None value and retry so the model can auto-generate it.
+            errors = getattr(exc, 'detail', {}) or {}
+            if 'testcase_id' in errors and errors.get('testcase_id') in (["This field is required."],) or (
+                isinstance(errors.get('testcase_id'), list) and any(str(e).lower().startswith('this field is required') for e in errors.get('testcase_id'))
+            ):
+                data['testcase_id'] = None
+                serializer = self.get_serializer(data=data)
+                serializer.is_valid(raise_exception=True)
+            else:
+                raise
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
 
 class RiskViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.RiskSerializer

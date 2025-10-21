@@ -483,7 +483,9 @@ class TestCase(TimeStampedModel):
     """Executable test case with dynamic variables for API validation."""
 
     scenario = models.ForeignKey(TestScenario, on_delete=models.CASCADE, related_name="cases")
-    testcase_id = models.CharField(max_length=50)
+    # allow blank so forms/serializers won't require the field; it will be
+    # auto-generated in save() when missing
+    testcase_id = models.CharField(max_length=50, blank=True)
     description = models.TextField(blank=True)
     precondition = models.TextField(blank=True)
     requirements = models.TextField(blank=True)
@@ -496,3 +498,53 @@ class TestCase(TimeStampedModel):
 
     def __str__(self) -> str:  # pragma: no cover
         return self.testcase_id
+
+    def save(self, *args, **kwargs):
+        """
+        Auto-generate a testcase_id when not provided.
+
+        Format: <INITIALS><NNNNN> where INITIALS are the initials of the
+        scenario title (letters only, up to 3 chars) and the numeric part
+        is a 5-digit number starting at 10001 and incrementing for the
+        given initials within the same scenario.
+        Example: Scenario "Scenario Test 1" -> initials "ST" -> ST10001
+        """
+        # only generate when empty/blank
+        if not (self.testcase_id and str(self.testcase_id).strip()):
+            try:
+                import re
+
+                title = (self.scenario.title or '') if self.scenario else ''
+                # extract word tokens containing letters
+                words = re.findall(r"[A-Za-z]+", title)
+                initials = ''.join([w[0].upper() for w in words[:3]]) if words else 'TC'
+                # build regex to find existing numeric suffixes for this initials
+                pattern = re.compile(rf'^{re.escape(initials)}(\d+)$')
+                # collect numeric parts from existing sibling cases that match prefix
+                existing = []
+                try:
+                    qs = TestCase.objects.filter(scenario=self.scenario, testcase_id__startswith=initials)
+                    for c in qs:
+                        m = pattern.match(c.testcase_id or '')
+                        if m:
+                            try:
+                                existing.append(int(m.group(1)))
+                            except Exception:
+                                continue
+                except Exception:
+                    existing = []
+                if existing:
+                    next_num = max(existing) + 1
+                else:
+                    next_num = 10001
+                # ensure numeric part is at least 5 digits
+                num_str = str(next_num).rjust(5, '0')
+                self.testcase_id = f"{initials}{num_str}"
+            except Exception:
+                # fallback: use a UUID-like short id
+                try:
+                    import uuid
+                    self.testcase_id = uuid.uuid4().hex[:12].upper()
+                except Exception:
+                    self.testcase_id = 'TC00001'
+        super().save(*args, **kwargs)

@@ -783,8 +783,8 @@
                                     <div class="panel-header">
                                         <h2 id="headline-cases">Test Cases</h2>
                                         <div class="panel-controls">
-                                            <input type="search" id="case-search" class="automation-search" placeholder="Search cases" aria-label="Search cases">
                                             <div class="case-breadcrumb-label" aria-hidden="true">plan &middot; modules &middot; scenarios</div>
+                                            <input type="search" id="case-search" class="automation-search" placeholder="Search cases" aria-label="Search cases">
                                             <button type="button" class="btn-primary" id="open-new-case">New Test Case</button>
                                         </div>
                                     </div>
@@ -806,7 +806,61 @@
                                         </table>
                                     </div>
                                 `;
-                                // no plan/module selects required — UI intentionally shows only the breadcrumb label
+                                // populate breadcrumb label with actual selected names
+                                try {
+                                    const crumb = panel.querySelector('.case-breadcrumb-label');
+                                    if (crumb) {
+                                        // plan name
+                                        let planName = '—';
+                                        try {
+                                            const p = state.plans.find((pp) => Number(pp.id) === Number(state.selectedPlanId));
+                                            if (p) planName = p.name || p.title || `Plan ${p.id}`;
+                                        } catch (e) { /* ignore */ }
+                                        // scenario title and module name
+                                        let scenarioTitle = '—';
+                                        let moduleName = '—';
+                                        try {
+                                            const s = (function () {
+                                                const plan = state.plans.find((pp) => Number(pp.id) === Number(state.selectedPlanId));
+                                                if (!plan || !Array.isArray(plan.scenarios)) return null;
+                                                return plan.scenarios.find((sc) => Number(sc.id) === Number(state.selectedScenarioId)) || null;
+                                            }());
+                                            if (s) {
+                                                scenarioTitle = s.title || `Scenario ${s.id}`;
+                                                // module id may be in s.module or s.module_id
+                                                const mid = s.module || s.module_id || null;
+                                                if (mid) {
+                                                    const mObj = initialModules.find((m) => Number(m.id) === Number(mid));
+                                                    if (mObj) moduleName = mObj.title || `Module ${mObj.id}`;
+                                                    else moduleName = `Module ${mid}`;
+                                                } else {
+                                                    moduleName = '—';
+                                                }
+                                            }
+                                        } catch (e) { /* ignore */ }
+                                        crumb.textContent = `${planName} · ${moduleName} · ${scenarioTitle}`;
+                                    }
+                                } catch (e) { /* ignore */ }
+                                // attach handler to the New Test Case button so it opens the add-case modal
+                                try {
+                                    const newCaseBtn = panel.querySelector('#open-new-case');
+                                    if (newCaseBtn) {
+                                        newCaseBtn.addEventListener('click', (ev) => {
+                                            try {
+                                                ev.preventDefault();
+                                                const sid = state.selectedScenarioId || null;
+                                                const caseModal = document.querySelector('[data-role="module-add-case-modal"]');
+                                                if (caseModal) {
+                                                    const hid = document.getElementById('module-add-case-scenario-id'); if (hid) hid.value = sid || '';
+                                                    caseModal.hidden = false; body.classList.add('automation-modal-open');
+                                                    const titleInput = document.getElementById('module-add-case-title'); if (titleInput) titleInput.focus();
+                                                } else {
+                                                    setStatus('Unable to open test case modal.', 'error');
+                                                }
+                                            } catch (err) { /* ignore */ }
+                                        });
+                                    }
+                                } catch (_err) { /* ignore */ }
                             }
                         } catch (e) { /* ignore */ }
                         // re-render UI so cases for the selected scenario are shown (table body will be populated)
@@ -2617,6 +2671,97 @@
             }
             return response.json();
         };
+
+        // Delegated handler for dynamically injected "New Test Case" button
+        document.addEventListener('click', (ev) => {
+            try {
+                const btn = ev.target.closest && ev.target.closest('#open-new-case');
+                if (!btn) return;
+                ev.preventDefault();
+                try { console.debug('[automation] #open-new-case clicked'); } catch (e) { /* ignore */ }
+                setStatus('Opening New Test Case…', 'info');
+                const sid = state.selectedScenarioId || null;
+                const caseModal = document.querySelector('[data-role="module-add-case-modal"]');
+                if (caseModal) {
+                    const hid = document.getElementById('module-add-case-scenario-id'); if (hid) hid.value = sid || '';
+                    caseModal.hidden = false; body.classList.add('automation-modal-open');
+                    const titleInput = document.getElementById('module-add-case-title'); if (titleInput) titleInput.focus();
+                    setStatus('', 'info');
+                } else {
+                    setStatus('Unable to find test case modal on the page.', 'error');
+                }
+            } catch (err) { /* ignore */ }
+        });
+
+        // Submit handler for Add Test Case modal form (so saving works when data_management.js is not loaded)
+        try {
+            const moduleAddCaseForm = document.getElementById('module-add-case-form');
+            if (moduleAddCaseForm) {
+                moduleAddCaseForm.addEventListener('submit', async (event) => {
+                    try {
+                        event.preventDefault();
+                        const scenarioInput = document.getElementById('module-add-case-scenario-id');
+                        const titleInput = document.getElementById('module-add-case-title');
+                        const descInput = document.getElementById('module-add-case-description');
+                        const stepsInput = document.getElementById('module-add-case-steps');
+                        const expectedInput = document.getElementById('module-add-case-expected');
+                        const priorityInput = document.getElementById('module-add-case-priority');
+                        const ownerInput = document.getElementById('module-add-case-owner');
+                        const requestInput = document.getElementById('module-add-case-request');
+                        const sid = scenarioInput && scenarioInput.value ? Number(scenarioInput.value) : null;
+                        if (!sid) {
+                            setStatus('Scenario id missing for test case.', 'error');
+                            return;
+                        }
+                        const payload = {
+                            scenario: sid,
+                            title: (titleInput && titleInput.value || '').trim(),
+                            description: descInput && descInput.value || '',
+                            steps: stepsInput && stepsInput.value ? stepsInput.value.split(/\n/).map((s) => s.trim()).filter(Boolean) : [],
+                            expected_results: expectedInput && expectedInput.value ? expectedInput.value.split(/\n/).map((s) => ({ note: s.trim() })).filter(Boolean) : [],
+                            priority: priorityInput && priorityInput.value ? priorityInput.value : '',
+                            owner: ownerInput && ownerInput.value ? ownerInput.value : '',
+                        };
+                        if (requestInput && requestInput.value) {
+                            const parsed = Number(requestInput.value);
+                            if (!Number.isNaN(parsed) && parsed > 0) payload.related_api_request = parsed;
+                        }
+                        if (!payload.title) {
+                            setStatus('Test case title is required.', 'error');
+                            return;
+                        }
+                        setStatus('Saving test case…', 'info');
+                        const base = apiEndpoints.cases || '/api/core/test-cases/';
+                        const resp = await fetch(base, {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
+                            body: JSON.stringify(payload),
+                        });
+                        if (!resp.ok) {
+                            const body = await resp.text().catch(() => null);
+                            throw new Error(`Failed to save test case: ${resp.status}${body ? ' - ' + body : ''}`);
+                        }
+                        const created = await resp.json().catch(() => null);
+                        // close modal and reset
+                        const modal = document.querySelector('[data-role="module-add-case-modal"]');
+                        if (modal) {
+                            modal.hidden = true; body.classList.remove('automation-modal-open');
+                        }
+                        moduleAddCaseForm.reset();
+                        setStatus('Test case saved.', 'success');
+                        // Refresh plans/scenarios so the new case appears in the table
+                        try {
+                            await refreshPlans({ silent: true });
+                        } catch (e) {
+                            try { renderAll(); } catch (_e) { }
+                        }
+                    } catch (err) {
+                        setStatus(err instanceof Error ? err.message : 'Unable to save test case.', 'error');
+                    }
+                });
+            }
+        } catch (e) { /* ignore */ }
 
         const handlePlanSubmit = async (event) => {
             event.preventDefault();

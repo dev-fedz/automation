@@ -355,6 +355,8 @@ class ApiRunSerializer(serializers.ModelSerializer):
 
 
 class TestCaseSerializer(serializers.ModelSerializer):
+    # Allow API clients to omit testcase_id; it will be generated in model.save()
+    testcase_id = serializers.CharField(required=False, allow_blank=True, allow_null=True, default=None)
     title = serializers.CharField(source="testcase_id", read_only=True)
     expected_results = serializers.ListField(child=serializers.JSONField(), required=False)
 
@@ -374,18 +376,22 @@ class TestCaseSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at", "title"]
-        validators = [
-            serializers.UniqueTogetherValidator(
-                queryset=models.TestCase.objects.all(),
-                fields=["scenario", "testcase_id"],
-                message="Test case ID must be unique per scenario.",
-            )
-        ]
+        extra_kwargs = {
+            "testcase_id": {"required": False, "allow_null": True, "allow_blank": True}
+        }
+        # validators: uniqueness is checked in validate() only when a
+        # testcase_id is supplied (so missing/testcase generation flows
+        # are allowed)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         testcase_id = attrs.get("testcase_id")
         if testcase_id:
-            attrs["testcase_id"] = str(testcase_id).strip()
+            testcase_id = str(testcase_id).strip()
+            attrs["testcase_id"] = testcase_id
+            # ensure uniqueness per scenario when provided
+            scenario = attrs.get("scenario")
+            if scenario and models.TestCase.objects.filter(scenario=scenario, testcase_id=testcase_id).exists():
+                raise ValidationError({"testcase_id": "Test case ID must be unique per scenario."})
         return attrs
 
 
