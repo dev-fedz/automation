@@ -14,11 +14,17 @@
     <div class="automation-grid">
 
         <div id="test-cases-panel-container" {% if not initial_selected_scenario %}style="display:none;"{% endif %}>
-        <section class="automation-panel" data-panel="cases" aria-labelledby="headline-cases">
+        <section class="automation-panel data-card" data-panel="cases" aria-labelledby="headline-cases">
             <div class="panel-header">
-                <h2 id="headline-cases">Test Cases</h2>
-                <p class="panel-meta">Scenario: <span data-role="selected-scenario-name">{{ initial_selected_scenario.title|default:"—" }}</span></p>
+                <div>
+                    <h2 id="headline-cases">Test Cases</h2>
+                    <p class="panel-subtitle">Inspect and capture test cases for a scenario.</p>
+                </div>
+                <div class="panel-actions">
+                    <p class="panel-meta">Scenario: <span data-role="selected-scenario-name">{{ initial_selected_scenario.title|default:"—" }}</span></p>
+                </div>
             </div>
+            <div class="card table-card automation-table-card" aria-live="polite">
             <div class="automation-case-summary" data-role="case-summary">
                 {% if initial_selected_scenario %}
                     <strong>{{ initial_selected_scenario.cases|length }} test case{% if initial_selected_scenario.cases|length != 1 %}s{% endif %} in scope.</strong>
@@ -79,6 +85,7 @@
                 {% else %}
                     <p class="empty">Select a scenario to view its test cases.</p>
                 {% endif %}
+            </div>
             </div>
             <details class="automation-form-group">
                 <summary>Create Test Case</summary>

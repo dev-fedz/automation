@@ -170,6 +170,30 @@
     gap: 0.75rem;
 }
 
+/* Ensure header controls line up in a single row and allow the breadcrumb to be centered */
+.panel-header .panel-controls {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.case-breadcrumb-label {
+    justify-self: start;
+    font-weight: 700;
+    color: var(--automation-accent-dark);
+}
+
+#case-search {
+    justify-self: center;
+    width: 100%;
+    max-width: 420px;
+}
+
+#open-new-case {
+    justify-self: end;
+}
+
 .panel-actions {
     display: flex;
     align-items: center;

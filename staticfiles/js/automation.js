@@ -528,6 +528,7 @@
                         // re-query elements at handler time to avoid stale references
                         const moduleSelect = document.getElementById('modal-case-module') || modalModuleEl;
                         const modalScenarioElLocal = document.getElementById('modal-case-scenario') || modalScenarioEl;
+                        try { console.debug('[automation] modalPlan handler elements', { moduleSelectPresent: !!moduleSelect, modalScenarioPresent: !!modalScenarioElLocal }); } catch (e) { }
                         if (!moduleSelect) return;
                         moduleSelect.innerHTML = '';
                         const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = '(select module)'; moduleSelect.appendChild(placeholder);
@@ -599,12 +600,13 @@
                                                 moduleIds.push(String(mid2));
                                             }
                                         });
-                                        // map to initialModules or fallback to minimal objects built from ids
+                                        // try to map to initialModules; if none exist, build minimal module objects from ids
                                         const modulesFromFetch = moduleIds.map((mid) => {
                                             const m = initialModules.find((im) => String(im.id) === String(mid));
                                             if (m) return m;
                                             return { id: mid, title: `Module ${mid}` };
                                         });
+                                        try { console.debug('[automation] modulesFromFetch after fetch', modulesFromFetch.length, modulesFromFetch.slice(0, 3)); } catch (e) { }
                                         moduleSelectRef.innerHTML = '';
                                         const placeholder2 = document.createElement('option'); placeholder2.value = ''; placeholder2.textContent = '(select module)'; moduleSelectRef.appendChild(placeholder2);
                                         modulesFromFetch.forEach((m) => {
@@ -752,6 +754,15 @@
                             els.caseScenarioSelect.value = selectedScenario;
                             els.caseScenarioSelect.disabled = false;
                         }
+                        // Update client-side selection state so renderers show the selected scenario
+                        try {
+                            // modal plan select may contain the selected plan id
+                            const modalPlanVal = (els.modalCasePlan && els.modalCasePlan.value) ? els.modalCasePlan.value : (document.getElementById('modal-case-plan') && document.getElementById('modal-case-plan').value) || null;
+                            if (modalPlanVal) {
+                                state.selectedPlanId = Number(modalPlanVal);
+                            }
+                            state.selectedScenarioId = Number(selectedScenario);
+                        } catch (e) { /* ignore */ }
                         // enable form fieldset
                         if (els.caseForm) {
                             const fieldset = els.caseForm.querySelector('fieldset'); if (fieldset) fieldset.disabled = false;
@@ -761,6 +772,45 @@
                             const panel = document.getElementById('test-cases-panel-container');
                             if (panel) panel.style.display = '';
                         } catch (ie) { /* ignore */ }
+                        // Convert the Test Cases panel into a scenarios-style table layout
+                        try {
+                            const panel = document.querySelector('.automation-panel[data-panel="cases"]');
+                            if (panel) {
+                                // clear existing contents
+                                panel.innerHTML = '';
+                                // inject header + controls similar to scenarios panel
+                                panel.innerHTML = `
+                                    <div class="panel-header">
+                                        <h2 id="headline-cases">Test Cases</h2>
+                                        <div class="panel-controls">
+                                            <input type="search" id="case-search" class="automation-search" placeholder="Search cases" aria-label="Search cases">
+                                            <div class="case-breadcrumb-label" aria-hidden="true">plan &middot; modules &middot; scenarios</div>
+                                            <button type="button" class="btn-primary" id="open-new-case">New Test Case</button>
+                                        </div>
+                                    </div>
+                                    <div class="card table-card automation-table-card" aria-live="polite">
+                                        <table class="table-modern automation-table" aria-label="Test cases">
+                                            <thead>
+                                                <tr>
+                                                    <th scope="col">Title</th>
+                                                    <th scope="col">Description</th>
+                                                    <th scope="col">Module</th>
+                                                    <th scope="col">Created</th>
+                                                    <th scope="col">Updated</th>
+                                                    <th scope="col">Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody data-role="case-table-body">
+                                                <tr><td colspan="6" class="empty">Loading test cases…</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                `;
+                                // no plan/module selects required — UI intentionally shows only the breadcrumb label
+                            }
+                        } catch (e) { /* ignore */ }
+                        // re-render UI so cases for the selected scenario are shown (table body will be populated)
+                        try { renderAll(); } catch (e) { try { renderCaseList(); } catch (_e) { /* ignore */ } }
                         // close modal
                         closeCaseSelectionModal();
                         // focus title input
@@ -2258,6 +2308,41 @@
             els.caseList.innerHTML = '';
             if (!scenario) {
                 els.caseList.innerHTML = '<p class="empty">No scenario selected.</p>';
+                return;
+            }
+            // If the cases panel has been converted to a table layout (copied from scenarios)
+            // render rows into the table body instead of card-based list.
+            const caseTbody = document.querySelector('[data-role="case-table-body"]');
+            if (caseTbody) {
+                const cases = Array.isArray(scenario.cases) ? scenario.cases : [];
+                if (!cases.length) {
+                    caseTbody.innerHTML = '<tr><td colspan="6" class="empty">No test cases found. Capture one using the form below.</td></tr>';
+                    return;
+                }
+                const rows = cases.map((testCase) => {
+                    const title = escapeHtml(testCase.title || 'Untitled case');
+                    const desc = escapeHtml(testCase.description || '');
+                    const moduleLabel = '';
+                    const created = escapeHtml(formatDateTime(testCase.created_at || null));
+                    const updated = escapeHtml(formatDateTime(testCase.updated_at || null));
+                    return `
+                        <tr data-case-id="${testCase.id || ''}">
+                            <td>${title}</td>
+                            <td>${desc}</td>
+                            <td>${escapeHtml(moduleLabel)}</td>
+                            <td>${created}</td>
+                            <td>${updated}</td>
+                            <td>
+                                <div class="table-action-group">
+                                    <button type="button" class="action-button" data-action="view-case" data-case-id="${testCase.id || ''}">View</button>
+                                    <button type="button" class="action-button" data-action="edit-case" data-case-id="${testCase.id || ''}">Edit</button>
+                                    <button type="button" class="action-button" data-action="delete-case" data-case-id="${testCase.id || ''}" data-variant="danger">Delete</button>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+                caseTbody.innerHTML = rows;
                 return;
             }
             const cases = Array.isArray(scenario.cases) ? scenario.cases : [];
