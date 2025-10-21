@@ -896,6 +896,35 @@
 
             // Prevent Escape key from closing the modal when it's open
             document.addEventListener('keydown', (ev) => {
+                // attach handler to the case search input (ensure element exists)
+                try {
+                    const caseSearchElLocal = panel.querySelector('#case-search');
+                    if (caseSearchElLocal && !caseSearchElLocal.dataset._searchAttached) {
+                        caseSearchElLocal.dataset._searchAttached = '1';
+                        caseSearchElLocal.addEventListener('input', debounce(async (ev) => {
+                            const q = (caseSearchElLocal.value || '').trim();
+                            state._caseSearch = q.toLowerCase();
+                            if (!q) {
+                                state._caseSearchResults = null;
+                                try { renderCaseList(); } catch (e) { /* ignore */ }
+                                return;
+                            }
+                            try {
+                                setStatus('Searching cases...', 'info');
+                                const base = apiEndpoints.cases || '/api/core/test-cases/';
+                                const url = `${base}?search=${encodeURIComponent(q)}`;
+                                const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                                if (!resp.ok) throw new Error('Search failed');
+                                const data = await resp.json();
+                                state._caseSearchResults = Array.isArray(data) ? data : [];
+                                setStatus('', 'info');
+                                try { renderCaseList(); } catch (e) { /* ignore */ }
+                            } catch (err) {
+                                setStatus('Case search failed.', 'error');
+                            }
+                        }, 300));
+                    }
+                } catch (e) { /* ignore */ }
                 if (!els.caseSelectionModal || els.caseSelectionModal.hidden) return;
                 if (ev.key === 'Escape' || ev.key === 'Esc') {
                     ev.preventDefault();
@@ -1391,6 +1420,70 @@
             }, 200));
         }
 
+        // wire case search input (search by testcase_id, title, description)
+        try {
+            const caseSearchEl = document.getElementById('case-search');
+            if (caseSearchEl) {
+                caseSearchEl.addEventListener('input', debounce(async (ev) => {
+                    const q = (caseSearchEl.value || '').trim();
+                    state._caseSearch = q.toLowerCase();
+                    // If empty, clear remote results and re-render scenario view
+                    if (!q) {
+                        state._caseSearchResults = null;
+                        try { renderCaseList(); } catch (e) { /* ignore */ }
+                        return;
+                    }
+                    // perform server-side search to allow cross-scenario results
+                    try {
+                        setStatus('Searching cases...', 'info');
+                        const base = apiEndpoints.cases || '/api/core/test-cases/';
+                        const url = `${base}?search=${encodeURIComponent(q)}`;
+                        const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                        if (!resp.ok) throw new Error('Search failed');
+                        const data = await resp.json();
+                        // normalize data to an array of case objects
+                        state._caseSearchResults = Array.isArray(data) ? data : [];
+                        setStatus('', 'info');
+                        try { renderCaseList(); } catch (e) { /* ignore */ }
+                    } catch (err) {
+                        setStatus('Case search failed.', 'error');
+                    }
+                }, 300));
+            }
+        } catch (e) { /* ignore */ }
+
+        // Delegated handler: ensure any input with class 'automation-search' triggers
+        // the case search logic even if the input was injected after script ran.
+        document.addEventListener('input', debounce(async (ev) => {
+            try {
+                const el = ev.target;
+                if (!el || !el.classList || !el.classList.contains('automation-search')) return;
+                // Only handle #case-search for now (other automation-search uses can be added)
+                if (String(el.id || '') !== 'case-search') return;
+                const q = (el.value || '').trim();
+                state._caseSearch = q.toLowerCase();
+                if (!q) {
+                    state._caseSearchResults = null;
+                    try { renderCaseList(); } catch (e) { /* ignore */ }
+                    return;
+                }
+                try {
+                    setStatus('Searching cases...', 'info');
+                    const base = apiEndpoints.cases || '/api/core/test-cases/';
+                    const url = `${base}?search=${encodeURIComponent(q)}`;
+                    const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                    if (!resp.ok) throw new Error('Search failed');
+                    const data = await resp.json();
+                    state._caseSearchResults = Array.isArray(data) ? data : [];
+                    setStatus('', 'info');
+                    try { renderCaseList(); } catch (e) { /* ignore */ }
+                } catch (err) {
+                    setStatus('Case search failed.', 'error');
+                    try { console.error('[automation] delegated case search error', err); } catch (e) { /* ignore */ }
+                }
+            } catch (e) { /* ignore */ }
+        }, 300));
+
         // New Scenario button should use the same modal flow as Add Scenario in Data Management
         const openNewScenarioButton = document.getElementById('open-new-scenario');
         if (openNewScenarioButton) {
@@ -1700,6 +1793,35 @@
                                         }
                                     }
                                 }
+                                // Immediately attach search handler to #case-search if present (guarded)
+                                try {
+                                    const caseSearchElImmediate = panel.querySelector('#case-search');
+                                    if (caseSearchElImmediate && !caseSearchElImmediate.dataset._searchAttached) {
+                                        caseSearchElImmediate.dataset._searchAttached = '1';
+                                        caseSearchElImmediate.addEventListener('input', debounce(async (ev) => {
+                                            const q = (caseSearchElImmediate.value || '').trim();
+                                            state._caseSearch = q.toLowerCase();
+                                            if (!q) {
+                                                state._caseSearchResults = null;
+                                                try { renderCaseList(); } catch (e) { /* ignore */ }
+                                                return;
+                                            }
+                                            try {
+                                                setStatus('Searching cases...', 'info');
+                                                const base = apiEndpoints.cases || '/api/core/test-cases/';
+                                                const url = `${base}?search=${encodeURIComponent(q)}`;
+                                                const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                                                if (!resp.ok) throw new Error('Search failed');
+                                                const data = await resp.json();
+                                                state._caseSearchResults = Array.isArray(data) ? data : [];
+                                                setStatus('', 'info');
+                                                try { renderCaseList(); } catch (e) { /* ignore */ }
+                                            } catch (err) {
+                                                setStatus('Case search failed.', 'error');
+                                            }
+                                        }, 300));
+                                    }
+                                } catch (e) { /* ignore */ }
                             }
                         }
                     } catch (ignore) { }
@@ -2370,7 +2492,26 @@
             // render rows into the table body instead of card-based list.
             const caseTbody = document.querySelector('[data-role="case-table-body"]');
             if (caseTbody) {
-                const cases = Array.isArray(scenario.cases) ? scenario.cases : [];
+                let cases = [];
+                // If remote search results are present, render those (cross-scenario)
+                if (Array.isArray(state._caseSearchResults)) {
+                    cases = state._caseSearchResults;
+                } else {
+                    cases = Array.isArray(scenario.cases) ? scenario.cases : [];
+                    // apply client-side case search filter if provided
+                    try {
+                        const q = state._caseSearch || '';
+                        if (q) {
+                            const lower = String(q).toLowerCase();
+                            cases = cases.filter((c) => {
+                                const idLabel = (c.testcase_id || String(c.id || '')).toLowerCase();
+                                const title = (c.title || '').toLowerCase();
+                                const desc = (c.description || '').toLowerCase();
+                                return idLabel.includes(lower) || title.includes(lower) || desc.includes(lower);
+                            });
+                        }
+                    } catch (e) { /* ignore */ }
+                }
                 if (!cases.length) {
                     caseTbody.innerHTML = '<tr><td colspan="6" class="empty">No test cases found. Capture one using the form below.</td></tr>';
                     return;

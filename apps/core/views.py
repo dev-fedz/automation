@@ -413,12 +413,21 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         queryset = selectors.test_case_list()
         search = self.request.query_params.get("search")
         if search:
-            queryset = queryset.filter(
+            # allow searching by testcase_id, title, description, precondition, requirements
+            q = (
                 Q(testcase_id__icontains=search)
+                | Q(title__icontains=search)
                 | Q(description__icontains=search)
                 | Q(precondition__icontains=search)
                 | Q(requirements__icontains=search)
             )
+            # if the search looks like an integer, allow searching by primary key too
+            try:
+                if str(search).isdigit():
+                    q = q | Q(pk=int(search))
+            except Exception:
+                pass
+            queryset = queryset.filter(q)
         scenario_id = self.request.query_params.get("scenario")
         if scenario_id:
             try:
