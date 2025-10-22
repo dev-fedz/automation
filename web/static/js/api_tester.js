@@ -1110,10 +1110,18 @@
 
         const createSignatureTransform = (signature = {}) => ({
             id: signature.id || createTransformRowId('signature'),
+            // type: 'simple' | 'external'
+            type: signature.type || 'simple',
             targetPath: signature.targetPath || signature.target_path || signature.target || '',
             algorithm: (signature.algorithm || SIGNATURE_ALGORITHMS[2].key).toLowerCase(),
             components: signature.components || '',
             storeAs: signature.storeAs || signature.store_as || '',
+            // when external: the external object name (saved) or id (UI)
+            externalName: signature.externalName || signature.external_name || signature.external || '',
+            // path inside external object where signature will be written
+            externalPath: signature.externalPath || signature.external_path || signature.externalPath || 'signature',
+            // whether to encrypt the external object before passing to targetPath
+            encrypted: !!signature.encrypted,
         });
 
         const renderBodyOverrides = () => {
@@ -1180,6 +1188,7 @@
                 window.__externalMonacoEditors = {};
             } catch (e) { /* ignore disposal errors */ }
 
+            const hasAnyExternal = rows.some((r) => r && r.type === 'external');
             const markup = rows
                 .map((row) => {
                     const safePath = escapeHtml(row.path || '');
@@ -1285,6 +1294,53 @@
                         delete window.__externalMonacoEditors[k];
                     }
                 });
+            } else {
+                // If Monaco is not available, ensure each textarea has paste/blur handlers
+                try {
+                    const textareas = overridesTable.querySelectorAll('.override-external-json');
+                    if (textareas && textareas.length) {
+                        textareas.forEach((ta) => {
+                            try {
+                                if (ta.__externalJsonHandlersAttached) return;
+                                ta.addEventListener('paste', (ev) => {
+                                    const row = ta.closest('tr');
+                                    if (!row) return;
+                                    const rawRowId = row.dataset.rowId || '';
+                                    const baseRowId = rawRowId.replace(/-external$/, '') || rawRowId;
+                                    setTimeout(() => {
+                                        try {
+                                            const formatted = formatJsonWithTemplates(ta.value || '');
+                                            if (formatted && formatted !== ta.value) {
+                                                ta.value = formatted;
+                                            }
+                                            updateOverrideTransform(baseRowId, 'externalJson', ta.value);
+                                        } catch (e) { }
+                                    }, 50);
+                                });
+                                ta.addEventListener('blur', () => {
+                                    const row = ta.closest('tr');
+                                    if (!row) return;
+                                    const rawRowId = row.dataset.rowId || '';
+                                    const baseRowId = rawRowId.replace(/-external$/, '') || rawRowId;
+                                    try {
+                                        let formatted = formatJsonWithTemplates(ta.value || '');
+                                        if (!formatted || formatted === (ta.value || '')) {
+                                            const converted = convertJsObjectLikeToJson(ta.value || '');
+                                            if (converted && converted !== (ta.value || '')) {
+                                                formatted = formatJsonWithTemplates(converted);
+                                            }
+                                        }
+                                        if (formatted && ta.value !== formatted) {
+                                            ta.value = formatted;
+                                        }
+                                        updateOverrideTransform(baseRowId, 'externalJson', ta.value);
+                                    } catch (e) { }
+                                });
+                                ta.__externalJsonHandlersAttached = true;
+                            } catch (e) { }
+                        });
+                    }
+                } catch (e) { }
             }
         };
 
@@ -1294,26 +1350,87 @@
                 return;
             }
             const rows = state.builder.transforms.signatures;
+            const hasAnyExternal = Array.isArray(rows) && rows.some((r) => r && r.type === 'external');
             if (!rows.length) {
-                signaturesTable.innerHTML = '<tr class="empty"><td colspan="5" class="muted">No signatures configured.</td></tr>';
+                // When there are no rows, hide external columns by default (new signatures default to simple)
+                const colspan = hasAnyExternal ? 8 : 6;
+                signaturesTable.innerHTML = `<tr class="empty"><td colspan="${colspan}" class="muted">No signatures configured.</td></tr>`;
+                // ensure header hides external columns when none external
+                try {
+                    const tableRootEmpty = signaturesTable.closest('table');
+                    if (tableRootEmpty) {
+                        const thExternal = tableRootEmpty.querySelector('thead tr th[data-col="externalObject"]');
+                        const thEncrypted = tableRootEmpty.querySelector('thead tr th[data-col="externalEncrypted"]');
+                        if (thExternal) thExternal.style.display = 'none';
+                        if (thEncrypted) thEncrypted.style.display = 'none';
+                    }
+                } catch (e) { }
                 return;
             }
-            const markup = rows
-                .map((row) => {
-                    const safeTarget = escapeHtml(row.targetPath || '');
-                    const safeComponents = escapeHtml(row.components || '');
-                    const safeStoreAs = escapeHtml(row.storeAs || '');
-                    const algorithmOptions = SIGNATURE_ALGORITHMS.map((item) => `<option value="${item.key}"${item.key === row.algorithm ? ' selected' : ''}>${item.label}</option>`).join('');
+
+            // Build rows depending on whether any signature is external
+            const externalOverrides = (state.builder.transforms.overrides || []).filter((o) => o && o.type === 'external');
+            const externalOptions = externalOverrides.length ? externalOverrides.map((o) => {
+                const key = o.externalName || o.path || o.id || '';
+                const label = escapeHtml(o.externalName || o.path || o.id || 'external');
+                return { key: key, label: label };
+            }) : [];
+
+            const markup = rows.map((row) => {
+                const safeTarget = escapeHtml(row.targetPath || '');
+                const safeComponents = escapeHtml(row.components || '');
+                const safeStoreAs = escapeHtml(row.storeAs || '');
+                const algorithmOptions = SIGNATURE_ALGORITHMS.map((item) => `<option value="${item.key}"${item.key === row.algorithm ? ' selected' : ''}>${item.label}</option>`).join('');
+                const type = row.type === 'external' ? 'external' : 'simple';
+                const typeSelect = `<select class="kv-input body-signature-type" data-field="type">
+                        <option value="simple"${type === 'simple' ? ' selected' : ''}>Simple</option>
+                        <option value="external"${type === 'external' ? ' selected' : ''}>External Object</option>
+                    </select>`;
+
+                const externalOptionsHtml = externalOptions.length ? externalOptions.map((o) => `<option value="${escapeHtml(o.key)}"${(o.key === (row.externalName || '')) ? ' selected' : ''}>${o.label}</option>`).join('') : '<option value="">(no external objects)</option>';
+
+                // externalFields removed: external controls are provided via table columns (select and encrypted checkbox)
+
+                if (hasAnyExternal) {
                     return `<tr data-row-id="${row.id}">
+                        <td>${typeSelect}</td>
                         <td><input type="text" class="kv-input body-signature-input" data-field="targetPath" value="${safeTarget}" placeholder="transaction.signature" /></td>
                         <td><select class="kv-input body-signature-select" data-field="algorithm">${algorithmOptions}</select></td>
                         <td><textarea class="kv-input body-signature-textarea" data-field="components" placeholder="path:transaction.merchantid\npath:transaction.request_id\nliteral:SECRET">${safeComponents}</textarea></td>
-                        <td><input type="text" class="kv-input body-signature-input" data-field="storeAs" value="${safeStoreAs}" placeholder="signature variable (optional)" /></td>
+                        <td data-col="externalObject"><select class="kv-input body-signature-external" data-field="externalName">${externalOptionsHtml}</select></td>
+                        <td data-col="externalEncrypted" style="text-align:center;vertical-align:middle;"><input type="checkbox" class="kv-input body-signature-encrypted" data-field="encrypted" ${row.encrypted ? 'checked' : ''} /></td>
+                        <td>
+                            <input type="text" class="kv-input body-signature-input" data-field="storeAs" value="${safeStoreAs}" placeholder="signature variable (optional)" />
+                        </td>
                         <td class="kv-actions"><button type="button" class="kv-remove body-signature-remove" data-row-id="${row.id}" aria-label="Remove signature">×</button></td>
                     </tr>`;
-                })
-                .join('');
+                }
+
+                // compact row (no external columns)
+                return `<tr data-row-id="${row.id}">
+                        <td>${typeSelect}</td>
+                        <td><input type="text" class="kv-input body-signature-input" data-field="targetPath" value="${safeTarget}" placeholder="transaction.signature" /></td>
+                        <td><select class="kv-input body-signature-select" data-field="algorithm">${algorithmOptions}</select></td>
+                        <td><textarea class="kv-input body-signature-textarea" data-field="components" placeholder="path:transaction.merchantid\npath:transaction.request_id\nliteral:SECRET">${safeComponents}</textarea></td>
+                        <td>
+                            <input type="text" class="kv-input body-signature-input" data-field="storeAs" value="${safeStoreAs}" placeholder="signature variable (optional)" />
+                        </td>
+                        <td class="kv-actions"><button type="button" class="kv-remove body-signature-remove" data-row-id="${row.id}" aria-label="Remove signature">×</button></td>
+                    </tr>`;
+            }).join('');
+
             signaturesTable.innerHTML = markup;
+
+            // Toggle header external THs visibility based on presence of external rows
+            try {
+                const tableRoot = signaturesTable.closest('table');
+                if (tableRoot) {
+                    const thExternal = tableRoot.querySelector('thead tr th[data-col="externalObject"]');
+                    const thEncrypted = tableRoot.querySelector('thead tr th[data-col="externalEncrypted"]');
+                    if (thExternal) thExternal.style.display = hasAnyExternal ? '' : 'none';
+                    if (thEncrypted) thEncrypted.style.display = hasAnyExternal ? '' : 'none';
+                }
+            } catch (e) { /* ignore DOM toggle errors */ }
         };
 
         const renderBodyTools = () => {
@@ -1381,6 +1498,14 @@
                 row.components = value;
             } else if (field === 'storeAs') {
                 row.storeAs = value;
+            } else if (field === 'type') {
+                row.type = value === 'external' ? 'external' : 'simple';
+            } else if (field === 'externalName') {
+                row.externalName = value;
+            } else if (field === 'externalPath') {
+                row.externalPath = value;
+            } else if (field === 'encrypted') {
+                row.encrypted = !!value || value === 'on' || value === true;
             }
         };
 
@@ -1484,6 +1609,20 @@
                 if (!components.length) {
                     continue;
                 }
+                // If signature targets an external object, prefer that external override for resolving external.* components
+                let extOverrideForSig = null;
+                if (row.type === 'external') {
+                    // try find external override by name/path
+                    const nameToFind = String(row.externalName || row.external_name || '').trim();
+                    if (nameToFind) {
+                        extOverrideForSig = overrideRows.find((o) => o && o.type === 'external' && ((o.name && String(o.name) === nameToFind) || (o.externalName && String(o.externalName) === nameToFind) || (o.path && String(o.path) === nameToFind) || (o.id && String(o.id) === nameToFind)));
+                    }
+                    if (!extOverrideForSig) {
+                        // fallback to first external override
+                        extOverrideForSig = overrideRows.find((o) => o && o.type === 'external') || null;
+                    }
+                }
+
                 const rawParts = components.map((component) => {
                     if (component.type === 'literal') {
                         return resolveLiteral(component.value);
@@ -1492,11 +1631,19 @@
                     // support external.* paths by resolving into external object if present on transforms
                     if (compPath.startsWith('external.')) {
                         const extPath = compPath.slice('external.'.length);
-                        // try to find a matching external override (first one)
-                        const extOverride = (overrideRows.find((o) => o.type === 'external') || {});
+                        // decide which external override to use: signature-specific or generic
+                        const extOverride = extOverrideForSig || (overrideRows.find((o) => o.type === 'external') || {});
                         let externalObj = {};
                         try {
-                            externalObj = tryParseJsonSilent(extOverride.externalJson) || {};
+                            if (extOverride) {
+                                if (extOverride.external_json !== undefined) {
+                                    externalObj = extOverride.external_json || {};
+                                } else if (extOverride.externalJson !== undefined) {
+                                    externalObj = tryParseJsonSilent(String(extOverride.externalJson)) || {};
+                                } else {
+                                    externalObj = {};
+                                }
+                            }
                         } catch (e) {
                             externalObj = {};
                         }
@@ -1513,6 +1660,59 @@
                     const message = error instanceof Error ? error.message : 'Unknown hashing error';
                     throw new Error(`Unable to compute signature for '${targetPath}': ${message}`);
                 }
+                // handle external-type signature: write signature into external object and pass object or encrypted string to targetPath
+                if (row.type === 'external') {
+                    // choose external override (prefer match by name/path)
+                    const nameToFind = String(row.externalName || row.external_name || '').trim();
+                    let extOverride = null;
+                    if (nameToFind) {
+                        extOverride = overrideRows.find((o) => o && o.type === 'external' && ((o.name && String(o.name) === nameToFind) || (o.externalName && String(o.externalName) === nameToFind) || (o.path && String(o.path) === nameToFind) || (o.id && String(o.id) === nameToFind)));
+                    }
+                    if (!extOverride) {
+                        extOverride = overrideRows.find((o) => o && o.type === 'external') || null;
+                    }
+                    if (!extOverride) {
+                        // no external override available, fall back to writing signature directly
+                        setValueAtObjectPath(jsonBody, targetPath, signature);
+                        if (row.storeAs && String(row.storeAs).trim()) {
+                            resultOverrides[String(row.storeAs).trim()] = signature;
+                        }
+                        continue;
+                    }
+                    // build externalObj from whichever shape is present
+                    let externalObj = {};
+                    try {
+                        if (extOverride.external_json !== undefined) {
+                            externalObj = extOverride.external_json || {};
+                        } else if (extOverride.externalJson !== undefined) {
+                            externalObj = tryParseJsonSilent(String(extOverride.externalJson)) || {};
+                        } else {
+                            externalObj = {};
+                        }
+                    } catch (e) {
+                        externalObj = {};
+                    }
+                    // set signature inside external object at externalPath
+                    const extPathToWrite = (row.externalPath || row.external_path || 'signature');
+                    setValueAtObjectPath(externalObj, extPathToWrite, signature);
+                    // if encrypted flag, encode externalObj and set that string at targetPath; else set the object
+                    if (row.encrypted) {
+                        const txt = JSON.stringify(externalObj);
+                        let enc = '';
+                        try {
+                            if (typeof btoa === 'function') enc = btoa(unescape(encodeURIComponent(txt))); else enc = txt;
+                        } catch (e) { enc = txt; }
+                        setValueAtObjectPath(jsonBody, targetPath, enc);
+                    } else {
+                        setValueAtObjectPath(jsonBody, targetPath, externalObj);
+                    }
+                    // optionally store signature variable
+                    if (row.storeAs && String(row.storeAs).trim()) {
+                        resultOverrides[String(row.storeAs).trim()] = signature;
+                    }
+                    continue;
+                }
+                // default/simple signature writes signature value to targetPath
                 setValueAtObjectPath(jsonBody, targetPath, signature);
                 if (row.storeAs && String(row.storeAs).trim()) {
                     resultOverrides[String(row.storeAs).trim()] = signature;
@@ -5903,10 +6103,14 @@
             const normalizedSignatures = state.builder.transforms.signatures
                 .filter((row) => row.targetPath && row.targetPath.trim() && row.components && row.components.trim())
                 .map((row) => ({
+                    type: row.type === 'external' ? 'external' : 'simple',
                     target_path: row.targetPath.trim(),
                     algorithm: (row.algorithm || SIGNATURE_ALGORITHMS[2].key).toLowerCase(),
                     components: row.components,
                     store_as: row.storeAs ? row.storeAs.trim() : '',
+                    external_name: row.externalName ? String(row.externalName).trim() : '',
+                    external_path: row.externalPath ? String(row.externalPath).trim() : 'signature',
+                    encrypted: !!row.encrypted,
                 }));
             definition.body_transforms = {
                 overrides: normalizedOverrides,
@@ -6222,7 +6426,8 @@
         if (signaturesTable) {
             signaturesTable.addEventListener('input', (event) => {
                 const target = event.target;
-                if (!target.classList.contains('body-signature-input') && !target.classList.contains('body-signature-textarea')) {
+                // input/Textarea/select/checkbox fields (include type/select/encrypted/external)
+                if (!target.classList.contains('body-signature-input') && !target.classList.contains('body-signature-textarea') && !target.classList.contains('body-signature-external') && !target.classList.contains('body-signature-encrypted') && !target.classList.contains('body-signature-type') && !target.classList.contains('body-signature-select')) {
                     return;
                 }
                 const row = target.closest('tr');
@@ -6234,12 +6439,18 @@
                 if (!rowId || !field) {
                     return;
                 }
-                updateSignatureTransform(rowId, field, target.value);
+                // checkbox value handling
+                const value = target.type === 'checkbox' ? (target.checked ? true : false) : target.value;
+                updateSignatureTransform(rowId, field, value);
+                // re-render signatures so columns/header toggle immediately on type changes
+                if (field === 'type') {
+                    renderBodySignatures();
+                }
             });
 
             signaturesTable.addEventListener('change', (event) => {
                 const target = event.target;
-                if (!target.classList.contains('body-signature-select')) {
+                if (!target.classList.contains('body-signature-select') && !target.classList.contains('body-signature-external') && !target.classList.contains('body-signature-type') && !target.classList.contains('body-signature-encrypted')) {
                     return;
                 }
                 const row = target.closest('tr');
@@ -6251,7 +6462,11 @@
                 if (!rowId || !field) {
                     return;
                 }
-                updateSignatureTransform(rowId, field, target.value);
+                const value = target.type === 'checkbox' ? (target.checked ? true : false) : target.value;
+                updateSignatureTransform(rowId, field, value);
+                if (field === 'type') {
+                    renderBodySignatures();
+                }
             });
 
             signaturesTable.addEventListener('click', (event) => {
