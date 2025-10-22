@@ -1509,6 +1509,61 @@
             }
         };
 
+        // Helper: apply a signature defined as type 'external'
+        // - row: signature row
+        // - overrideRows: array of override rows (to find the external override)
+        // - jsonBody: the current request JSON body (modified in-place)
+        // - signature: the computed signature string
+        // - resultOverrides: accumulator for storeAs variables
+        const applyExternalSignature = async (row, overrideRows, jsonBody, signature, resultOverrides) => {
+            // choose external override (prefer match by name/path)
+            const nameToFind = String(row.externalName || row.external_name || '').trim();
+            let extOverride = null;
+            if (nameToFind) {
+                extOverride = overrideRows.find((o) => o && o.type === 'external' && ((o.name && String(o.name) === nameToFind) || (o.externalName && String(o.externalName) === nameToFind) || (o.path && String(o.path) === nameToFind) || (o.id && String(o.id) === nameToFind)));
+            }
+            if (!extOverride) {
+                extOverride = overrideRows.find((o) => o && o.type === 'external') || null;
+            }
+            if (!extOverride) {
+                // no external override available, fall back to returning the signature
+                return { applied: false, signature };
+            }
+            // build externalObj from whichever shape is present
+            let externalObj = {};
+            try {
+                if (extOverride.external_json !== undefined) {
+                    externalObj = extOverride.external_json || {};
+                } else if (extOverride.externalJson !== undefined) {
+                    externalObj = tryParseJsonSilent(String(extOverride.externalJson)) || {};
+                } else {
+                    externalObj = {};
+                }
+            } catch (e) {
+                externalObj = {};
+            }
+            // set signature inside external object at externalPath
+            const extPathToWrite = (row.externalPath || row.external_path || 'signature');
+            setValueAtObjectPath(externalObj, extPathToWrite, signature);
+            // if encrypted flag, encode externalObj and set that string at targetPath; else set the object
+            const targetPath = String(row.targetPath || row.target_path || row.target || '').trim();
+            if (row.encrypted) {
+                const txt = JSON.stringify(externalObj);
+                let enc = '';
+                try {
+                    if (typeof btoa === 'function') enc = btoa(unescape(encodeURIComponent(txt))); else enc = txt;
+                } catch (e) { enc = txt; }
+                setValueAtObjectPath(jsonBody, targetPath, enc);
+            } else {
+                setValueAtObjectPath(jsonBody, targetPath, externalObj);
+            }
+            // optionally store signature variable
+            if (row.storeAs && String(row.storeAs).trim()) {
+                resultOverrides[String(row.storeAs).trim()] = signature;
+            }
+            return { applied: true, signature };
+        };
+
         const applyBodyTransforms = async (jsonBody, transforms, overridesAccumulator, templateResolver) => {
             if (!jsonBody || typeof jsonBody !== 'object') {
                 return { json: jsonBody, overrides: overridesAccumulator || {} };
@@ -1662,55 +1717,11 @@
                 }
                 // handle external-type signature: write signature into external object and pass object or encrypted string to targetPath
                 if (row.type === 'external') {
-                    // choose external override (prefer match by name/path)
-                    const nameToFind = String(row.externalName || row.external_name || '').trim();
-                    let extOverride = null;
-                    if (nameToFind) {
-                        extOverride = overrideRows.find((o) => o && o.type === 'external' && ((o.name && String(o.name) === nameToFind) || (o.externalName && String(o.externalName) === nameToFind) || (o.path && String(o.path) === nameToFind) || (o.id && String(o.id) === nameToFind)));
-                    }
-                    if (!extOverride) {
-                        extOverride = overrideRows.find((o) => o && o.type === 'external') || null;
-                    }
-                    if (!extOverride) {
-                        // no external override available, fall back to writing signature directly
-                        setValueAtObjectPath(jsonBody, targetPath, signature);
-                        if (row.storeAs && String(row.storeAs).trim()) {
-                            resultOverrides[String(row.storeAs).trim()] = signature;
-                        }
+                    const res = await applyExternalSignature(row, overrideRows, jsonBody, signature, resultOverrides);
+                    if (res && res.applied) {
                         continue;
                     }
-                    // build externalObj from whichever shape is present
-                    let externalObj = {};
-                    try {
-                        if (extOverride.external_json !== undefined) {
-                            externalObj = extOverride.external_json || {};
-                        } else if (extOverride.externalJson !== undefined) {
-                            externalObj = tryParseJsonSilent(String(extOverride.externalJson)) || {};
-                        } else {
-                            externalObj = {};
-                        }
-                    } catch (e) {
-                        externalObj = {};
-                    }
-                    // set signature inside external object at externalPath
-                    const extPathToWrite = (row.externalPath || row.external_path || 'signature');
-                    setValueAtObjectPath(externalObj, extPathToWrite, signature);
-                    // if encrypted flag, encode externalObj and set that string at targetPath; else set the object
-                    if (row.encrypted) {
-                        const txt = JSON.stringify(externalObj);
-                        let enc = '';
-                        try {
-                            if (typeof btoa === 'function') enc = btoa(unescape(encodeURIComponent(txt))); else enc = txt;
-                        } catch (e) { enc = txt; }
-                        setValueAtObjectPath(jsonBody, targetPath, enc);
-                    } else {
-                        setValueAtObjectPath(jsonBody, targetPath, externalObj);
-                    }
-                    // optionally store signature variable
-                    if (row.storeAs && String(row.storeAs).trim()) {
-                        resultOverrides[String(row.storeAs).trim()] = signature;
-                    }
-                    continue;
+                    // if not applied, fallthrough to simple behavior
                 }
                 // default/simple signature writes signature value to targetPath
                 setValueAtObjectPath(jsonBody, targetPath, signature);
