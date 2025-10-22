@@ -995,6 +995,8 @@
             id: override.id || createTransformRowId('override'),
             path: override.path || '',
             value: override.value === undefined ? '' : String(override.value),
+            isRandom: !!override.isRandom,
+            charLimit: Number.isFinite(Number(override.charLimit)) && Number(override.charLimit) > 0 ? Number(override.charLimit) : null,
         });
 
         const createSignatureTransform = (signature = {}) => ({
@@ -1019,9 +1021,13 @@
                 .map((row) => {
                     const safePath = escapeHtml(row.path || '');
                     const safeValue = escapeHtml(row.value || '');
+                    const isRandomChecked = row.isRandom ? ' checked' : '';
+                    const charLimitVal = row.charLimit ? String(row.charLimit) : '';
                     return `<tr data-row-id="${row.id}">
                         <td><input type="text" class="kv-input body-override-input" data-field="path" value="${safePath}" placeholder="transaction.request_id" /></td>
-                        <td><input type="text" class="kv-input body-override-input" data-field="value" value="${safeValue}" placeholder="New value" /></td>
+                        <td><input type="text" class="kv-input body-override-input override-value-input" data-field="value" value="${safeValue}" placeholder="New value" /></td>
+                        <td><input type="checkbox" class="override-is-random" data-field="isRandom"${isRandomChecked} aria-label="Is random" /></td>
+                        <td><input type="number" min="1" class="kv-input override-char-limit" data-field="charLimit" value="${escapeHtml(charLimitVal)}" placeholder="e.g. 32" ${row.isRandom ? '' : 'disabled'} /></td>
                         <td class="kv-actions"><button type="button" class="kv-remove body-override-remove" data-row-id="${row.id}" aria-label="Remove override">×</button></td>
                     </tr>`;
                 })
@@ -1084,6 +1090,11 @@
                 row.path = value;
             } else if (field === 'value') {
                 row.value = value;
+            } else if (field === 'isRandom') {
+                row.isRandom = !!value;
+            } else if (field === 'charLimit') {
+                const n = Number(value);
+                row.charLimit = Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
             }
         };
 
@@ -1135,7 +1146,31 @@
                 if (!path) {
                     return;
                 }
-                const resolvedValue = resolveLiteral(row?.value);
+                let resolvedValue = resolveLiteral(row?.value);
+                if (row?.isRandom) {
+                    if (typeof resolvedValue === 'string' && resolvedValue.length > 10) {
+                        resolvedValue = resolvedValue.slice(0, 10);
+                    }
+                    const now = new Date();
+                    const ms = String(now.getMilliseconds()).padStart(3, '0');
+                    let nano = '';
+                    if (typeof performance !== 'undefined' && performance.now) {
+                        const frac = performance.now();
+                        const nanos = Math.floor((frac % 1) * 1e6);
+                        nano = String(nanos).padStart(6, '0');
+                    }
+                    const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}.${ms}${nano}`;
+                    let combined = `${resolvedValue}${timestamp}`;
+                    const limit = Number.isFinite(Number(row?.charLimit)) && Number(row.charLimit) > 0 ? Number(row.charLimit) : null;
+                    if (limit) {
+                        if (combined.length > limit) {
+                            const allowedTimestampLen = Math.max(0, limit - String(resolvedValue).length);
+                            const truncatedTimestamp = allowedTimestampLen > 0 ? timestamp.slice(0, allowedTimestampLen) : '';
+                            combined = `${resolvedValue}${truncatedTimestamp}`;
+                        }
+                    }
+                    resolvedValue = combined;
+                }
                 setValueAtObjectPath(jsonBody, path, resolvedValue);
             });
 
@@ -5353,6 +5388,8 @@
                 .map((row) => ({
                     path: row.path.trim(),
                     value: row.value ?? '',
+                    isRandom: !!row.isRandom,
+                    charLimit: Number.isFinite(Number(row.charLimit)) && Number(row.charLimit) > 0 ? Number(row.charLimit) : null,
                 }));
             const normalizedSignatures = state.builder.transforms.signatures
                 .filter((row) => row.targetPath && row.targetPath.trim() && row.components && row.components.trim())
@@ -5523,19 +5560,40 @@
         if (overridesTable) {
             overridesTable.addEventListener('input', (event) => {
                 const target = event.target;
-                if (!target.classList.contains('body-override-input')) {
-                    return;
-                }
                 const row = target.closest('tr');
                 if (!row) {
                     return;
                 }
                 const rowId = row.dataset.rowId;
-                const field = target.dataset.field;
-                if (!rowId || !field) {
+                if (!rowId) {
                     return;
                 }
-                updateOverrideTransform(rowId, field, target.value);
+                if (target.classList.contains('body-override-input')) {
+                    const field = target.dataset.field;
+                    if (!field) return;
+                    updateOverrideTransform(rowId, field, target.value);
+                } else if (target.classList.contains('override-is-random')) {
+                    const checked = !!target.checked;
+                    updateOverrideTransform(rowId, 'isRandom', checked);
+                    const charInput = row.querySelector('.override-char-limit');
+                    if (charInput) {
+                        charInput.disabled = !checked;
+                    }
+                    const valueInput = row.querySelector('.override-value-input');
+                    if (valueInput) {
+                        if (checked) {
+                            valueInput.setAttribute('maxlength', '10');
+                            if (valueInput.value.length > 10) {
+                                valueInput.value = valueInput.value.slice(0, 10);
+                                updateOverrideTransform(rowId, 'value', valueInput.value);
+                            }
+                        } else {
+                            valueInput.removeAttribute('maxlength');
+                        }
+                    }
+                } else if (target.classList.contains('override-char-limit')) {
+                    updateOverrideTransform(rowId, 'charLimit', target.value);
+                }
             });
 
             overridesTable.addEventListener('click', (event) => {
