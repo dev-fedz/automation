@@ -35,7 +35,7 @@
                 {% endif %}
             </div>
             <div class="automation-list" data-role="case-list" aria-live="polite">
-                <button type="button" id="run-cases-btn" class="btn-primary" style="display:none;">Run Selected Case</button>
+                <button type="button" id="run-cases-btn" class="btn-primary" style="display:none;margin-bottom:12px;">Run Selected Case</button>
                 {% if initial_selected_scenario and initial_selected_scenario.cases %}
                     <table class="table-modern automation-table" aria-label="Test cases">
                         <thead>
@@ -360,7 +360,7 @@ payload.plan=premium"></textarea>
                 btn.id = 'run-cases-btn';
                 btn.className = 'btn-primary';
                 btn.textContent = 'Run Selected Case';
-                try { btn.style.setProperty('display', 'none', 'important'); } catch (e) { btn.style.display = 'none'; }
+                try { btn.style.setProperty('display', 'none', 'important'); btn.style.setProperty('margin-bottom', '12px', 'important'); } catch (e) { btn.style.display = 'none'; btn.style.marginBottom = '12px'; }
                 const table = list.querySelector('table');
                 if (table && table.parentNode) table.parentNode.insertBefore(btn, table);
                 else list.insertBefore(btn, list.firstChild);
