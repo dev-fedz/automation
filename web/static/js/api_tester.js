@@ -5216,6 +5216,74 @@
                 }
             }
 
+            // Normalize and attach body_transforms so the execute endpoint receives
+            // concrete override values (match testcase-runner behavior).
+            try {
+                const rawTransforms = state.builder.transforms || {};
+                const overrideRows = Array.isArray(rawTransforms.overrides) ? rawTransforms.overrides : [];
+                const signatureRows = Array.isArray(rawTransforms.signatures) ? rawTransforms.signatures : [];
+
+                const cloned = {
+                    overrides: overrideRows.map((row) => {
+                        try {
+                            const path = (row?.path || '').trim();
+                            if (!path) return null;
+                            // resolve template placeholders in the base value
+                            const baseRaw = row?.value === undefined || row?.value === null ? '' : String(row.value);
+                            let resolvedBase = resolveStringTemplate(baseRaw);
+                            // If isRandom flag is set, generate timestamped unique value
+                            if (row?.isRandom) {
+                                if (typeof resolvedBase === 'string' && resolvedBase.length > 10) {
+                                    resolvedBase = resolvedBase.slice(0, 10);
+                                }
+                                const now = new Date();
+                                const ms = String(now.getMilliseconds()).padStart(3, '0');
+                                let nano = '';
+                                if (typeof performance !== 'undefined' && performance.now) {
+                                    const frac = performance.now();
+                                    const nanos = Math.floor((frac % 1) * 1e6);
+                                    nano = String(nanos).padStart(6, '0');
+                                }
+                                const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}.${ms}${nano}`;
+                                let combined = `${resolvedBase}${timestamp}`;
+                                const limit = Number.isFinite(Number(row?.charLimit)) && Number(row.charLimit) > 0 ? Number(row.charLimit) : null;
+                                if (limit && combined.length > limit) {
+                                    const allowedTimestampLen = Math.max(0, limit - String(resolvedBase).length);
+                                    const truncatedTimestamp = allowedTimestampLen > 0 ? timestamp.slice(0, allowedTimestampLen) : '';
+                                    combined = `${resolvedBase}${truncatedTimestamp}`;
+                                }
+                                resolvedBase = combined;
+                            }
+
+                            return {
+                                path,
+                                value: resolvedBase,
+                            };
+                        } catch (e) {
+                            return null;
+                        }
+                    }).filter(Boolean),
+                    signatures: signatureRows.map((row) => {
+                        try {
+                            const target_path = row?.targetPath ? String(row.targetPath).trim() : '';
+                            if (!target_path) return null;
+                            return {
+                                target_path,
+                                algorithm: (row.algorithm || SIGNATURE_ALGORITHMS[2].key).toLowerCase(),
+                                components: row.components,
+                                store_as: row.storeAs ? row.storeAs.trim() : '',
+                            };
+                        } catch (e) {
+                            return null;
+                        }
+                    }).filter(Boolean),
+                };
+
+                if ((cloned.overrides && cloned.overrides.length) || (cloned.signatures && cloned.signatures.length)) {
+                    payload.body_transforms = cloned;
+                }
+            } catch (e) { }
+
             return payload;
         };
 
