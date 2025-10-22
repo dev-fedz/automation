@@ -507,6 +507,14 @@ class TestCase(TimeStampedModel):
     precondition = models.TextField(blank=True)
     requirements = models.TextField(blank=True)
     related_api_request = models.ForeignKey(ApiRequest, on_delete=models.SET_NULL, null=True, blank=True, related_name="test_cases")
+    # Optional dependency on another TestCase that must be executed before this one.
+    test_case_dependency = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="dependents",
+    )
 
     class Meta:
         ordering = ["scenario", "testcase_id", "id"]
@@ -564,3 +572,38 @@ class TestCase(TimeStampedModel):
                 except Exception:
                     self.testcase_id = 'TC00001'
         super().save(*args, **kwargs)
+
+    def is_ready_to_run(self, completed_testcase_ids: set | None = None) -> bool:
+        """Return True if this TestCase can be run now given a set of completed testcase ids.
+
+        If `test_case_dependency` is set, the dependency's id must be present in
+        `completed_testcase_ids` for this case to be considered ready. If
+        `completed_testcase_ids` is None, the method will return False when a
+        dependency exists (because we can't confirm the dependency has run).
+        """
+        if not self.test_case_dependency:
+            return True
+        if completed_testcase_ids is None:
+            return False
+        return int(self.test_case_dependency.pk) in set(completed_testcase_ids)
+
+    def clean(self) -> None:
+        """Perform validation to avoid self-dependency and simple circular references.
+
+        This prevents a TestCase from depending on itself and checks one-level
+        circular references (A -> B -> A). For deeper cycle detection a
+        full graph algorithm would be required; this basic check is adequate
+        for common accidental mistakes.
+        """
+        from django.core.exceptions import ValidationError
+
+        # Prevent direct self-dependency
+        if self.test_case_dependency and self.test_case_dependency_id == self.id:
+            raise ValidationError({"test_case_dependency": "A test case cannot depend on itself."})
+
+        # Prevent simple 2-node cycle: A -> B -> A
+        if self.test_case_dependency and self.test_case_dependency.test_case_dependency_id:
+            if self.test_case_dependency.test_case_dependency_id == self.id:
+                raise ValidationError({
+                    "test_case_dependency": "Circular dependency detected (A -> B -> A).",
+                })

@@ -1153,3 +1153,85 @@ body.automation-modal-open {
     color: #5a3800;
 }
 
+
+/* Multi-run modal and accordion styling */
+.modal#testcase-multi-response-modal .modal-dialog {
+    width: 75vw; /* at least 75% of viewport width */
+    max-width: 1200px;
+    margin: 1.5rem auto;
+    box-shadow: var(--automation-shadow);
+    border-radius: 10px;
+}
+
+.modal#testcase-multi-response-modal .modal-body {
+    max-height: 70vh;
+    overflow: auto;
+}
+
+.multi-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.multi-item {
+    background: #fff;
+    border-radius: 8px;
+    border: 1px solid var(--automation-border);
+    overflow: hidden;
+}
+
+.multi-item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    padding: 0.8rem 1rem;
+    cursor: pointer;
+    user-select: none;
+    background: linear-gradient(90deg, rgba(244,180,0,0.05), rgba(244,180,0,0.02));
+    border-bottom: 1px solid rgba(0,0,0,0.03);
+}
+
+.multi-item-header:focus {
+    outline: 3px solid rgba(244,180,0,0.15);
+}
+
+.multi-item-title {
+    font-weight: 700;
+    color: #3a2a00;
+}
+
+.multi-item-status {
+    font-size: 0.9rem;
+    color: var(--automation-text-muted);
+}
+
+/* caret arrow */
+.multi-item-header::before {
+    content: '\25B6'; /* right-pointing triangle */
+    display: inline-block;
+    margin-right: 0.6rem;
+    transition: transform 0.18s ease-in-out, color 0.18s;
+    color: var(--automation-accent);
+}
+.multi-item-header[aria-expanded="true"]::before {
+    transform: rotate(90deg);
+}
+
+.multi-item-body {
+    padding: 0.8rem 1rem;
+    border-top: 1px solid rgba(0,0,0,0.03);
+}
+
+.multi-item .response-pre {
+    background: #f9f7f2;
+    color: #2b1b00; /* darker text for readable contrast against light background */
+    border: 1px solid rgba(0,0,0,0.06);
+    padding: 0.6rem;
+    border-radius: 6px;
+    overflow: auto;
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+

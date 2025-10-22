@@ -1003,7 +1003,7 @@
                     const allOpt = document.createElement('option'); allOpt.value = ''; allOpt.textContent = 'All modules'; moduleFilter.appendChild(allOpt);
                     if (Array.isArray(initialModules)) {
                         initialModules.forEach((m) => {
-                            const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.title || `Module ${m.id}`;
+                            const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.title || m.name || `Module ${m.id}`;
                             moduleFilter.appendChild(opt);
                         });
                     }
@@ -1014,7 +1014,7 @@
                     const none = document.createElement('option'); none.value = ''; none.textContent = '(none)'; moduleSelect.appendChild(none);
                     if (Array.isArray(initialModules)) {
                         initialModules.forEach((m) => {
-                            const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.title || `Module ${m.id}`;
+                            const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.title || m.name || `Module ${m.id}`;
                             moduleSelect.appendChild(opt);
                         });
                     }
@@ -1345,7 +1345,7 @@
                 initialModules.forEach((m) => {
                     const option = document.createElement('option');
                     option.value = m.id;
-                    option.textContent = m.title || `Module ${m.id}`;
+                    option.textContent = m.title || m.name || `Module ${m.id}`;
                     if (filter) filter.appendChild(option.cloneNode(true));
                     if (select) select.appendChild(option.cloneNode(true));
                 });
@@ -2351,7 +2351,7 @@
             if (tbody) {
                 const rows = filtered.map((scenario) => {
                     const module = initialModules.find((m) => Number(m.id) === Number(scenario.module));
-                    const moduleLabel = module ? (module.title || `Module ${module.id}`) : '';
+                    const moduleLabel = module ? (module.title || module.name || `Module ${module.id}`) : '';
                     return `
                         <tr data-scenario-id="${scenario.id}">
                             <td>${escapeHtml(scenario.title || '')}</td>
@@ -2427,7 +2427,7 @@
                                 } else {
                                     const rows = virtualPlan.scenarios.map((scenario) => {
                                         const module = initialModules.find((m) => Number(m.id) === Number(scenario.module));
-                                        const moduleLabel = module ? (module.title || `Module ${module.id}`) : '';
+                                        const moduleLabel = module ? (module.title || module.name || `Module ${module.id}`) : '';
                                         return `
                                             <tr data-scenario-id="${scenario.id}">
                                                 <td>${escapeHtml(scenario.title || '')}</td>
@@ -2461,7 +2461,7 @@
                             } else {
                                 const rows = virtualPlan.scenarios.map((scenario) => {
                                     const module = initialModules.find((m) => Number(m.id) === Number(scenario.module));
-                                    const moduleLabel = module ? (module.title || `Module ${module.id}`) : '';
+                                    const moduleLabel = module ? (module.title || module.name || `Module ${module.id}`) : '';
                                     return `
                                         <tr data-scenario-id="${scenario.id}">
                                             <td>${escapeHtml(scenario.title || '')}</td>

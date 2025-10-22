@@ -59,6 +59,9 @@
         const idSafe = String(caseId).replace(/[^a-zA-Z0-9\-_]/g, '-');
         const headerId = `tc-${idSafe}-header`;
         const bodyId = `tc-${idSafe}-body`;
+        const headersId = `testcase-response-headers-${idSafe}`;
+        const bodyPreId = `testcase-response-body-${idSafe}`;
+        const previewId = `testcase-response-preview-${idSafe}`;
         const container = document.createElement('div');
         container.className = 'multi-item';
         container.innerHTML = `
@@ -71,13 +74,34 @@
                 <div class="response-content" hidden>
                     <div class="response-summary"></div>
                     <div class="response-section">
-                        <h4>Headers</h4>
-                        <pre class="response-pre response-headers" data-min-height="80">{}</pre>
+                        <div class="response-section__header">
+                            <h4>Headers</h4>
+                            <div class="response-section-controls">
+                                <button type="button" class="action-button" data-action="toggle-section" data-target="${headersId}">Toggle</button>
+                            </div>
+                        </div>
+                        <pre id="${headersId}" class="response-pre response-headers expandable" data-min-height="80">{}</pre>
                     </div>
                     <div class="response-section">
-                        <h4>Body</h4>
-                        <pre class="response-pre response-body" data-min-height="100">{}</pre>
-                        <iframe class="response-preview" title="Response preview" hidden></iframe>
+                        <div class="response-section__header">
+                            <h4>Body</h4>
+                            <div class="response-body__controls" role="group" aria-label="Response body view options">
+                                <div class="response-body__views" role="group" aria-label="Format type">
+                                    <button type="button" class="response-body__view-button is-active" data-response-body-view="json" aria-pressed="true">JSON</button>
+                                    <button type="button" class="response-body__view-button" data-response-body-view="xml" aria-pressed="false">XML</button>
+                                    <button type="button" class="response-body__view-button" data-response-body-view="html" aria-pressed="false">HTML</button>
+                                </div>
+                                <div class="response-body__modes" role="group" aria-label="Display mode">
+                                    <button type="button" class="response-body__mode-button is-active" data-response-body-mode="pretty" aria-pressed="true">Pretty</button>
+                                    <button type="button" class="response-body__mode-button" data-response-body-mode="preview" aria-pressed="false">Preview</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="response-body__content">
+                            <pre id="${bodyPreId}" class="response-pre response-body expandable" data-min-height="100">{}</pre>
+                            <div class="resizer" data-resize-target="${bodyPreId}" title="Drag to resize"></div>
+                            <iframe id="${previewId}" class="response-preview" title="Response preview" hidden></iframe>
+                        </div>
                     </div>
                     <div class="response-section">
                         <h4>Assertions</h4>
@@ -105,6 +129,73 @@
         return String(str).replace(/[&<>"']/g, function (m) {
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
         });
+    }
+
+    // Render response body for a specific panel (container)
+    function renderPanel(container, view, mode) {
+        if (!container) return;
+        const last = container._lastResponse || { text: '', json: null };
+        const pre = container.querySelector('.response-body');
+        const preview = container.querySelector('.response-preview');
+        if (!pre) return;
+        view = view || (container.querySelector('.response-body__view-button.is-active') && container.querySelector('.response-body__view-button.is-active').getAttribute('data-response-body-view')) || 'json';
+        mode = mode || (container.querySelector('.response-body__mode-button.is-active') && container.querySelector('.response-body__mode-button.is-active').getAttribute('data-response-body-mode')) || 'pretty';
+
+        function setPreText(txt) { try { pre.textContent = txt == null ? '' : String(txt); } catch (e) { pre.textContent = String(txt || ''); } }
+
+        switch (view) {
+            case 'json':
+                if (last.json) setPreText(JSON.stringify(last.json, null, 2));
+                else {
+                    try { setPreText(JSON.stringify(JSON.parse(last.text || ''), null, 2)); } catch (e) { setPreText(last.text || ''); }
+                }
+                if (preview) preview.hidden = true;
+                break;
+            case 'xml':
+                try { const txt = last.text || ''; setPreText(txt.replace(/>(\s*)</g, '>' + '\n' + '<').trim()); } catch (e) { setPreText(last.text || ''); }
+                if (preview) preview.hidden = true;
+                break;
+            case 'html':
+                if (mode === 'preview') {
+                    if (preview) {
+                        try {
+                            preview.hidden = false;
+                            if ('srcdoc' in preview) {
+                                preview.srcdoc = last.text || '';
+                            } else if (preview.contentDocument) {
+                                // fallback - avoid document.write if possible but keep fallback
+                                try { preview.contentDocument.open(); preview.contentDocument.write(last.text || ''); preview.contentDocument.close(); } catch (e) { /* ignore */ }
+                            }
+                        } catch (e) { preview.hidden = true; }
+                        setPreText((last.text || '').slice(0, 20000));
+                    }
+                } else {
+                    setPreText(last.text || '');
+                    if (preview) preview.hidden = true;
+                }
+                break;
+            case 'pretty':
+                if (last.json) setPreText(JSON.stringify(last.json, null, 2)); else setPreText(last.text || '');
+                if (preview) preview.hidden = true;
+                break;
+            case 'raw':
+                setPreText(last.text || '');
+                if (preview) preview.hidden = true;
+                break;
+            case 'preview':
+                if (preview) {
+                    try {
+                        preview.hidden = false;
+                        if ('srcdoc' in preview) preview.srcdoc = last.text || '';
+                        else if (preview.contentDocument) { preview.contentDocument.open(); preview.contentDocument.write(last.text || ''); preview.contentDocument.close(); }
+                    } catch (e) { preview.hidden = true; }
+                    setPreText((last.text || '').slice(0, 20000));
+                }
+                break;
+            default:
+                setPreText(last.text || '');
+                if (preview) preview.hidden = true;
+        }
     }
 
     async function executeForPanel(requestId, envId, container) {
@@ -145,30 +236,132 @@
 
         statusEl.textContent = 'Running…';
 
-        // build payload (simplified reuse of existing logic)
+        // build payload (reuse logic from single-runner)
         const payload = { request_id: requestId };
         try {
             payload.method = requestObj.method || 'GET';
             payload.url = requestObj.url || '';
             payload.headers = requestObj.headers || {};
             payload.params = requestObj.query_params || {};
+
             if (requestObj.body_type === 'json' && requestObj.body_json) payload.json = requestObj.body_json;
             else if (requestObj.body_type === 'form' && requestObj.body_form) {
                 const formEntries = [];
                 Object.entries(requestObj.body_form || {}).forEach(([k, v]) => formEntries.push({ key: k, type: 'text', value: v }));
                 payload.form_data = formEntries;
             } else if (requestObj.body_type === 'raw' && requestObj.body_raw) payload.body = requestObj.body_raw;
+
             if (typeof requestObj.timeout_ms === 'number') payload.timeout = Math.max(1, (requestObj.timeout_ms || 30000) / 1000);
             if (requestObj.collection_id) payload.collection_id = requestObj.collection_id;
-            if (envId) payload.environment = envId;
-            // simple auth handling
+
+            try {
+                // attempt to read environment id from a run-case button in the main table (fallback)
+                const btn = document.querySelector(`button[data-action="run-case"][data-request-id="${requestId}"]`);
+                const btnEnvId = btn ? btn.getAttribute('data-environment-id') : null;
+                if (btnEnvId) payload.environment = Number.isFinite(Number(btnEnvId)) ? Number(btnEnvId) : btnEnvId;
+            } catch (e) { }
+
+            const resolveTemplate = (v, vars) => {
+                if (!v || typeof v !== 'string') return v;
+                const m = v.match(/^\{\{\s*([\w\.\-]+)\s*\}\}$/);
+                if (!m) return v;
+                const key = m[1];
+                if (vars && Object.prototype.hasOwnProperty.call(vars, key)) return vars[key];
+                return v;
+            };
+
+            let collectionVars = null;
+            if (requestObj.collection_id) {
+                try {
+                    const collectionsBase = endpoints.collections || '/api/core/collections/';
+                    const colUrl = collectionsBase.endsWith('/') ? `${collectionsBase}${requestObj.collection_id}/` : `${collectionsBase}/${requestObj.collection_id}/`;
+                    const colResp = await fetch(colUrl, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                    if (colResp.ok) {
+                        const colData = await colResp.json();
+                        const envs = Array.isArray(colData.environments) ? colData.environments : [];
+                        if (envs.length) {
+                            let chosenEnv = null;
+                            try {
+                                const btn = document.querySelector(`button[data-action="run-case"][data-request-id="${requestId}"]`);
+                                const btnEnvId = btn ? btn.getAttribute('data-environment-id') : null;
+                                if (btnEnvId) {
+                                    const parsed = envs.find(e => String(e.id) === String(btnEnvId));
+                                    if (parsed) chosenEnv = parsed;
+                                }
+                            } catch (e) { }
+                            if (!chosenEnv) chosenEnv = envs.find(e => e && e.variables && Object.prototype.hasOwnProperty.call(e.variables, 'non_realtime_mid') && Object.prototype.hasOwnProperty.call(e.variables, 'non_realtime_mkey')) || null;
+                            if (!chosenEnv) chosenEnv = envs.find(e => e && e.variables && Object.prototype.hasOwnProperty.call(e.variables, 'non_realtime_mid')) || null;
+                            if (!chosenEnv) chosenEnv = envs[0];
+                            collectionVars = chosenEnv ? (chosenEnv.variables || {}) : {};
+                            if ((!payload.environment || payload.environment === null || payload.environment === undefined) && chosenEnv && chosenEnv.id) payload.environment = chosenEnv.id;
+                        }
+                    }
+                } catch (e) { }
+            }
+
             if (requestObj.auth_type === 'basic' && requestObj.auth_basic) {
-                try { const token = btoa(`${requestObj.auth_basic.username || ''}:${requestObj.auth_basic.password || ''}`); payload.headers = payload.headers || {}; payload.headers['Authorization'] = `Basic ${token}`; } catch (e) { }
+                const ab = requestObj.auth_basic || {};
+                const resolvedUsername = resolveTemplate(typeof ab.username === 'string' ? ab.username : '', collectionVars);
+                const resolvedPassword = resolveTemplate(typeof ab.password === 'string' ? ab.password : '', collectionVars);
+                if (resolvedUsername || resolvedPassword) {
+                    try {
+                        const token = btoa(`${resolvedUsername}:${resolvedPassword}`);
+                        payload.headers = payload.headers || {};
+                        payload.headers['Authorization'] = `Basic ${token}`;
+                    } catch (e) { }
+                }
             }
+
+            try {
+                const transforms = requestObj.body_transforms || null;
+                if (transforms && typeof transforms === 'object') {
+                    const cloned = JSON.parse(JSON.stringify(transforms));
+                    if (Array.isArray(cloned.overrides)) {
+                        cloned.overrides = cloned.overrides.map((ov) => {
+                            try {
+                                if (ov && ov.isRandom) {
+                                    let base = (ov.value === undefined || ov.value === null) ? '' : String(ov.value);
+                                    if (base.length > 10) base = base.slice(0, 10);
+                                    const now = new Date();
+                                    const ms = String(now.getMilliseconds()).padStart(3, '0');
+                                    let nano = '';
+                                    if (typeof performance !== 'undefined' && performance.now) {
+                                        const frac = performance.now();
+                                        const nanos = Math.floor((frac % 1) * 1e6);
+                                        nano = String(nanos).padStart(6, '0');
+                                    }
+                                    const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}.${ms}${nano}`;
+                                    let combined = `${base}${timestamp}`;
+                                    const limit = Number.isFinite(Number(ov.charLimit)) && Number(ov.charLimit) > 0 ? Number(ov.charLimit) : null;
+                                    if (limit) {
+                                        if (combined.length > limit) {
+                                            const allowedTimestampLen = Math.max(0, limit - String(base).length);
+                                            const truncatedTimestamp = allowedTimestampLen > 0 ? timestamp.slice(0, allowedTimestampLen) : '';
+                                            combined = `${base}${truncatedTimestamp}`;
+                                        }
+                                    }
+                                    ov.value = combined;
+                                    delete ov.isRandom;
+                                    delete ov.charLimit;
+                                }
+                            } catch (e) { }
+                            return ov;
+                        });
+                    }
+                    payload.body_transforms = cloned;
+                }
+            } catch (e) { }
+
             if (requestObj.auth_type === 'bearer' && requestObj.auth_bearer) {
-                payload.headers = payload.headers || {}; payload.headers['Authorization'] = `Bearer ${requestObj.auth_bearer}`;
+                const resolved = resolveTemplate(requestObj.auth_bearer, collectionVars);
+                if (resolved) {
+                    payload.headers = payload.headers || {};
+                    payload.headers['Authorization'] = `Bearer ${resolved}`;
+                }
             }
-        } catch (e) { }
+        } catch (e) {
+            // ignore building errors and continue
+        }
 
         // CSRF
         let csrftoken = null;
@@ -203,16 +396,13 @@
             const elapsed = result.elapsed_ms || result.response_time_ms || null;
             const resolvedUrl = result.resolved_url || (result.request && result.request.url) || '';
             summaryEl.textContent = 'Status: ' + (statusCode || '') + (elapsed ? (' — ' + Math.round(elapsed) + 'ms') : '') + (resolvedUrl ? (' — ' + resolvedUrl) : '');
-            headersEl.textContent = JSON.stringify(result.headers || result.response_headers || {}, null, 2);
+            const headersObj = result.headers || result.response_headers || {};
             const bodyText = result.body || result.response_body || '';
-            // try JSON
-            try { const parsed = typeof bodyText === 'string' ? JSON.parse(bodyText) : bodyText; bodyEl.textContent = JSON.stringify(parsed, null, 2); } catch (e) { bodyEl.textContent = String(bodyText || ''); }
-            // preview if html
-            const looksLikeHtml = /<\s*html|<\s*div|<\s*span|<!DOCTYPE html/i.test(String(bodyText || ''));
-            if (looksLikeHtml && preview) {
-                try { preview.hidden = false; if (preview.contentDocument) { preview.contentDocument.open(); preview.contentDocument.write(bodyText || ''); preview.contentDocument.close(); } }
-                catch (e) { preview.hidden = true; }
-            } else if (preview) preview.hidden = true;
+            // store lastResponse on container for rendering
+            container._lastResponse = { text: typeof bodyText === 'string' ? bodyText : (JSON.stringify(bodyText) || ''), json: result.json || null };
+            headersEl.textContent = JSON.stringify(headersObj, null, 2);
+            // render according to current view/mode
+            try { renderPanel(container); } catch (e) { /* ignore */ }
 
             assertionsEl.innerHTML = '';
             if (result.assertions_passed && result.assertions_passed.length) {
@@ -286,6 +476,51 @@
             modal.addEventListener('click', (ev2) => { if (ev2.target === modal) { closeModal(modal); setTimeout(() => modal.remove(), 250); } });
 
             openModal(modal);
+        });
+
+        // Delegated controls for view/mode/toggle inside the multi modal
+        document.addEventListener('click', function (ev) {
+            const t = ev.target;
+            if (!t) return;
+            // toggle-section
+            const toggleBtn = t.closest && t.closest('button[data-action="toggle-section"]');
+            if (toggleBtn) {
+                const targetId = toggleBtn.getAttribute('data-target');
+                if (!targetId) return;
+                const el = document.getElementById(targetId);
+                if (!el) return;
+                if (el.hidden || el.style.display === 'none') { el.hidden = false; el.style.display = ''; }
+                else { el.hidden = true; el.style.display = 'none'; }
+                return;
+            }
+
+            // response body view buttons
+            const viewBtn = t.closest && t.closest('button[data-response-body-view]');
+            if (viewBtn) {
+                const view = viewBtn.getAttribute('data-response-body-view');
+                if (!view) return;
+                const controls = viewBtn.closest && viewBtn.closest('.response-body__controls');
+                if (!controls) return;
+                Array.from(controls.querySelectorAll('button[data-response-body-view]')).forEach(b => { b.classList.remove('is-active'); b.setAttribute('aria-pressed', 'false'); });
+                viewBtn.classList.add('is-active'); viewBtn.setAttribute('aria-pressed', 'true');
+                const multiItem = viewBtn.closest && viewBtn.closest('.multi-item');
+                if (multiItem) try { renderPanel(multiItem); } catch (e) { }
+                return;
+            }
+
+            // response body mode buttons
+            const modeBtn = t.closest && t.closest('button[data-response-body-mode]');
+            if (modeBtn) {
+                const mode = modeBtn.getAttribute('data-response-body-mode');
+                if (!mode) return;
+                const controls = modeBtn.closest && modeBtn.closest('.response-body__modes');
+                if (!controls) return;
+                Array.from(controls.querySelectorAll('button[data-response-body-mode]')).forEach(b => { b.classList.remove('is-active'); b.setAttribute('aria-pressed', 'false'); });
+                modeBtn.classList.add('is-active'); modeBtn.setAttribute('aria-pressed', 'true');
+                const multiItem2 = modeBtn.closest && modeBtn.closest('.multi-item');
+                if (multiItem2) try { renderPanel(multiItem2); } catch (e) { }
+                return;
+            }
         });
     }
 
