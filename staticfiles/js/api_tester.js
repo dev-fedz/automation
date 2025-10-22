@@ -314,6 +314,61 @@
         }
     };
 
+    // Format JSON even when it contains template tokens like {{var}}.
+    // Strategy: replace template tokens with temporary placeholders (keeping
+    // track whether the token was originally quoted), parse & pretty-print,
+    // then restore the template tokens with correct quoting.
+    const formatJsonWithTemplates = (text) => {
+        if (typeof text !== 'string' || !text.trim()) return '';
+        const VARIABLE_RE = /{{\s*([\w\.-]+)\s*}}/g;
+        const tokens = [];
+        let m;
+        let out = '';
+        let lastIndex = 0;
+        let id = 0;
+        while ((m = VARIABLE_RE.exec(text)) !== null) {
+            const matchIndex = m.index;
+            const matchText = m[0];
+            // push preceding text
+            out += text.slice(lastIndex, matchIndex);
+            // inspect surrounding characters to determine if token is quoted
+            const beforeChar = text[matchIndex - 1] || '';
+            const afterChar = text[matchIndex + matchText.length] || '';
+            const insideQuotes = beforeChar === '"' || afterChar === '"';
+            const placeholder = `__TEMPLATE_${id}__`;
+            // if token is inside quotes, replace token with placeholder (no extra quotes)
+            // otherwise replace with quoted placeholder so JSON remains valid
+            if (insideQuotes) {
+                out += placeholder;
+            } else {
+                out += `"${placeholder}"`;
+            }
+            tokens.push({ placeholder, original: matchText, insideQuotes });
+            lastIndex = matchIndex + matchText.length;
+            id += 1;
+        }
+        out += text.slice(lastIndex);
+        try {
+            const parsed = JSON.parse(out);
+            const formatted = prettyJson(parsed);
+            let result = formatted;
+            // restore tokens: for each token replace the string literal "__TEMPLATE_n__"
+            // with either "{{...}}" (if originally inside quotes) or {{...}} (no quotes)
+            tokens.forEach((t) => {
+                if (t.insideQuotes) {
+                    // replace "__TEMPLATE__" with "{{...}}"
+                    result = result.replace(new RegExp(`\\"${t.placeholder}\\"`, 'g'), `\"${t.original}\"`);
+                } else {
+                    // replace "__TEMPLATE__" (including quotes) with {{...}} (no quotes)
+                    result = result.replace(new RegExp(`\\"${t.placeholder}\\"`, 'g'), t.original);
+                }
+            });
+            return result;
+        } catch (e) {
+            return text;
+        }
+    };
+
     const escapeHtml = (value) => {
         if (value === null || value === undefined) {
             return '';
@@ -994,7 +1049,14 @@
         const createOverrideTransform = (override = {}) => ({
             id: override.id || createTransformRowId('override'),
             path: override.path || '',
+            // type: 'simple' | 'external'
+            type: override.type || 'simple',
+            // when simple: use value/isRandom/charLimit as before
             value: override.value === undefined ? '' : String(override.value),
+            // when external: provide externalJson (string) and encryptionKey (string)
+            externalJson: override.externalJson === undefined ? '' : String(override.externalJson),
+            externalName: override.externalName === undefined ? '' : String(override.externalName),
+            encryptionKey: override.encryptionKey === undefined ? '' : String(override.encryptionKey),
             isRandom: !!override.isRandom,
             charLimit: Number.isFinite(Number(override.charLimit)) && Number(override.charLimit) > 0 ? Number(override.charLimit) : null,
         });
@@ -1014,7 +1076,7 @@
             }
             const rows = state.builder.transforms.overrides;
             if (!rows.length) {
-                overridesTable.innerHTML = '<tr class="empty"><td colspan="3" class="muted">No overrides defined.</td></tr>';
+                overridesTable.innerHTML = '<tr class="empty"><td colspan="6" class="muted">No overrides defined.</td></tr>';
                 return;
             }
             const markup = rows
@@ -1023,13 +1085,43 @@
                     const safeValue = escapeHtml(row.value || '');
                     const isRandomChecked = row.isRandom ? ' checked' : '';
                     const charLimitVal = row.charLimit ? String(row.charLimit) : '';
-                    return `<tr data-row-id="${row.id}">
+                    const type = row.type === 'external' ? 'external' : 'simple';
+                    const typeSelect = `<select class="kv-input body-override-type" data-field="type">
+                            <option value="simple"${type === 'simple' ? ' selected' : ''}>Simple</option>
+                            <option value="external"${type === 'external' ? ' selected' : ''}>External Object</option>
+                        </select>`;
+                    let externalJsonText = '';
+                    if (row.externalJson) {
+                        try {
+                            externalJsonText = formatJsonWithTemplates(String(row.externalJson));
+                        } catch (e) {
+                            externalJsonText = String(row.externalJson);
+                        }
+                    }
+                    const externalNameVal = escapeHtml(row.externalName || '');
+                    const externalFields = row.type === 'external' ?
+                        `<div class="override-external-fields">
+                            <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+                                <input type="text" class="kv-input override-external-name" data-field="externalName" placeholder="External object name (optional)" value="${externalNameVal}" />
+                                <button type="button" class="btn btn-secondary override-external-format">Format</button>
+                            </div>
+                            <textarea class="kv-input override-external-json" data-field="externalJson" placeholder='{"pchannel":"pchannel","amount":"amount","pay_reference":"pay_reference","pmethod":"pmethod"}'>${escapeHtml(externalJsonText || '')}</textarea>
+                            <input type="text" class="kv-input override-encryption-key" data-field="encryptionKey" value="${escapeHtml(row.encryptionKey || '')}" placeholder="Encryption key (optional)" />
+                        </div>` : '';
+
+                    const mainRow = `<tr data-row-id="${row.id}">
+                        <td>${typeSelect}</td>
                         <td><input type="text" class="kv-input body-override-input" data-field="path" value="${safePath}" placeholder="transaction.request_id" /></td>
                         <td><input type="text" class="kv-input body-override-input override-value-input" data-field="value" value="${safeValue}" placeholder="New value" /></td>
                         <td><input type="checkbox" class="override-is-random" data-field="isRandom"${isRandomChecked} aria-label="Is random" /></td>
                         <td><input type="number" min="1" class="kv-input override-char-limit" data-field="charLimit" value="${escapeHtml(charLimitVal)}" placeholder="e.g. 32" ${row.isRandom ? '' : 'disabled'} /></td>
                         <td class="kv-actions"><button type="button" class="kv-remove body-override-remove" data-row-id="${row.id}" aria-label="Remove override">×</button></td>
                     </tr>`;
+
+                    const extraRow = row.type === 'external' ?
+                        `<tr class="override-external-row" data-row-id="${row.id}-external"><td colspan="6">${externalFields}</td></tr>` : '';
+
+                    return `${mainRow}${extraRow}`;
                 })
                 .join('');
             overridesTable.innerHTML = markup;
@@ -1090,6 +1182,14 @@
                 row.path = value;
             } else if (field === 'value') {
                 row.value = value;
+            } else if (field === 'type') {
+                row.type = value === 'external' ? 'external' : 'simple';
+            } else if (field === 'externalJson') {
+                row.externalJson = value;
+            } else if (field === 'externalName') {
+                row.externalName = value;
+            } else if (field === 'encryptionKey') {
+                row.encryptionKey = value;
             } else if (field === 'isRandom') {
                 row.isRandom = !!value;
             } else if (field === 'charLimit') {
@@ -1146,17 +1246,69 @@
                 if (!path) {
                     return;
                 }
+                // handle external object override
+                if (row?.type === 'external') {
+                    // parse external json provided by user, with template resolution
+                    let externalObj = {};
+                    try {
+                        const raw = resolveLiteral(row?.externalJson || '');
+                        const parsed = tryParseJsonSilent(raw);
+                        externalObj = parsed && typeof parsed === 'object' ? parsed : {};
+                    } catch (e) {
+                        externalObj = {};
+                    }
+
+                    // allow signatures to target external fields: signatures with components can reference paths in external by prefixing 'external.' or just path
+                    // compute signatures that refer to external (we will handle all signatures after overrides loop below too)
+
+                    // We'll set signatures for external below in the signatures processing loop by referencing externalObj when component.path starts with 'external.'
+
+                    // after signatures are computed and possibly stored in resultOverrides (done below), encrypt externalObj
+                    const externalJsonText = JSON.stringify(externalObj);
+                    let encrypted = '';
+                    // prefer CryptoJS AES if available and key provided
+                    try {
+                        if (typeof window !== 'undefined' && window.CryptoJS && row.encryptionKey) {
+                            const key = row.encryptionKey || '';
+                            // use AES encrypt with key as passphrase, output base64
+                            const cipher = window.CryptoJS.AES.encrypt(externalJsonText, key);
+                            encrypted = String(cipher.toString());
+                        } else {
+                            // fallback: base64 encode
+                            if (typeof btoa === 'function') {
+                                encrypted = btoa(unescape(encodeURIComponent(externalJsonText)));
+                            } else {
+                                encrypted = externalJsonText;
+                            }
+                        }
+                    } catch (e) {
+                        // fallback to base64
+                        try {
+                            encrypted = btoa(unescape(encodeURIComponent(externalJsonText)));
+                        } catch (e2) {
+                            encrypted = externalJsonText;
+                        }
+                    }
+
+                    setValueAtObjectPath(jsonBody, path, encrypted);
+                    return;
+                }
+
                 let resolvedValue = resolveLiteral(row?.value);
+                // If isRandom flag is set, enforce base max length 10 and append timestamp
                 if (row?.isRandom) {
+                    // trim base value to 10 chars
                     if (typeof resolvedValue === 'string' && resolvedValue.length > 10) {
                         resolvedValue = resolvedValue.slice(0, 10);
                     }
+                    // generate high-resolution timestamp string
                     const now = new Date();
                     const ms = String(now.getMilliseconds()).padStart(3, '0');
+                    // use performance.now() to get fractional ms for pseudo-nanoseconds
                     let nano = '';
                     if (typeof performance !== 'undefined' && performance.now) {
                         const frac = performance.now();
-                        const nanos = Math.floor((frac % 1) * 1e6);
+                        const nanos = Math.floor((frac % 1) * 1e6); // micro -> emulate nano digits
                         nano = String(nanos).padStart(6, '0');
                     }
                     const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}.${ms}${nano}`;
@@ -1164,6 +1316,7 @@
                     const limit = Number.isFinite(Number(row?.charLimit)) && Number(row.charLimit) > 0 ? Number(row.charLimit) : null;
                     if (limit) {
                         if (combined.length > limit) {
+                            // attempt to trim the timestamp first to fit, but never remove base value
                             const allowedTimestampLen = Math.max(0, limit - String(resolvedValue).length);
                             const truncatedTimestamp = allowedTimestampLen > 0 ? timestamp.slice(0, allowedTimestampLen) : '';
                             combined = `${resolvedValue}${truncatedTimestamp}`;
@@ -1190,6 +1343,21 @@
                 const rawParts = components.map((component) => {
                     if (component.type === 'literal') {
                         return resolveLiteral(component.value);
+                    }
+                    const compPath = String(component.value || '');
+                    // support external.* paths by resolving into external object if present on transforms
+                    if (compPath.startsWith('external.')) {
+                        const extPath = compPath.slice('external.'.length);
+                        // try to find a matching external override (first one)
+                        const extOverride = (overrideRows.find((o) => o.type === 'external') || {});
+                        let externalObj = {};
+                        try {
+                            externalObj = tryParseJsonSilent(extOverride.externalJson) || {};
+                        } catch (e) {
+                            externalObj = {};
+                        }
+                        const value = getValueAtObjectPath(externalObj, extPath);
+                        return value === undefined || value === null ? '' : String(value);
                     }
                     const value = getValueAtObjectPath(jsonBody, component.value);
                     return value === undefined || value === null ? '' : String(value);
@@ -5211,6 +5379,74 @@
                 }
             }
 
+            // Normalize and attach body_transforms so the execute endpoint receives
+            // concrete override values (match testcase-runner behavior).
+            try {
+                const rawTransforms = state.builder.transforms || {};
+                const overrideRows = Array.isArray(rawTransforms.overrides) ? rawTransforms.overrides : [];
+                const signatureRows = Array.isArray(rawTransforms.signatures) ? rawTransforms.signatures : [];
+
+                const cloned = {
+                    overrides: overrideRows.map((row) => {
+                        try {
+                            const path = (row?.path || '').trim();
+                            if (!path) return null;
+                            // resolve template placeholders in the base value
+                            const baseRaw = row?.value === undefined || row?.value === null ? '' : String(row.value);
+                            let resolvedBase = resolveStringTemplate(baseRaw);
+                            // If isRandom flag is set, generate timestamped unique value
+                            if (row?.isRandom) {
+                                if (typeof resolvedBase === 'string' && resolvedBase.length > 10) {
+                                    resolvedBase = resolvedBase.slice(0, 10);
+                                }
+                                const now = new Date();
+                                const ms = String(now.getMilliseconds()).padStart(3, '0');
+                                let nano = '';
+                                if (typeof performance !== 'undefined' && performance.now) {
+                                    const frac = performance.now();
+                                    const nanos = Math.floor((frac % 1) * 1e6);
+                                    nano = String(nanos).padStart(6, '0');
+                                }
+                                const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}.${ms}${nano}`;
+                                let combined = `${resolvedBase}${timestamp}`;
+                                const limit = Number.isFinite(Number(row?.charLimit)) && Number(row.charLimit) > 0 ? Number(row.charLimit) : null;
+                                if (limit && combined.length > limit) {
+                                    const allowedTimestampLen = Math.max(0, limit - String(resolvedBase).length);
+                                    const truncatedTimestamp = allowedTimestampLen > 0 ? timestamp.slice(0, allowedTimestampLen) : '';
+                                    combined = `${resolvedBase}${truncatedTimestamp}`;
+                                }
+                                resolvedBase = combined;
+                            }
+
+                            return {
+                                path,
+                                value: resolvedBase,
+                            };
+                        } catch (e) {
+                            return null;
+                        }
+                    }).filter(Boolean),
+                    signatures: signatureRows.map((row) => {
+                        try {
+                            const target_path = row?.targetPath ? String(row.targetPath).trim() : '';
+                            if (!target_path) return null;
+                            return {
+                                target_path,
+                                algorithm: (row.algorithm || SIGNATURE_ALGORITHMS[2].key).toLowerCase(),
+                                components: row.components,
+                                store_as: row.storeAs ? row.storeAs.trim() : '',
+                            };
+                        } catch (e) {
+                            return null;
+                        }
+                    }).filter(Boolean),
+                };
+
+                if ((cloned.overrides && cloned.overrides.length) || (cloned.signatures && cloned.signatures.length)) {
+                    payload.body_transforms = cloned;
+                }
+            } catch (e) { }
+
             return payload;
         };
 
@@ -5385,12 +5621,40 @@
             ensureTransformState();
             const normalizedOverrides = state.builder.transforms.overrides
                 .filter((row) => row.path && row.path.trim())
-                .map((row) => ({
-                    path: row.path.trim(),
-                    value: row.value ?? '',
-                    isRandom: !!row.isRandom,
-                    charLimit: Number.isFinite(Number(row.charLimit)) && Number(row.charLimit) > 0 ? Number(row.charLimit) : null,
-                }));
+                .map((row) => {
+                    const base = { path: row.path.trim() };
+                    if (row.type === 'external') {
+                        // If external JSON contains template tokens we save the raw
+                        // string as external_json_raw; if parsable and no templates,
+                        // include external_json as the parsed object.
+                        const rawText = row.externalJson === undefined || row.externalJson === null ? '' : String(row.externalJson).trim();
+                        const hasTemplate = /{{\s*[\w\.-]+\s*}}/.test(rawText);
+                        let parsedObj = null;
+                        if (rawText && !hasTemplate) {
+                            // try parse now; if it fails, block save
+                            try {
+                                parsedObj = JSON.parse(rawText);
+                            } catch (e) {
+                                throw new Error(`External object JSON is invalid for override with path '${row.path}'.`);
+                            }
+                        }
+                        return {
+                            ...base,
+                            type: 'external',
+                            name: row.externalName ? String(row.externalName).trim() : '',
+                            external_json: parsedObj,
+                            external_json_raw: rawText || '',
+                            encryption_key: row.encryptionKey || '',
+                        };
+                    }
+                    return {
+                        ...base,
+                        type: 'simple',
+                        value: row.value ?? '',
+                        isRandom: !!row.isRandom,
+                        charLimit: Number.isFinite(Number(row.charLimit)) && Number(row.charLimit) > 0 ? Number(row.charLimit) : null,
+                    };
+                });
             const normalizedSignatures = state.builder.transforms.signatures
                 .filter((row) => row.targetPath && row.targetPath.trim() && row.components && row.components.trim())
                 .map((row) => ({
@@ -5572,13 +5836,30 @@
                     const field = target.dataset.field;
                     if (!field) return;
                     updateOverrideTransform(rowId, field, target.value);
+                } else if (target.classList.contains('body-override-type')) {
+                    updateOverrideTransform(rowId, 'type', target.value);
+                    // re-render to show/hide external fields
+                    renderBodyOverrides();
+                } else if (target.classList.contains('override-external-json')) {
+                    // external inputs may live in a separate TR whose dataset row id
+                    // ends with '-external'. Normalize to base id.
+                    const baseRowId = rowId.replace(/-external$/, '');
+                    updateOverrideTransform(baseRowId, 'externalJson', target.value);
+                } else if (target.classList.contains('override-external-name')) {
+                    const baseRowId = rowId.replace(/-external$/, '');
+                    updateOverrideTransform(baseRowId, 'externalName', target.value);
+                } else if (target.classList.contains('override-encryption-key')) {
+                    const baseRowId = rowId.replace(/-external$/, '');
+                    updateOverrideTransform(baseRowId, 'encryptionKey', target.value);
                 } else if (target.classList.contains('override-is-random')) {
                     const checked = !!target.checked;
                     updateOverrideTransform(rowId, 'isRandom', checked);
+                    // enable/disable char limit input in the row
                     const charInput = row.querySelector('.override-char-limit');
                     if (charInput) {
                         charInput.disabled = !checked;
                     }
+                    // if enabling random, enforce maxlength 10 on value input
                     const valueInput = row.querySelector('.override-value-input');
                     if (valueInput) {
                         if (checked) {
@@ -5599,6 +5880,25 @@
             overridesTable.addEventListener('click', (event) => {
                 const target = event.target;
                 if (!target.classList.contains('body-override-remove')) {
+                    // handle format button
+                    if (target.classList.contains('override-external-format')) {
+                        const row = target.closest('tr');
+                        if (!row) return;
+                        // compute base row id (strip '-external' suffix if present)
+                        const rawRowId = row.dataset.rowId || '';
+                        const baseRowId = rawRowId.replace(/-external$/, '') || rawRowId;
+                        // find the external textarea related to this baseRowId
+                        const externalRow = document.querySelector(`tr.override-external-row[data-row-id="${baseRowId}-external"]`);
+                        const textarea = (externalRow && externalRow.querySelector('textarea.override-external-json')) || document.querySelector(`tr[data-row-id="${baseRowId}"] textarea.override-external-json`);
+                        if (!textarea) return;
+                        try {
+                            const formatted = formatJsonWithTemplates(textarea.value || '');
+                            textarea.value = formatted;
+                            updateOverrideTransform(baseRowId, 'externalJson', formatted);
+                        } catch (e) {
+                            // no-op
+                        }
+                    }
                     return;
                 }
                 event.preventDefault();
@@ -5608,6 +5908,51 @@
                 }
                 removeOverrideTransform(rowId);
             });
+
+            // auto-format external JSON on paste
+            overridesTable.addEventListener('paste', (event) => {
+                const target = event.target;
+                if (!target || !target.classList || !target.classList.contains('override-external-json')) {
+                    return;
+                }
+                // Wait for paste to populate the textarea then format
+                const row = target.closest('tr');
+                if (!row) return;
+                const rawRowId = row.dataset.rowId || '';
+                const baseRowId = rawRowId.replace(/-external$/, '') || rawRowId;
+                setTimeout(() => {
+                    try {
+                        const formatted = formatJsonWithTemplates(target.value || '');
+                        if (formatted && formatted !== target.value) {
+                            target.value = formatted;
+                            updateOverrideTransform(baseRowId, 'externalJson', formatted);
+                        }
+                    } catch (e) {
+                        // leave as-is on error
+                    }
+                }, 50);
+            });
+
+            // auto-format external JSON on blur (listen on table via capture)
+            overridesTable.addEventListener('blur', (event) => {
+                const target = event.target;
+                if (!target.classList || !target.classList.contains('override-external-json')) {
+                    return;
+                }
+                const row = target.closest('tr');
+                if (!row) return;
+                const rawRowId = row.dataset.rowId || '';
+                const baseRowId = rawRowId.replace(/-external$/, '') || rawRowId;
+                try {
+                    const formatted = formatJsonWithTemplates(target.value || '');
+                    if (target.value !== formatted) {
+                        target.value = formatted;
+                        updateOverrideTransform(baseRowId, 'externalJson', formatted);
+                    }
+                } catch (e) {
+                    // leave as-is on error
+                }
+            }, true);
         }
 
         if (elements.addBodySignatureRow) {

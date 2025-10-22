@@ -314,6 +314,109 @@
         }
     };
 
+    // Format JSON even when it contains template tokens like {{var}}.
+    // Strategy: replace template tokens with temporary placeholders (keeping
+    // track whether the token was originally quoted), parse & pretty-print,
+    // then restore the template tokens with correct quoting.
+    const formatJsonWithTemplates = (text) => {
+        if (typeof text !== 'string' || !text.trim()) return '';
+        const VARIABLE_RE = /{{\s*([\w\.-]+)\s*}}/g;
+        const tokens = [];
+        let m;
+        let out = '';
+        let lastIndex = 0;
+        let id = 0;
+        while ((m = VARIABLE_RE.exec(text)) !== null) {
+            const matchIndex = m.index;
+            const matchText = m[0];
+            // push preceding text
+            out += text.slice(lastIndex, matchIndex);
+            // inspect surrounding characters to determine if token is quoted
+            const beforeChar = text[matchIndex - 1] || '';
+            const afterChar = text[matchIndex + matchText.length] || '';
+            const insideQuotes = beforeChar === '"' || afterChar === '"';
+            const placeholder = `__TEMPLATE_${id}__`;
+            // if token is inside quotes, replace token with placeholder (no extra quotes)
+            // otherwise replace with quoted placeholder so JSON remains valid
+            if (insideQuotes) {
+                out += placeholder;
+            } else {
+                out += `"${placeholder}"`;
+            }
+            tokens.push({ placeholder, original: matchText, insideQuotes });
+            lastIndex = matchIndex + matchText.length;
+            id += 1;
+        }
+        out += text.slice(lastIndex);
+        try {
+            const parsed = JSON.parse(out);
+            const formatted = prettyJson(parsed);
+            let result = formatted;
+            // restore tokens: for each token replace the string literal "__TEMPLATE_n__"
+            // with either "{{...}}" (if originally inside quotes) or {{...}} (no quotes)
+            tokens.forEach((t) => {
+                if (t.insideQuotes) {
+                    // replace "__TEMPLATE__" with "{{...}}"
+                    result = result.replace(new RegExp(`\\"${t.placeholder}\\"`, 'g'), `\"${t.original}\"`);
+                } else {
+                    // replace "__TEMPLATE__" (including quotes) with {{...}} (no quotes)
+                    result = result.replace(new RegExp(`\\"${t.placeholder}\\"`, 'g'), t.original);
+                }
+            });
+            return result;
+        } catch (e) {
+            return text;
+        }
+    };
+
+    // Try to convert a JS-style object literal into JSON. This handles simple
+    // cases like unquoted keys and values like pm.environment.get('name') by
+    // converting them to quoted keys and "{{name}}" template tokens.
+    const convertJsObjectLikeToJson = (text) => {
+        if (typeof text !== 'string') return text;
+        // quick check: must contain braces
+        const trimmed = text.trim();
+        if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return text;
+        // extract inner lines
+        const inner = trimmed.slice(1, -1).trim();
+        const lines = inner.split(/\r?\n/);
+        const outLines = [];
+        for (const rawLine of lines) {
+            let line = rawLine.trim();
+            if (!line) continue;
+            // remove trailing comma
+            if (line.endsWith(',')) line = line.slice(0, -1).trim();
+            // match key: value
+            const m = line.match(/^(["']?)([\w@.\-]+)\1\s*:\s*(.+)$/);
+            if (!m) {
+                // if line doesn't match, keep as-is
+                outLines.push(line);
+                continue;
+            }
+            const key = m[2];
+            let value = m[3].trim();
+            // convert common pm.environment.get('name') and pm.variables.get('name') or pm.getEnvironmentVariable
+            const envMatch = value.match(/pm\.environment\.get\(['"]([\w.\-]+)['"]\)/) || value.match(/pm\.variables\.get\(['"]([\w.\-]+)['"]\)/) || value.match(/pm\.getEnvironmentVariable\(['"]([\w.\-]+)['"]\)/);
+            if (envMatch) {
+                value = `"{{${envMatch[1]}}}"`;
+            } else if (/^(['"]).*\1$/.test(value)) {
+                // already quoted string
+                // keep as-is
+            } else if (/^[0-9.+-]+$/.test(value)) {
+                // numeric
+            } else if (/^\{/.test(value) || /^\[/.test(value)) {
+                // nested object/array: leave as-is
+            } else {
+                // default: treat as string
+                value = JSON.stringify(value.replace(/,$/, ''));
+            }
+            outLines.push(`"${key}": ${value}`);
+        }
+        return `{
+  ${outLines.join(',\n  ')}
+}`;
+    };
+
     const escapeHtml = (value) => {
         if (value === null || value === undefined) {
             return '';
@@ -994,7 +1097,13 @@
         const createOverrideTransform = (override = {}) => ({
             id: override.id || createTransformRowId('override'),
             path: override.path || '',
+            // type: 'simple' | 'external'
+            type: override.type || 'simple',
+            // when simple: use value/isRandom/charLimit as before
             value: override.value === undefined ? '' : String(override.value),
+            // when external: provide externalJson (string) and externalName (strings)
+            externalJson: override.externalJson === undefined ? '' : String(override.externalJson),
+            externalName: override.externalName === undefined ? '' : String(override.externalName),
             isRandom: !!override.isRandom,
             charLimit: Number.isFinite(Number(override.charLimit)) && Number(override.charLimit) > 0 ? Number(override.charLimit) : null,
         });
@@ -1014,25 +1123,169 @@
             }
             const rows = state.builder.transforms.overrides;
             if (!rows.length) {
-                overridesTable.innerHTML = '<tr class="empty"><td colspan="3" class="muted">No overrides defined.</td></tr>';
+                overridesTable.innerHTML = '<tr class="empty"><td colspan="6" class="muted">No overrides defined.</td></tr>';
                 return;
             }
+            // unmount any Monaco editors that no longer have rows
+            if (window.monaco && typeof window.monaco === 'object') {
+                // we'll mount after DOM insertion
+            } else {
+                // if Monaco unavailable, ensure any previously mounted editors are cleared
+                if (window.__externalMonacoEditors && typeof window.__externalMonacoEditors === 'object') {
+                    Object.keys(window.__externalMonacoEditors).forEach((k) => {
+                        try { window.__externalMonacoEditors[k].dispose(); } catch (e) { }
+                    });
+                    window.__externalMonacoEditors = {};
+                }
+            }
+
+            // Preserve current external editor/textarea contents (by row id) so
+            // re-rendering (e.g., when adding a new override) doesn't wipe user input.
+            const preservedExternalContent = {};
+            try {
+                // Monaco editors
+                if (window.__externalMonacoEditors && typeof window.__externalMonacoEditors === 'object') {
+                    Object.keys(window.__externalMonacoEditors).forEach((k) => {
+                        try {
+                            const ed = window.__externalMonacoEditors[k];
+                            if (ed && typeof ed.getValue === 'function') preservedExternalContent[k] = ed.getValue();
+                        } catch (e) { }
+                    });
+                }
+                // textarea fallbacks: read existing DOM textareas
+                const existingTextareas = overridesTable.querySelectorAll && overridesTable.querySelectorAll('.override-external-json');
+                if (existingTextareas && existingTextareas.length) {
+                    existingTextareas.forEach((ta) => {
+                        try {
+                            // find parent tr to get row id
+                            const tr = ta.closest('tr');
+                            if (!tr) return;
+                            let rowId = tr.dataset.rowId || '';
+                            rowId = rowId.replace(/-external$/, '');
+                            preservedExternalContent[rowId] = ta.value || ta.textContent || '';
+                        } catch (e) { }
+                    });
+                }
+            } catch (e) { /* ignore preservation errors */ }
+
+            // If Monaco editors were present, dispose them now (we've preserved their
+            // content above). We'll recreate fresh editor instances after the DOM
+            // is updated so they attach to the new containers correctly.
+            try {
+                if (window.__externalMonacoEditors && typeof window.__externalMonacoEditors === 'object') {
+                    Object.keys(window.__externalMonacoEditors).forEach((k) => {
+                        try { window.__externalMonacoEditors[k].dispose(); } catch (e) { }
+                    });
+                }
+                window.__externalMonacoEditors = {};
+            } catch (e) { /* ignore disposal errors */ }
+
             const markup = rows
                 .map((row) => {
                     const safePath = escapeHtml(row.path || '');
                     const safeValue = escapeHtml(row.value || '');
                     const isRandomChecked = row.isRandom ? ' checked' : '';
                     const charLimitVal = row.charLimit ? String(row.charLimit) : '';
-                    return `<tr data-row-id="${row.id}">
+                    const type = row.type === 'external' ? 'external' : 'simple';
+                    const typeSelect = `<select class="kv-input body-override-type" data-field="type">
+                            <option value="simple"${type === 'simple' ? ' selected' : ''}>Simple</option>
+                            <option value="external"${type === 'external' ? ' selected' : ''}>External Object</option>
+                        </select>`;
+                    // prefer preserved content if present (user may have typed but not yet triggered change)
+                    let externalJsonText = '';
+                    const preserved = preservedExternalContent[row.id];
+                    if (preserved !== undefined && preserved !== null) {
+                        externalJsonText = String(preserved);
+                    } else if (row.externalJson) {
+                        try {
+                            externalJsonText = formatJsonWithTemplates(String(row.externalJson));
+                        } catch (e) {
+                            externalJsonText = String(row.externalJson);
+                        }
+                    }
+                    const editorPlaceholder = `external-editor-${row.id}`;
+                    const externalNameVal = escapeHtml(row.externalName || '');
+                    const externalFields = row.type === 'external' ?
+                        `<div class="override-external-fields">
+                            <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+                                <input type="text" class="kv-input override-external-name" data-field="externalName" placeholder="External object name" value="${externalNameVal}" />
+                            </div>
+                            ${window.monaco ? `<div id="${editorPlaceholder}" class="external-monaco-container" data-row-id="${row.id}" style="height:160px;border:1px solid #eee;border-radius:4px;overflow:hidden;background:#fff;padding:4px;"></div>` : `<textarea class="kv-input override-external-json" data-field="externalJson" placeholder='{"pchannel":"pchannel","amount":"amount","pay_reference":"pay_reference","pmethod":"pmethod"}'>${escapeHtml(externalJsonText || '')}</textarea>`}
+                            <!-- encryption key removed -->
+                        </div>` : '';
+
+                    const disabledForExternal = row.type === 'external' ? ' disabled' : '';
+                    const checkboxDisabledForExternal = row.type === 'external' ? ' disabled' : '';
+                    const charLimitDisabled = row.type === 'external' ? ' disabled' : (row.isRandom ? '' : 'disabled');
+                    const mainRow = `<tr data-row-id="${row.id}">
+                        <td>${typeSelect}</td>
                         <td><input type="text" class="kv-input body-override-input" data-field="path" value="${safePath}" placeholder="transaction.request_id" /></td>
-                        <td><input type="text" class="kv-input body-override-input override-value-input" data-field="value" value="${safeValue}" placeholder="New value" /></td>
-                        <td><input type="checkbox" class="override-is-random" data-field="isRandom"${isRandomChecked} aria-label="Is random" /></td>
-                        <td><input type="number" min="1" class="kv-input override-char-limit" data-field="charLimit" value="${escapeHtml(charLimitVal)}" placeholder="e.g. 32" ${row.isRandom ? '' : 'disabled'} /></td>
+                        <td><input type="text" class="kv-input body-override-input override-value-input" data-field="value" value="${safeValue}" placeholder="New value"${disabledForExternal} /></td>
+                        <td><input type="checkbox" class="override-is-random" data-field="isRandom"${isRandomChecked} aria-label="Is random"${checkboxDisabledForExternal} /></td>
+                        <td><input type="number" min="1" class="kv-input override-char-limit" data-field="charLimit" value="${escapeHtml(charLimitVal)}" placeholder="e.g. 32" ${charLimitDisabled} /></td>
                         <td class="kv-actions"><button type="button" class="kv-remove body-override-remove" data-row-id="${row.id}" aria-label="Remove override">×</button></td>
                     </tr>`;
+
+                    const extraRow = row.type === 'external' ?
+                        `<tr class="override-external-row" data-row-id="${row.id}-external"><td colspan="6">${externalFields}</td></tr>` : '';
+
+                    return `${mainRow}${extraRow}`;
                 })
                 .join('');
             overridesTable.innerHTML = markup;
+
+            // After DOM inserted, mount Monaco editors for external rows when available
+            if (window.monaco && typeof window.monaco === 'object') {
+                if (!window.__externalMonacoEditors) window.__externalMonacoEditors = {};
+                rows.forEach((row) => {
+                    if (row.type !== 'external') return;
+                    const placeholderId = `external-editor-${row.id}`;
+                    const container = document.getElementById(placeholderId);
+                    if (!container) return;
+                    // if editor exists and container matches, update value
+                    if (window.__externalMonacoEditors[row.id]) {
+                        const ed = window.__externalMonacoEditors[row.id];
+                        if (ed && typeof ed.getValue === 'function') {
+                            const currentVal = ed.getValue();
+                            const desiredVal = row.externalJson == null ? '' : String(row.externalJson);
+                            // Only overwrite the editor if desiredVal is non-empty (explicit content)
+                            // or the editor is currently empty. This prevents clearing user-entered
+                            // content when a new row is added and the state has an empty string.
+                            if (desiredVal !== '' || currentVal === '') {
+                                if (currentVal !== desiredVal) {
+                                    try { ed.setValue(desiredVal); } catch (e) { }
+                                }
+                            }
+                        }
+                        return;
+                    }
+                    try {
+                        const model = monaco.editor.createModel(row.externalJson || '', 'json');
+                        const editor = monaco.editor.create(container, {
+                            model,
+                            language: 'json',
+                            minimap: { enabled: false },
+                            automaticLayout: true,
+                            scrollBeyondLastLine: false,
+                        });
+                        editor.onDidChangeModelContent(() => {
+                            const v = editor.getValue();
+                            updateOverrideTransform(row.id, 'externalJson', v);
+                        });
+                        // store editor instance for later formatting or disposal
+                        window.__externalMonacoEditors[row.id] = editor;
+                    } catch (e) {
+                        // fail silently and fall back to textarea rendering
+                    }
+                });
+                // dispose editors for removed rows
+                Object.keys(window.__externalMonacoEditors).forEach((k) => {
+                    if (!rows.find((r) => r.id === k)) {
+                        try { window.__externalMonacoEditors[k].dispose(); } catch (e) { }
+                        delete window.__externalMonacoEditors[k];
+                    }
+                });
+            }
         };
 
         const renderBodySignatures = () => {
@@ -1090,6 +1343,10 @@
                 row.path = value;
             } else if (field === 'value') {
                 row.value = value;
+            } else if (field === 'type') {
+                row.type = value === 'external' ? 'external' : 'simple';
+            } else if (field === 'externalJson') {
+                row.externalJson = value;
             } else if (field === 'isRandom') {
                 row.isRandom = !!value;
             } else if (field === 'charLimit') {
@@ -1146,6 +1403,41 @@
                 if (!path) {
                     return;
                 }
+                // handle external object override
+                if (row?.type === 'external') {
+                    // parse external json provided by user, with template resolution
+                    let externalObj = {};
+                    try {
+                        const raw = resolveLiteral(row?.externalJson || '');
+                        const parsed = tryParseJsonSilent(raw);
+                        externalObj = parsed && typeof parsed === 'object' ? parsed : {};
+                    } catch (e) {
+                        externalObj = {};
+                    }
+
+                    // allow signatures to target external fields: signatures with components can reference paths in external by prefixing 'external.' or just path
+                    // compute signatures that refer to external (we will handle all signatures after overrides loop below too)
+
+                    // We'll set signatures for external below in the signatures processing loop by referencing externalObj when component.path starts with 'external.'
+
+                    // after signatures are computed and possibly stored in resultOverrides (done below), encrypt externalObj
+                    const externalJsonText = JSON.stringify(externalObj);
+                    let encrypted = '';
+                    // client-side encryption key removed — always use base64 encoding (or raw text if btoa unavailable)
+                    try {
+                        if (typeof btoa === 'function') {
+                            encrypted = btoa(unescape(encodeURIComponent(externalJsonText)));
+                        } else {
+                            encrypted = externalJsonText;
+                        }
+                    } catch (e) {
+                        encrypted = externalJsonText;
+                    }
+
+                    setValueAtObjectPath(jsonBody, path, encrypted);
+                    return;
+                }
+
                 let resolvedValue = resolveLiteral(row?.value);
                 // If isRandom flag is set, enforce base max length 10 and append timestamp
                 if (row?.isRandom) {
@@ -1195,6 +1487,21 @@
                 const rawParts = components.map((component) => {
                     if (component.type === 'literal') {
                         return resolveLiteral(component.value);
+                    }
+                    const compPath = String(component.value || '');
+                    // support external.* paths by resolving into external object if present on transforms
+                    if (compPath.startsWith('external.')) {
+                        const extPath = compPath.slice('external.'.length);
+                        // try to find a matching external override (first one)
+                        const extOverride = (overrideRows.find((o) => o.type === 'external') || {});
+                        let externalObj = {};
+                        try {
+                            externalObj = tryParseJsonSilent(extOverride.externalJson) || {};
+                        } catch (e) {
+                            externalObj = {};
+                        }
+                        const value = getValueAtObjectPath(externalObj, extPath);
+                        return value === undefined || value === null ? '' : String(value);
                     }
                     const value = getValueAtObjectPath(jsonBody, component.value);
                     return value === undefined || value === null ? '' : String(value);
@@ -1739,7 +2046,69 @@
                 : {};
             const overrideItems = Array.isArray(rawTransforms.overrides) ? rawTransforms.overrides : [];
             const signatureItems = Array.isArray(rawTransforms.signatures) ? rawTransforms.signatures : [];
-            state.builder.transforms.overrides = overrideItems.map((item) => createOverrideTransform(item));
+            // convert saved override shape into the UI-friendly shape expected by createOverrideTransform
+            const convertSavedOverrideToUi = (saved) => {
+                if (!saved || typeof saved !== 'object') return saved;
+                const base = {
+                    id: saved.id || saved._id || undefined,
+                    path: saved.path || saved.path === '' ? saved.path : '',
+                    type: saved.type || 'simple',
+                };
+                if ((saved.type || '') === 'external') {
+                    // prefer external_json (parsed object) -> stringify for editor
+                    let externalText = '';
+                    try {
+                        if (saved.external_json !== undefined && saved.external_json !== null) {
+                            externalText = JSON.stringify(saved.external_json, null, 2);
+                        } else if (saved.external_json_raw !== undefined && saved.external_json_raw !== null) {
+                            // raw may already be an object or a string; if object stringify, else use as-is
+                            if (typeof saved.external_json_raw === 'object') {
+                                externalText = JSON.stringify(saved.external_json_raw, null, 2);
+                            } else {
+                                externalText = String(saved.external_json_raw || '');
+                            }
+                        } else if (saved.externalJson !== undefined) {
+                            externalText = String(saved.externalJson || '');
+                        }
+                    } catch (e) {
+                        externalText = saved.externalJson || '';
+                    }
+                    // attempt to find a sensible external object name from common locations
+                    let resolvedName = '';
+                    try {
+                        resolvedName = saved.name || saved.external_name || saved.externalName || '';
+                        if (!resolvedName && saved.external_json && typeof saved.external_json === 'object') {
+                            if (saved.external_json.name) resolvedName = String(saved.external_json.name);
+                        }
+                        if (!resolvedName && saved.external_json_raw && typeof saved.external_json_raw === 'object') {
+                            if (saved.external_json_raw.name) resolvedName = String(saved.external_json_raw.name);
+                        }
+                        // fallback: use the saved path as the name when no explicit name found
+                        if (!resolvedName && base && base.path) {
+                            resolvedName = String(base.path || '');
+                        }
+                    } catch (e) {
+                        resolvedName = saved.name || base.path || '';
+                    }
+
+                    return {
+                        ...base,
+                        type: 'external',
+                        externalJson: externalText,
+                        externalName: resolvedName || '',
+                    };
+                }
+                // simple override mapping
+                return {
+                    ...base,
+                    type: 'simple',
+                    value: saved.value ?? saved.val ?? '',
+                    isRandom: !!saved.isRandom,
+                    charLimit: Number.isFinite(Number(saved.charLimit)) && Number(saved.charLimit) > 0 ? Number(saved.charLimit) : null,
+                };
+            };
+
+            state.builder.transforms.overrides = overrideItems.map((item) => createOverrideTransform(convertSavedOverrideToUi(item)));
             state.builder.transforms.signatures = signatureItems.map((item) => createSignatureTransform(item));
             state.builder.scripts.pre = '';
             state.builder.scripts.post = '';
@@ -5456,14 +5825,81 @@
             }
 
             ensureTransformState();
+            try { console.debug && console.debug('Raw override rows:', state.builder.transforms.overrides); } catch (e) { }
             const normalizedOverrides = state.builder.transforms.overrides
-                .filter((row) => row.path && row.path.trim())
-                .map((row) => ({
-                    path: row.path.trim(),
-                    value: row.value ?? '',
-                    isRandom: !!row.isRandom,
-                    charLimit: Number.isFinite(Number(row.charLimit)) && Number(row.charLimit) > 0 ? Number(row.charLimit) : null,
-                }));
+                // keep rows that have a path, or external rows (we'll default their path if missing)
+                .filter((row) => (row.type === 'external') || (row.path && row.path.trim()))
+                .map((row) => {
+                    const base = { path: (row.path && String(row.path).trim()) || (row.type === 'external' ? 'data' : '') };
+                    if (row.type === 'external') {
+                        // If external JSON contains template tokens we save the raw
+                        // string as external_json_raw; if parsable and no templates,
+                        // include external_json as the parsed object.
+                        const rawText = row.externalJson === undefined || row.externalJson === null ? '' : String(row.externalJson).trim();
+                        const hasTemplate = /{{\s*[\w\.-]+\s*}}/.test(rawText);
+                        let parsedObj = null;
+                        if (rawText && !hasTemplate) {
+                            // try parse now; if it fails, block save
+                            try {
+                                parsedObj = JSON.parse(rawText);
+                            } catch (e) {
+                                throw new Error(`External object JSON is invalid for override with path '${row.path}'.`);
+                            }
+                        }
+                        // attempt to provide external_json_raw as a JSON object when possible
+                        let rawJsonObj = null;
+                        try {
+                            // If we already parsed the object above (no templates), reuse it
+                            if (parsedObj !== null) {
+                                rawJsonObj = parsedObj;
+                            } else if (rawText) {
+                                // try parsing rawText directly
+                                const tryParsed = tryParseJsonSilent(rawText);
+                                if (tryParsed !== null) {
+                                    rawJsonObj = tryParsed;
+                                } else {
+                                    // try converting JS-like object literal into JSON and parse
+                                    try {
+                                        const converted = convertJsObjectLikeToJson(rawText);
+                                        const tryConverted = tryParseJsonSilent(converted);
+                                        if (tryConverted !== null) {
+                                            rawJsonObj = tryConverted;
+                                        }
+                                    } catch (e) {
+                                        // ignore
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            rawJsonObj = null;
+                        }
+
+                        return {
+                            ...base,
+                            type: 'external',
+                            name: row.externalName ? String(row.externalName).trim() : '',
+                            external_json: parsedObj,
+                            // prefer object when possible; if not parseable, set null
+                            external_json_raw: rawJsonObj,
+                            // encryption removed on client-side
+                        };
+                    }
+                    return {
+                        ...base,
+                        type: 'simple',
+                        value: row.value ?? '',
+                        isRandom: !!row.isRandom,
+                        charLimit: Number.isFinite(Number(row.charLimit)) && Number(row.charLimit) > 0 ? Number(row.charLimit) : null,
+                    };
+                });
+            try { console.debug && console.debug('Normalized overrides to save:', normalizedOverrides); } catch (e) { }
+            // If there were external rows present but none were normalized, warn
+            try {
+                const hadExternal = Array.isArray(state.builder.transforms.overrides) && state.builder.transforms.overrides.some((r) => r.type === 'external');
+                if (hadExternal && (!Array.isArray(normalizedOverrides) || !normalizedOverrides.some((r) => r.type === 'external'))) {
+                    console.warn && console.warn('External overrides present in editor but none were included in the saved definition. Check that each external override has a non-empty path.');
+                }
+            } catch (e) { }
             const normalizedSignatures = state.builder.transforms.signatures
                 .filter((row) => row.targetPath && row.targetPath.trim() && row.components && row.components.trim())
                 .map((row) => ({
@@ -5645,6 +6081,18 @@
                     const field = target.dataset.field;
                     if (!field) return;
                     updateOverrideTransform(rowId, field, target.value);
+                } else if (target.classList.contains('body-override-type')) {
+                    updateOverrideTransform(rowId, 'type', target.value);
+                    // re-render to show/hide external fields
+                    renderBodyOverrides();
+                } else if (target.classList.contains('override-external-json')) {
+                    // external inputs may live in a separate TR whose dataset row id
+                    // ends with '-external'. Normalize to base id.
+                    const baseRowId = rowId.replace(/-external$/, '');
+                    updateOverrideTransform(baseRowId, 'externalJson', target.value);
+                } else if (target.classList.contains('override-external-name')) {
+                    const baseRowId = rowId.replace(/-external$/, '');
+                    updateOverrideTransform(baseRowId, 'externalName', target.value);
                 } else if (target.classList.contains('override-is-random')) {
                     const checked = !!target.checked;
                     updateOverrideTransform(rowId, 'isRandom', checked);
@@ -5683,6 +6131,85 @@
                 }
                 removeOverrideTransform(rowId);
             });
+
+            // auto-format external JSON on paste
+            overridesTable.addEventListener('paste', (event) => {
+                const target = event.target;
+                // if paste occurs into a Monaco-mounted container (we listen to container), handle separately
+                if (target && target.classList && target.classList.contains('override-external-json')) {
+                    // Wait for paste to populate the textarea then format (fallback path)
+                    const row = target.closest('tr');
+                    if (!row) return;
+                    const rawRowId = row.dataset.rowId || '';
+                    const baseRowId = rawRowId.replace(/-external$/, '') || rawRowId;
+                    setTimeout(() => {
+                        try {
+                            const formatted = formatJsonWithTemplates(target.value || '');
+                            if (formatted && formatted !== target.value) {
+                                target.value = formatted;
+                                updateOverrideTransform(baseRowId, 'externalJson', formatted);
+                            }
+                        } catch (e) {
+                            // leave as-is on error
+                        }
+                    }, 50);
+                    return;
+                }
+
+                // If paste happened into a Monaco container, find the editor and invoke Monaco's format
+                const el = event.target;
+                const rowTr = el && el.closest ? el.closest('tr.override-external-row') : null;
+                const rawRowId = rowTr ? (rowTr.dataset.rowId || '') : '';
+                const baseRowId = rawRowId.replace(/-external$/, '') || rawRowId;
+                if (window.__externalMonacoEditors && window.__externalMonacoEditors[baseRowId]) {
+                    try {
+                        // give browser time to apply the paste into the editor
+                        setTimeout(() => {
+                            try {
+                                const editor = window.__externalMonacoEditors[baseRowId];
+                                const action = editor.getAction && editor.getAction('editor.action.formatDocument');
+                                if (action && typeof action.run === 'function') {
+                                    action.run().catch(() => { });
+                                }
+                                const v = editor.getValue();
+                                updateOverrideTransform(baseRowId, 'externalJson', v);
+                            } catch (e) {
+                                // ignore
+                            }
+                        }, 50);
+                    } catch (e) {
+                        // ignore
+                    }
+                }
+            });
+
+            // auto-format external JSON on blur (listen on table via capture)
+            overridesTable.addEventListener('blur', (event) => {
+                const target = event.target;
+                if (!target.classList || !target.classList.contains('override-external-json')) {
+                    return;
+                }
+                const row = target.closest('tr');
+                if (!row) return;
+                const rawRowId = row.dataset.rowId || '';
+                const baseRowId = rawRowId.replace(/-external$/, '') || rawRowId;
+                try {
+                    let formatted = formatJsonWithTemplates(target.value || '');
+                    if (!formatted || formatted === (target.value || '')) {
+                        // try converting JS-like object to JSON (handles pm.environment.get(...) style)
+                        const converted = convertJsObjectLikeToJson(target.value || '');
+                        if (converted && converted !== (target.value || '')) {
+                            formatted = formatJsonWithTemplates(converted);
+                        }
+                    }
+                    if (formatted && target.value !== formatted) {
+                        target.value = formatted;
+                        updateOverrideTransform(baseRowId, 'externalJson', formatted);
+                    }
+                } catch (e) {
+                    // leave as-is on error
+                }
+            }, true);
         }
 
         if (elements.addBodySignatureRow) {
@@ -6075,6 +6602,10 @@
 
                 setStatus('Saving request...', 'loading');
                 try {
+                    // Debug: log the request definition before sending so we can
+                    // verify external overrides are present. Remove this when
+                    // debugging is complete.
+                    try { console.debug && console.debug('Request definition to save:', definition); } catch (e) { }
                     const response = await postJson(detailUrl, definition, method);
                     const savedRequestId = existingRequest?.id || response?.id || null;
                     await refreshCollections({
