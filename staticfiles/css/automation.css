@@ -55,6 +55,23 @@
     --automation-info: #2563eb;
 }
 
+/* Make the Test Case response modal wider: at least 75% of the viewport width,
+   but cap it to 95% to avoid edge overflow on small screens. Center it. */
+#testcase-response-modal .modal-dialog,
+#testcase-response-modal .modal-dialog .modal-content {
+    min-width: 75vw !important;
+    width: auto !important;
+    max-width: 95vw !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}
+
+#testcase-response-modal .modal-dialog {
+    /* allow dialog content to scroll when response sections are very tall */
+    max-height: 95vh !important;
+    overflow-y: auto !important;
+}
+
 .automation-table-card {
     margin-top: 1.6rem;
 }
@@ -1011,3 +1028,13 @@ body.automation-modal-open {
         width: 100%;
     }
 }
+
+/* Response modal: expandable pre blocks and resizer */
+.response-section { margin-top: 0.6rem; position: relative; }
+.response-section-controls { position: absolute; right: 0.5rem; top: 0.25rem; }
+.response-pre { background: #0f1724; color: #e6eef8; padding: 0.7rem; border-radius: 8px; overflow: auto; max-height: none; }
+.response-pre.expandable { resize: vertical; min-height: 80px; max-height: none; }
+.response-preview { width: 100%; height: 320px; border: 1px solid rgba(0,0,0,0.06); border-radius: 6px; }
+.resizer { height: 8px; background: linear-gradient(90deg, rgba(0,0,0,0.06), rgba(0,0,0,0.12)); cursor: ns-resize; margin: 6px 0 8px 0; border-radius: 4px; }
+.resizer:hover { background: linear-gradient(90deg, rgba(0,0,0,0.12), rgba(0,0,0,0.18)); }
+.response-section .action-button { font-size: 0.7rem; padding: 0.25rem 0.5rem; }

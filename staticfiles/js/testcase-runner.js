@@ -417,6 +417,55 @@
         });
         const close = document.getElementById('testcase-response-close');
         if (close) close.addEventListener('click', closeModal);
+        // Toggle controls for expandable sections
+        document.addEventListener('click', function (ev) {
+            const t = ev.target;
+            if (!t) return;
+            const btn = t.closest && t.closest('button[data-action="toggle-section"]');
+            if (!btn) return;
+            const targetId = btn.getAttribute('data-target');
+            if (!targetId) return;
+            const el = document.getElementById(targetId);
+            if (!el) return;
+            if (el.hidden || el.style.display === 'none') {
+                el.hidden = false;
+                el.style.display = '';
+            } else {
+                el.hidden = true;
+                el.style.display = 'none';
+            }
+        });
+
+        // Resizer: drag to change height of the target pre block
+        let activeResizer = null;
+        let startY = 0;
+        let startHeight = 0;
+        document.addEventListener('mousedown', function (ev) {
+            const r = ev.target && ev.target.closest && ev.target.closest('.resizer');
+            if (!r) return;
+            const targetId = r.getAttribute('data-resize-target');
+            if (!targetId) return;
+            const target = document.getElementById(targetId);
+            if (!target) return;
+            activeResizer = { target };
+            startY = ev.clientY;
+            startHeight = target.getBoundingClientRect().height;
+            ev.preventDefault();
+        });
+        document.addEventListener('mousemove', function (ev) {
+            if (!activeResizer) return;
+            try {
+                const dy = ev.clientY - startY;
+                const newH = Math.max(20, startHeight + dy);
+                activeResizer.target.style.height = newH + 'px';
+                activeResizer.target.style.maxHeight = 'none';
+            } catch (e) { /* ignore */ }
+        });
+        document.addEventListener('mouseup', function (ev) {
+            if (activeResizer) {
+                activeResizer = null;
+            }
+        });
         // click outside modal to close
         document.addEventListener('click', function (ev) {
             const modal = document.getElementById('testcase-response-modal');
