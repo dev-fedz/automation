@@ -1043,3 +1043,113 @@ body.automation-modal-open {
 .response-format-tabs { display: flex; gap: 0.4rem; margin: 0.45rem 0 0.8rem 0; }
 .response-format-tabs .action-button { background: transparent; border: 1px solid rgba(255,255,255,0.06); color: inherit; }
 .response-format-tabs .action-button[aria-selected="true"] { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.12); }
+
+/* Ensure table checkboxes are visible and sized consistently */
+.automation-table .col-checkbox {
+    /* remove fixed width so column aligns with tbody cells */
+    width: auto !important;
+    text-align: left !important;
+    padding-left: 1rem !important;
+}
+.automation-table input[type="checkbox"],
+.automation-table input.case-checkbox,
+#select-all-cases {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    vertical-align: middle;
+    -webkit-appearance: checkbox;
+    appearance: checkbox;
+    display: inline-block;
+    accent-color: #D19000; /* modern browsers */
+    /* fallback visible border for older browsers */
+    background-clip: padding-box;
+    box-sizing: border-box;
+    border: 1px solid rgba(0,0,0,0.12);
+    border-radius: 3px;
+}
+
+.automation-table thead .col-checkbox {
+    vertical-align: middle;
+    text-align: left;
+    padding-left: 0.5rem;
+}
+
+/* stronger specificity to override any centered header defaults */
+.automation-table thead th.col-checkbox {
+    text-align: left !important;
+    /* match tbody td left padding so header checkbox lines up with row checkboxes */
+    padding-left: 1rem !important;
+}
+
+/* ensure row checkbox label sits flush and is vertically centered */
+.automation-table tbody td:first-child {
+    padding-left: 1rem !important;
+}
+.automation-table tbody td:first-child .case-checkbox-label {
+    margin-left: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    height: 100%;
+}
+
+/* Fallback visual checkbox when native input isn't visible or is overridden */
+.case-checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    position: relative;
+    margin-left: 0; /* ensure it sits flush to the left */
+}
+.case-checkbox-label .fake-checkbox {
+    width: 18px;
+    height: 18px;
+    display: inline-block;
+    border: 1px solid rgba(0,0,0,0.12);
+    background: #fff;
+    border-radius: 3px;
+}
+.case-checkbox-label input[type="checkbox"] { /* visually hide native but keep in DOM */
+    position: absolute !important;
+    opacity: 0 !important;
+    width: 1px !important;
+    height: 1px !important;
+    margin: 0 !important;
+    pointer-events: none !important;
+}
+.case-checkbox-label input[type="checkbox"]:checked + .fake-checkbox {
+    background: linear-gradient(180deg,#fff4c7,#fff9e0);
+    border-color: #D19000;
+}
+.case-checkbox-label input[type="checkbox"]:focus + .fake-checkbox {
+    box-shadow: 0 0 0 3px rgba(209,145,0,0.12);
+}
+.case-checkbox-label .fake-checkbox.header-indeterminate {
+    background: linear-gradient(90deg,#fff4c7,#fff9e0);
+    border-color: #D19000;
+}
+/* show a checkmark when checked using a pseudo-element */
+.case-checkbox-label .fake-checkbox {
+    position: relative;
+}
+.case-checkbox-label input[type="checkbox"]:checked + .fake-checkbox::after {
+    content: '\2713';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -55%);
+    font-size: 12px;
+    color: #5a3800;
+    line-height: 1;
+}
+.case-checkbox-label .fake-checkbox.header-indeterminate::after {
+    content: '\2014'; /* em dash for indeterminate */
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 12px;
+    color: #5a3800;
+}
+

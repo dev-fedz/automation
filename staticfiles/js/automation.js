@@ -793,6 +793,12 @@
                                         <table class="table-modern automation-table" aria-label="Test cases">
                                             <thead>
                                                 <tr>
+                                                    <th scope="col" class="col-checkbox">
+                                                        <label class="case-checkbox-label">
+                                                            <input id="select-all-cases" type="checkbox" aria-label="Select all test cases">
+                                                            <span class="fake-checkbox" aria-hidden="true"></span>
+                                                        </label>
+                                                    </th>
                                                     <th scope="col">ID</th>
                                                     <th scope="col">Title</th>
                                                     <th scope="col">Description</th>
@@ -802,7 +808,7 @@
                                                 </tr>
                                             </thead>
                                             <tbody data-role="case-table-body">
-                                                <tr><td colspan="6" class="empty">Loading test cases…</td></tr>
+                                                <tr><td colspan="7" class="empty">Loading test cases…</td></tr>
                                             </tbody>
                                         </table>
                                     </div>
@@ -817,6 +823,8 @@
                                             const p = state.plans.find((pp) => Number(pp.id) === Number(state.selectedPlanId));
                                             if (p) planName = p.name || p.title || `Plan ${p.id}`;
                                         } catch (e) { /* ignore */ }
+                                        // initialize checkbox wiring for the new header if present
+                                        try { initCaseCheckboxes(); } catch (e) { /* ignore */ }
                                         // scenario title and module name
                                         let scenarioTitle = '—';
                                         let moduleName = '—';
@@ -2487,6 +2495,79 @@
             });
         }
 
+        // Ensure header and row checkboxes are wired up and keep header state in sync
+        const initCaseCheckboxes = () => {
+            const selectAll = document.getElementById('select-all-cases');
+            const tbody = document.querySelector('tbody[data-role="case-table-body"]');
+            if (!selectAll || !tbody) return;
+            // Avoid attaching multiple handlers
+            if (selectAll.dataset.caseCheckboxInit === '1') {
+                // still update state in case rows changed
+                const boxes = Array.from(tbody.querySelectorAll('input.case-checkbox'));
+                const checked = boxes.filter(b => b.checked).length;
+                selectAll.disabled = boxes.length === 0;
+                selectAll.checked = boxes.length > 0 && checked === boxes.length;
+                selectAll.indeterminate = checked > 0 && checked < boxes.length;
+                return;
+            }
+
+            function getRowCheckboxes() {
+                return Array.from(tbody.querySelectorAll('input.case-checkbox'));
+            }
+
+            function updateSelectAllState() {
+                const boxes = getRowCheckboxes();
+                if (boxes.length === 0) {
+                    selectAll.checked = false;
+                    selectAll.indeterminate = false;
+                    selectAll.disabled = true;
+                    return;
+                }
+                selectAll.disabled = false;
+                const checked = boxes.filter(b => b.checked).length;
+                if (checked === boxes.length) {
+                    selectAll.checked = true;
+                    selectAll.indeterminate = false;
+                } else if (checked === 0) {
+                    selectAll.checked = false;
+                    selectAll.indeterminate = false;
+                } else {
+                    selectAll.checked = false;
+                    selectAll.indeterminate = true;
+                }
+                // toggle header fake-checkbox visuals when present
+                try {
+                    const headerFake = selectAll.parentElement && selectAll.parentElement.querySelector('.fake-checkbox');
+                    if (headerFake) {
+                        headerFake.classList.toggle('header-indeterminate', selectAll.indeterminate === true);
+                        headerFake.classList.toggle('checked', selectAll.checked === true);
+                    }
+                } catch (e) { /* ignore */ }
+            }
+
+            // wire header change to toggle row checkboxes
+            selectAll.addEventListener('change', function () {
+                const boxes = getRowCheckboxes();
+                boxes.forEach(b => b.checked = selectAll.checked);
+                // trigger a change event for any listeners (some code may rely on events)
+                boxes.forEach(b => b.dispatchEvent(new Event('change', { bubbles: true })));
+                updateSelectAllState();
+            });
+
+            // delegate row checkbox changes to update header state
+            tbody.addEventListener('change', function (ev) {
+                if (ev.target && ev.target.matches && ev.target.matches('input.case-checkbox')) {
+                    updateSelectAllState();
+                }
+            });
+
+            // mark initialized and sync state
+            selectAll.dataset.caseCheckboxInit = '1';
+            // expose for other scripts that may inject header earlier
+            try { window.initCaseCheckboxes = initCaseCheckboxes; } catch (e) { /* ignore */ }
+            updateSelectAllState();
+        };
+
         const renderCaseList = () => {
             if (!els.caseList) {
                 return;
@@ -2540,7 +2621,7 @@
                     } catch (e) { /* ignore */ }
                 }
                 if (!cases.length) {
-                    caseTbody.innerHTML = '<tr><td colspan="6" class="empty">No test cases found. Capture one using the form below.</td></tr>';
+                    caseTbody.innerHTML = '<tr><td colspan="7" class="empty">No test cases found. Capture one using the form below.</td></tr>';
                     return;
                 }
                 const rows = cases.map((testCase) => {
@@ -2551,6 +2632,12 @@
                     const updated = escapeHtml(formatDateTime(testCase.updated_at || null));
                     return `
                         <tr data-case-id="${testCase.id || ''}">
+                            <td>
+                                <label class="case-checkbox-label">
+                                    <input type="checkbox" class="case-checkbox" data-case-id="${testCase.id || ''}" aria-label="Select test case ${idLabel}" />
+                                    <span class="fake-checkbox" aria-hidden="true"></span>
+                                </label>
+                            </td>
                             <td>${idLabel}</td>
                             <td>${title}</td>
                             <td>${desc}</td>
@@ -2560,7 +2647,7 @@
                                 <div class="table-action-group">
                                     <button type="button" class="action-button" data-action="view-case" data-case-id="${testCase.id || ''}" data-related-api-request-name="${escapeHtml(testCase.related_api_request_name || '')}">View</button>
                                     <button type="button" class="action-button" data-action="edit-case" data-case-id="${testCase.id || ''}" data-related-api-request-name="${escapeHtml(testCase.related_api_request_name || '')}">Edit</button>
-                                    ${testCase.related_api_request ? `<button type="button" class="action-button" data-action="run-case" data-case-id="${testCase.id || ''}" data-request-id="${testCase.related_api_request || ''}" data-environment-id="1" title="Run related API request">Run</button>` : ''}
+                                    ${testCase.related_api_request ? `<button type="button" class="action-button" data-action="run-case" data-case-id="${testCase.id || ''}" data-request-id="${testCase.related_api_request || ''}" title="Run related API request">Run</button>` : ''}
                                     <button type="button" class="action-button" data-action="delete-case" data-case-id="${testCase.id || ''}" data-variant="danger">Delete</button>
                                 </div>
                             </td>
@@ -2568,6 +2655,8 @@
                     `;
                 }).join('');
                 caseTbody.innerHTML = rows;
+                // ensure header checkbox is wired to these new rows
+                try { initCaseCheckboxes(); } catch (e) { /* ignore */ }
                 return;
             }
             const cases = Array.isArray(scenario.cases) ? scenario.cases : [];
@@ -2790,6 +2879,14 @@
                     const caseModal = document.querySelector('[data-role="module-add-case-modal"]');
                     if (caseModal) {
                         const hid = document.getElementById('module-add-case-scenario-id'); if (hid) hid.value = sid;
+                        // If the trigger included a related API request name, show it
+                        try {
+                            const name = trigger && trigger.dataset && trigger.dataset.relatedApiRequestName ? trigger.dataset.relatedApiRequestName : null;
+                            const relatedLabel = document.getElementById('module-related-api-request-label');
+                            if (name && relatedLabel) {
+                                relatedLabel.textContent = `Selected API Request: ${name}`;
+                            }
+                        } catch (e) { /* ignore */ }
                         caseModal.hidden = false; body.classList.add('automation-modal-open');
                     }
                 } else if (action === 'delete-scenario') {
@@ -3044,8 +3141,10 @@
                             if (hiddenRelated) hiddenRelated.value = relatedId ? String(relatedId) : '';
                             if (relatedLabel) {
                                 if (relatedId) {
-                                    // show a minimal label if name not provided
-                                    relatedLabel.textContent = data.related_api_request_name || `Request #${relatedId}`;
+                                    // Prefer server-supplied name; if missing, fall back to any
+                                    // value the trigger may have provided on click.
+                                    const triggerName = trigger && trigger.dataset && trigger.dataset.relatedApiRequestName ? trigger.dataset.relatedApiRequestName : null;
+                                    relatedLabel.textContent = data.related_api_request_name || triggerName || `Request #${relatedId}`;
                                     relatedLabel.dataset.requestId = relatedId;
                                 } else {
                                     relatedLabel.textContent = 'No API request selected';

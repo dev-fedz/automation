@@ -39,6 +39,13 @@
                     <table class="table-modern automation-table" aria-label="Test cases">
                         <thead>
                             <tr>
+                                <th scope="col" class="col-checkbox">
+                                    <!-- Select-all checkbox for the table (wrapped for a visual fallback) -->
+                                    <label class="case-checkbox-label">
+                                        <input id="select-all-cases" type="checkbox" aria-label="Select all test cases">
+                                        <span class="fake-checkbox" aria-hidden="true"></span>
+                                    </label>
+                                </th>
                                 <th scope="col">ID</th>
                                 <th scope="col">Title</th>
                                 <th scope="col">Description</th>
@@ -50,6 +57,12 @@
                         <tbody data-role="case-table-body">
                             {% for test_case in initial_selected_scenario.cases %}
                                 <tr data-case-id="{{ test_case.id }}">
+                                    <td>
+                                        <label class="case-checkbox-label">
+                                            <input type="checkbox" class="case-checkbox" data-case-id="{{ test_case.id }}" aria-label="Select test case {{ test_case.testcase_id|default:test_case.id }}">
+                                            <span class="fake-checkbox" aria-hidden="true"></span>
+                                        </label>
+                                    </td>
                                     <td>{{ test_case.testcase_id|default:test_case.id }}</td>
                                     <td>{{ test_case.title|default:"Untitled case" }}</td>
                                     <td>{{ test_case.description|truncatechars:120 }}</td>
@@ -304,6 +317,75 @@ payload.plan=premium"></textarea>
 
 {% block body_js %}
     {{ block.super }}
+    <script>
+        (function () {
+            // Cache elements
+            const selectAll = document.getElementById('select-all-cases');
+            if (!selectAll) return;
+
+            const table = selectAll.closest('table');
+            const tbody = table && table.querySelector('tbody[data-role="case-table-body"]');
+            if (!tbody) return;
+
+            function getRowCheckboxes() {
+                return Array.from(tbody.querySelectorAll('input.case-checkbox'));
+            }
+
+            function updateSelectAllState() {
+                const boxes = getRowCheckboxes();
+                if (boxes.length === 0) {
+                    selectAll.checked = false;
+                    selectAll.indeterminate = false;
+                    selectAll.disabled = true;
+                    return;
+                }
+                selectAll.disabled = false;
+                const checked = boxes.filter(b => b.checked).length;
+                if (checked === boxes.length) {
+                    selectAll.checked = true;
+                    selectAll.indeterminate = false;
+                } else if (checked === 0) {
+                    selectAll.checked = false;
+                    selectAll.indeterminate = false;
+                } else {
+                    selectAll.checked = false;
+                    selectAll.indeterminate = true;
+                }
+
+                // Visual fallback: toggle header fake-checkbox "header-indeterminate" class
+                try {
+                    const headerFake = selectAll.parentElement && selectAll.parentElement.querySelector('.fake-checkbox');
+                    if (headerFake) {
+                        headerFake.classList.toggle('header-indeterminate', selectAll.indeterminate === true);
+                        headerFake.classList.toggle('checked', selectAll.checked === true);
+                    }
+                } catch (e) {
+                    // ignore
+                }
+            }
+
+            // When header checkbox toggles, toggle all row checkboxes
+            selectAll.addEventListener('change', function () {
+                const boxes = getRowCheckboxes();
+                boxes.forEach(b => b.checked = selectAll.checked);
+                updateSelectAllState();
+            });
+
+            // Delegate row checkbox changes to update header state
+            tbody.addEventListener('change', function (ev) {
+                if (ev.target && ev.target.matches('input.case-checkbox')) {
+                    updateSelectAllState();
+                }
+            });
+
+            // Initialize state on DOMContentLoaded (or immediately if already loaded)
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', updateSelectAllState);
+            } else {
+                updateSelectAllState();
+            }
+        })();
+    </script>
     <script src="{% static 'js/automation.js' %}"></script>
     <script src="{% static 'js/testcase-runner.js' %}"></script>
 {% endblock %}
