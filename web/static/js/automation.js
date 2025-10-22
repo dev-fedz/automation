@@ -2496,76 +2496,34 @@
         }
 
         // Ensure header and row checkboxes are wired up and keep header state in sync
+        // NOTE: The canonical implementation lives in the page inline script which
+        // exposes `window.syncCaseSelectionState`. To avoid duplicate listeners
+        // we delegate to that implementation when available. This function now
+        // performs a minimal sync fallback when not present.
         const initCaseCheckboxes = () => {
+            // Prefer the centralized sync function when available
+            if (window && typeof window.syncCaseSelectionState === 'function') {
+                try { window.syncCaseSelectionState(); } catch (e) { /* ignore */ }
+                return;
+            }
+
+            // Safe fallback: compute header checked/indeterminate state without
+            // attaching new event listeners (keeps behavior consistent).
             const selectAll = document.getElementById('select-all-cases');
             const tbody = document.querySelector('tbody[data-role="case-table-body"]');
             if (!selectAll || !tbody) return;
-            // Avoid attaching multiple handlers
-            if (selectAll.dataset.caseCheckboxInit === '1') {
-                // still update state in case rows changed
+
+            try {
                 const boxes = Array.from(tbody.querySelectorAll('input.case-checkbox'));
                 const checked = boxes.filter(b => b.checked).length;
                 selectAll.disabled = boxes.length === 0;
                 selectAll.checked = boxes.length > 0 && checked === boxes.length;
                 selectAll.indeterminate = checked > 0 && checked < boxes.length;
-                return;
-            }
-
-            function getRowCheckboxes() {
-                return Array.from(tbody.querySelectorAll('input.case-checkbox'));
-            }
-
-            function updateSelectAllState() {
-                const boxes = getRowCheckboxes();
-                if (boxes.length === 0) {
-                    selectAll.checked = false;
-                    selectAll.indeterminate = false;
-                    selectAll.disabled = true;
-                    return;
-                }
-                selectAll.disabled = false;
-                const checked = boxes.filter(b => b.checked).length;
-                if (checked === boxes.length) {
-                    selectAll.checked = true;
-                    selectAll.indeterminate = false;
-                } else if (checked === 0) {
-                    selectAll.checked = false;
-                    selectAll.indeterminate = false;
-                } else {
-                    selectAll.checked = false;
-                    selectAll.indeterminate = true;
-                }
-                // toggle header fake-checkbox visuals when present
-                try {
-                    const headerFake = selectAll.parentElement && selectAll.parentElement.querySelector('.fake-checkbox');
-                    if (headerFake) {
-                        headerFake.classList.toggle('header-indeterminate', selectAll.indeterminate === true);
-                        headerFake.classList.toggle('checked', selectAll.checked === true);
-                    }
-                } catch (e) { /* ignore */ }
-            }
-
-            // wire header change to toggle row checkboxes
-            selectAll.addEventListener('change', function () {
-                const boxes = getRowCheckboxes();
-                boxes.forEach(b => b.checked = selectAll.checked);
-                // trigger a change event for any listeners (some code may rely on events)
-                boxes.forEach(b => b.dispatchEvent(new Event('change', { bubbles: true })));
-                updateSelectAllState();
-            });
-
-            // delegate row checkbox changes to update header state
-            tbody.addEventListener('change', function (ev) {
-                if (ev.target && ev.target.matches && ev.target.matches('input.case-checkbox')) {
-                    updateSelectAllState();
-                }
-            });
-
-            // mark initialized and sync state
-            selectAll.dataset.caseCheckboxInit = '1';
-            // expose for other scripts that may inject header earlier
-            try { window.initCaseCheckboxes = initCaseCheckboxes; } catch (e) { /* ignore */ }
-            updateSelectAllState();
+                // mark initialized so callers don't re-run heavy initialization
+                selectAll.dataset.caseCheckboxInit = '1';
+                // expose for backwards-compatibility
+                try { window.initCaseCheckboxes = initCaseCheckboxes; } catch (e) { }
+            } catch (e) { /* ignore */ }
         };
 
         const renderCaseList = () => {

@@ -35,6 +35,7 @@
                 {% endif %}
             </div>
             <div class="automation-list" data-role="case-list" aria-live="polite">
+                <button type="button" id="run-cases-btn" class="btn-primary" style="display:none;">Run Selected Case</button>
                 {% if initial_selected_scenario and initial_selected_scenario.cases %}
                     <table class="table-modern automation-table" aria-label="Test cases">
                         <thead>
@@ -319,71 +320,201 @@ payload.plan=premium"></textarea>
     {{ block.super }}
     <script>
         (function () {
-            // Cache elements
-            const selectAll = document.getElementById('select-all-cases');
-            if (!selectAll) return;
+            // Robust checkbox handling: listens for change and click events and watches DOM mutations.
 
-            const table = selectAll.closest('table');
-            const tbody = table && table.querySelector('tbody[data-role="case-table-body"]');
-            if (!tbody) return;
+            function getRunBtn() { return document.getElementById('run-cases-btn'); }
+
+            function getSelectAll() {
+                return document.getElementById('select-all-cases');
+            }
 
             function getRowCheckboxes() {
-                return Array.from(tbody.querySelectorAll('input.case-checkbox'));
+                return Array.from(document.querySelectorAll('input.case-checkbox'));
+            }
+
+            // Simple debounce helper to collapse rapid calls into one.
+            function debounce(fn, wait) {
+                let timer = null;
+                return function debounced() {
+                    const ctx = this;
+                    const args = arguments;
+                    if (timer) clearTimeout(timer);
+                    timer = setTimeout(function () {
+                        timer = null;
+                        try { fn.apply(ctx, args); } catch (e) { /* ignore */ }
+                    }, wait);
+                };
+            }
+
+            function getListNode() {
+                return document.querySelector('.automation-list') || document.querySelector('[data-role="case-list"]') || document.body;
+            }
+
+            function ensureRunBtn() {
+                let btn = getRunBtn();
+                if (btn) return btn;
+                const list = getListNode();
+                if (!list) return null;
+                btn = document.createElement('button');
+                btn.type = 'button';
+                btn.id = 'run-cases-btn';
+                btn.className = 'btn-primary';
+                btn.textContent = 'Run Selected Case';
+                try { btn.style.setProperty('display', 'none', 'important'); } catch (e) { btn.style.display = 'none'; }
+                const table = list.querySelector('table');
+                if (table && table.parentNode) table.parentNode.insertBefore(btn, table);
+                else list.insertBefore(btn, list.firstChild);
+                return btn;
+            }
+
+
+            function setRunBtnVisible(visible) {
+                const btn = getRunBtn();
+                if (!btn) return;
+                try {
+                    if (visible) {
+                        // Force visible with an important inline rule so CSS rules or classes won't hide it.
+                        btn.style.setProperty('display', 'inline-block', 'important');
+                        btn.removeAttribute('aria-hidden');
+                    } else {
+                        btn.style.setProperty('display', 'none', 'important');
+                        btn.setAttribute('aria-hidden', 'true');
+                    }
+                } catch (e) { /* ignore */ }
             }
 
             function updateSelectAllState() {
+                // Ensure the run button exists before toggling visibility (some UI code may remove/replace it)
+                try { ensureRunBtn(); } catch (e) { /* ignore */ }
+                const selectAll = getSelectAll();
                 const boxes = getRowCheckboxes();
+                // DEBUG: trace state (only when there are boxes or global debug enabled)
+                try { if (boxes.length > 0 || window.CASES_DEBUG) console.debug('[cases] updateSelectAllState - boxes:', boxes.length); } catch (e) {}
+
                 if (boxes.length === 0) {
-                    selectAll.checked = false;
-                    selectAll.indeterminate = false;
-                    selectAll.disabled = true;
+                    if (selectAll) {
+                        selectAll.checked = false;
+                        selectAll.indeterminate = false;
+                        selectAll.disabled = true;
+                    }
+                    setRunBtnVisible(false);
+                    try { if (window.CASES_DEBUG) console.debug('[cases] runBtn hidden (no rows)'); } catch (e) {}
                     return;
                 }
-                selectAll.disabled = false;
+
+                if (selectAll) selectAll.disabled = false;
+
                 const checked = boxes.filter(b => b.checked).length;
-                if (checked === boxes.length) {
-                    selectAll.checked = true;
-                    selectAll.indeterminate = false;
-                } else if (checked === 0) {
-                    selectAll.checked = false;
-                    selectAll.indeterminate = false;
-                } else {
-                    selectAll.checked = false;
-                    selectAll.indeterminate = true;
+                try { console.debug('[cases] checked count:', checked); } catch (e) {}
+
+                if (selectAll) {
+                    selectAll.checked = (checked === boxes.length);
+                    selectAll.indeterminate = (checked > 0 && checked < boxes.length);
+                    // update visual fake-checkbox if present
+                    try {
+                        const headerFake = selectAll.parentElement && selectAll.parentElement.querySelector('.fake-checkbox');
+                        if (headerFake) {
+                            headerFake.classList.toggle('header-indeterminate', selectAll.indeterminate === true);
+                            headerFake.classList.toggle('checked', selectAll.checked === true);
+                        }
+                    } catch (e) { /* ignore */ }
                 }
 
-                // Visual fallback: toggle header fake-checkbox "header-indeterminate" class
-                try {
-                    const headerFake = selectAll.parentElement && selectAll.parentElement.querySelector('.fake-checkbox');
-                    if (headerFake) {
-                        headerFake.classList.toggle('header-indeterminate', selectAll.indeterminate === true);
-                        headerFake.classList.toggle('checked', selectAll.checked === true);
-                    }
-                } catch (e) {
-                    // ignore
-                }
+                setRunBtnVisible(checked > 0);
+
+                // Ensure we watch the run button for attribute mutations (so if another script hides it again
+                // we reapply the visibility while cases remain checked).
+                try { watchRunBtn(); } catch (e) { /* ignore */ }
+                try { if (checked > 0 || window.CASES_DEBUG) console.debug('[cases] runBtn set visible=', (checked > 0)); } catch (e) {}
             }
 
-            // When header checkbox toggles, toggle all row checkboxes
-            selectAll.addEventListener('change', function () {
-                const boxes = getRowCheckboxes();
-                boxes.forEach(b => b.checked = selectAll.checked);
-                updateSelectAllState();
-            });
-
-            // Delegate row checkbox changes to update header state
-            tbody.addEventListener('change', function (ev) {
-                if (ev.target && ev.target.matches('input.case-checkbox')) {
-                    updateSelectAllState();
+            // Catch native change events
+            document.addEventListener('change', function (ev) {
+                const t = ev.target;
+                if (!t) return;
+                try { console.debug('[cases] change event target=', t && (t.id || t.className || t.getAttribute && t.getAttribute('aria-label'))); } catch (e) {}
+                if (t.matches('#select-all-cases')) {
+                    const boxes = getRowCheckboxes();
+                    boxes.forEach(b => b.checked = t.checked);
+                    // dispatch change so other listeners can react
+                    boxes.forEach(b => b.dispatchEvent(new Event('change', { bubbles: true })));
+                    // schedule a debounced update to collapse per-row change events
+                    try { debouncedUpdateSelectAllState(); } catch (e) { updateSelectAllState(); }
+                    return;
+                }
+                if (t.matches('input.case-checkbox')) {
+                    // slight delay in case other handlers modify checked state -> use debounced scheduler
+                    try { debouncedUpdateSelectAllState(); } catch (e) { setTimeout(updateSelectAllState, 0); }
                 }
             });
 
-            // Initialize state on DOMContentLoaded (or immediately if already loaded)
+            // Some UI layers use a styled fake-checkbox that receives the click.
+            // Also listen for clicks on the fake-checkbox or its label and refresh state.
+            document.addEventListener('click', function (ev) {
+                const t = ev.target;
+                if (!t) return;
+                try { console.debug('[cases] click event target=', t && (t.id || t.className)); } catch (e) {}
+                if (t.matches('.fake-checkbox') || t.closest('.case-checkbox-label')) {
+                    // update after the click causes the native input to toggle; use debounced scheduler
+                    try { debouncedUpdateSelectAllState(); } catch (e) { setTimeout(updateSelectAllState, 0); }
+                }
+            });
+
+            // Observe mutations to the table body (cases are often re-rendered); update state when rows change.
+            const tbody = document.querySelector('tbody[data-role="case-table-body"]');
+            if (tbody) {
+                const mo = new MutationObserver(function () {
+                    // re-run state update when rows change (debounced)
+                    try { debouncedUpdateSelectAllState(); } catch (e) { setTimeout(updateSelectAllState, 0); }
+                });
+                mo.observe(tbody, { childList: true, subtree: true });
+            }
+
+            // Observe the surrounding automation-list so we detect if the run button is replaced or removed
+            const listNode = document.querySelector('.automation-list') || document.querySelector('[data-role="case-list"]');
+            if (listNode) {
+                const mo2 = new MutationObserver(function () {
+                    // re-run state update when DOM under automation-list changes (new run button may be added)
+                    try { debouncedUpdateSelectAllState(); } catch (e) { setTimeout(updateSelectAllState, 0); }
+                });
+                mo2.observe(listNode, { childList: true, subtree: true, attributes: true });
+            }
+
+            // Watch the run button for attribute changes and reapply visibility when needed.
+            function watchRunBtn() {
+                const b = getRunBtn();
+                if (!b) return;
+                // Avoid attaching multiple observers to same node
+                if (b._casesObserver) return;
+                try {
+                    const o = new MutationObserver(function (ms) {
+                        // If cases are checked, ensure the button remains visible.
+                        const checked = getRowCheckboxes().filter(bx => bx.checked).length;
+                        if (checked > 0) {
+                            // reapply visible state (important inline will override CSS)
+                            setRunBtnVisible(true);
+                        }
+                    });
+                    o.observe(b, { attributes: true, attributeFilter: ['style', 'class'], attributeOldValue: true });
+                    b._casesObserver = o;
+                } catch (e) { /* ignore */ }
+            }
+
+            // Create debounced scheduler and expose both immediate and debounced functions.
+            const debouncedUpdateSelectAllState = debounce(updateSelectAllState, 40);
+
+            // Initial sync
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', updateSelectAllState);
             } else {
                 updateSelectAllState();
             }
+
+            // Expose a sync function so other scripts (e.g. automation.js) can delegate to this single implementation.
+            try {
+                window.syncCaseSelectionState = updateSelectAllState; // immediate
+                window.scheduleCaseSelectionState = debouncedUpdateSelectAllState; // debounced scheduler
+            } catch (e) { /* ignore */ }
         })();
     </script>
     <script src="{% static 'js/automation.js' %}"></script>
