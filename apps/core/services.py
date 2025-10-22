@@ -176,7 +176,47 @@ def _apply_body_transforms(
         if not path:
             continue
         raw_value = override.get("value", "")
+        # Resolve template variables first
         resolved_value = _resolve_variables(str(raw_value), variables)
+
+        # Server-side handling for runtime-only helpers: isRandom / is_random and charLimit / char_limit
+        is_random = bool(override.get("isRandom") or override.get("is_random"))
+        char_limit = override.get("charLimit") if override.get("charLimit") is not None else override.get("char_limit")
+
+        # If a non-empty value is already provided by the client, respect it and do
+        # not synthesize a random value even if isRandom is true. Only synthesize
+        # when isRandom is requested and the provided value is missing or empty.
+        provided_value_present = resolved_value is not None and str(resolved_value) != ""
+
+        try:
+            char_limit = int(char_limit) if char_limit is not None else None
+            if char_limit is not None and char_limit <= 0:
+                char_limit = None
+        except (TypeError, ValueError):
+            char_limit = None
+
+        if is_random and not provided_value_present:
+            # enforce base length 10
+            base = resolved_value if isinstance(resolved_value, str) else str(resolved_value)
+            if len(base) > 10:
+                base = base[:10]
+            # timestamp: use timezone.now() for server-local time + time.time_ns() for higher precision
+            now = timezone.now()
+            ms = f"{int(now.microsecond / 1000):03d}"
+            try:
+                ns = time.time_ns()
+                # include lower-order digits to emulate extra precision
+                extra = str(ns % 1000000).zfill(6)
+            except Exception:
+                extra = "000000"
+            timestamp = f"{now.year}{now.month:02d}{now.day:02d}-{now.hour:02d}{now.minute:02d}{now.second:02d}.{ms}{extra}"
+            combined = f"{base}{timestamp}"
+            if char_limit is not None and len(combined) > char_limit:
+                allowed_ts_len = max(0, char_limit - len(base))
+                truncated_ts = timestamp[:allowed_ts_len] if allowed_ts_len > 0 else ""
+                combined = f"{base}{truncated_ts}"
+            resolved_value = combined
+
         _set_nested_value(json_payload, path, resolved_value)
 
     for signature in config.get("signatures", []) or []:
@@ -237,6 +277,35 @@ def _apply_xml_body_transforms(
             continue
         raw_value = override.get("value", "")
         resolved_value = _resolve_variables(str(raw_value), variables)
+        # isRandom / charLimit support for XML transforms as well
+        is_random = bool(override.get("isRandom") or override.get("is_random"))
+        char_limit = override.get("charLimit") if override.get("charLimit") is not None else override.get("char_limit")
+        try:
+            char_limit = int(char_limit) if char_limit is not None else None
+            if char_limit is not None and char_limit <= 0:
+                char_limit = None
+        except (TypeError, ValueError):
+            char_limit = None
+
+        if is_random:
+            base = resolved_value if isinstance(resolved_value, str) else str(resolved_value)
+            if len(base) > 10:
+                base = base[:10]
+            now = timezone.now()
+            ms = f"{int(now.microsecond / 1000):03d}"
+            try:
+                ns = time.time_ns()
+                extra = str(ns % 1000000).zfill(6)
+            except Exception:
+                extra = "000000"
+            timestamp = f"{now.year}{now.month:02d}{now.day:02d}-{now.hour:02d}{now.minute:02d}{now.second:02d}.{ms}{extra}"
+            combined = f"{base}{timestamp}"
+            if char_limit is not None and len(combined) > char_limit:
+                allowed_ts_len = max(0, char_limit - len(base))
+                truncated_ts = timestamp[:allowed_ts_len] if allowed_ts_len > 0 else ""
+                combined = f"{base}{truncated_ts}"
+            resolved_value = combined
+
         target = _locate_xml_node(root, path)
         if target is None:
             continue

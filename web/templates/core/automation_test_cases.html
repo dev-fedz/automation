@@ -60,7 +60,7 @@
                                             <button type="button" class="action-button" data-action="view-case" data-case-id="{{ test_case.id }}" data-related-api-request-name="{{ test_case.related_api_request_name|default:'' }}">View</button>
                                             <button type="button" class="action-button" data-action="edit-case" data-case-id="{{ test_case.id }}" data-related-api-request-name="{{ test_case.related_api_request_name|default:'' }}">Edit</button>
                                                     {% if test_case.related_api_request %}
-                                                        <button type="button" class="action-button" data-action="run-case" data-case-id="{{ test_case.id }}" data-request-id="{{ test_case.related_api_request }}" title="Run related API request">Run</button>
+                                                        <button type="button" class="action-button" data-action="run-case" data-case-id="{{ test_case.id }}" data-request-id="{{ test_case.related_api_request }}" data-environment-id="1" title="Run related API request">Run</button>
                                                     {% endif %}
                                             <button type="button" class="action-button" data-action="delete-case" data-case-id="{{ test_case.id }}" data-variant="danger">Delete</button>
                                         </div>

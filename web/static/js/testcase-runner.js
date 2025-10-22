@@ -165,6 +165,16 @@
             if (requestObj.collection_id) {
                 payload.collection_id = requestObj.collection_id;
             }
+            // If the Run button has an explicit environment selection, prefer it
+            try {
+                const btn = document.querySelector(`button[data-action="run-case"][data-request-id="${requestId}"]`);
+                const btnEnvId = btn ? btn.getAttribute('data-environment-id') : null;
+                if (btnEnvId) {
+                    // keep numeric id as number when possible
+                    const parsed = Number(btnEnvId);
+                    payload.environment = Number.isFinite(parsed) ? parsed : btnEnvId;
+                }
+            } catch (e) { /* ignore */ }
             // Resolve auth placeholders if necessary by inspecting collection environments
             const resolveTemplate = (v, vars) => {
                 if (!v || typeof v !== 'string') return v;
@@ -193,7 +203,7 @@
                 } catch (e) { /* ignore */ }
                 return false;
             };
-            if (needsResolve() && requestObj.collection_id) {
+            if (requestObj.collection_id) {
                 try {
                     const endpoints = getJsonScript('automation-api-endpoints') || {};
                     const collectionsBase = endpoints.collections || '/api/core/collections/';
@@ -204,8 +214,38 @@
                         // collection.environments is an array of ApiEnvironment objects (with variables)
                         const envs = Array.isArray(colData.environments) ? colData.environments : [];
                         if (envs.length) {
-                            const firstEnv = envs[0];
-                            collectionVars = firstEnv.variables || {};
+                            // Prefer an explicit environment id set on the Run button
+                            let chosenEnv = null;
+                            try {
+                                const btn = document.querySelector(`button[data-action="run-case"][data-request-id="${requestId}"]`);
+                                const btnEnvId = btn ? btn.getAttribute('data-environment-id') : null;
+                                if (btnEnvId) {
+                                    const parsed = envs.find(e => String(e.id) === String(btnEnvId));
+                                    if (parsed) chosenEnv = parsed;
+                                }
+                            } catch (e) { /* ignore */ }
+
+                            // If no explicit button selection, prefer an environment that contains both
+                            // non_realtime_mid and non_realtime_mkey (strong match). If none, fall back to
+                            // any env that contains at least non_realtime_mid.
+                            if (!chosenEnv) {
+                                chosenEnv = envs.find(e => e && e.variables && Object.prototype.hasOwnProperty.call(e.variables, 'non_realtime_mid') && Object.prototype.hasOwnProperty.call(e.variables, 'non_realtime_mkey')) || null;
+                            }
+                            if (!chosenEnv) {
+                                chosenEnv = envs.find(e => e && e.variables && Object.prototype.hasOwnProperty.call(e.variables, 'non_realtime_mid')) || null;
+                            }
+
+                            // fallback to first env
+                            if (!chosenEnv) chosenEnv = envs[0];
+
+                            collectionVars = chosenEnv.variables || {};
+                            // include explicit environment id in payload so server uses it
+                            // If the payload already contains an explicit environment (from the Run button),
+                            // do not override it with the collection-chosen environment. This ensures the
+                            // button-level selection is authoritative.
+                            if ((!payload.environment || payload.environment === null || payload.environment === undefined) && chosenEnv && chosenEnv.id) {
+                                payload.environment = chosenEnv.id;
+                            }
                         }
                     }
                 } catch (e) { /* ignore */ }
@@ -224,6 +264,52 @@
                     } catch (e) { /* ignore */ }
                 }
             }
+            // If the ApiRequest contains body_transforms (overrides/signatures), include them in the execute payload.
+            // For any override marked as isRandom, compute the final value here to preserve the randomization semantics
+            // (server-side transform logic doesn't currently implement isRandom/charLimit client behavior).
+            try {
+                const transforms = requestObj.body_transforms || null;
+                if (transforms && typeof transforms === 'object') {
+                    // clone to avoid mutating original
+                    const cloned = JSON.parse(JSON.stringify(transforms));
+                    if (Array.isArray(cloned.overrides)) {
+                        cloned.overrides = cloned.overrides.map((ov) => {
+                            try {
+                                if (ov && ov.isRandom) {
+                                    let base = (ov.value === undefined || ov.value === null) ? '' : String(ov.value);
+                                    if (base.length > 10) base = base.slice(0, 10);
+                                    const now = new Date();
+                                    const ms = String(now.getMilliseconds()).padStart(3, '0');
+                                    let nano = '';
+                                    if (typeof performance !== 'undefined' && performance.now) {
+                                        const frac = performance.now();
+                                        const nanos = Math.floor((frac % 1) * 1e6);
+                                        nano = String(nanos).padStart(6, '0');
+                                    }
+                                    const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}.${ms}${nano}`;
+                                    let combined = `${base}${timestamp}`;
+                                    const limit = Number.isFinite(Number(ov.charLimit)) && Number(ov.charLimit) > 0 ? Number(ov.charLimit) : null;
+                                    if (limit) {
+                                        if (combined.length > limit) {
+                                            const allowedTimestampLen = Math.max(0, limit - String(base).length);
+                                            const truncatedTimestamp = allowedTimestampLen > 0 ? timestamp.slice(0, allowedTimestampLen) : '';
+                                            combined = `${base}${truncatedTimestamp}`;
+                                        }
+                                    }
+                                    ov.value = combined;
+                                    // remove helper fields so server sees only path/value/signature fields it expects
+                                    delete ov.isRandom;
+                                    delete ov.charLimit;
+                                }
+                            } catch (e) {
+                                // ignore per-row errors
+                            }
+                            return ov;
+                        });
+                    }
+                    payload.body_transforms = cloned;
+                }
+            } catch (e) { /* best-effort */ }
             if (requestObj.auth_type === 'bearer' && requestObj.auth_bearer) {
                 const resolved = resolveTemplate(requestObj.auth_bearer, collectionVars);
                 if (resolved) {
@@ -249,6 +335,13 @@
         } catch (e) { csrftoken = null; }
 
         try {
+            // Debugging: show what transforms will be posted (if any)
+            if (payload.body_transforms) {
+                try { console.debug('testcase-run payload.body_transforms:', payload.body_transforms); } catch (e) { }
+            } else {
+                try { console.debug('testcase-run no body_transforms present'); } catch (e) { }
+            }
+
             const resp = await fetch(POST_URL, {
                 method: 'POST',
                 credentials: 'same-origin',

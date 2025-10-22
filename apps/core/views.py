@@ -910,6 +910,33 @@ class ApiAdhocRequestView(APIView):
     def post(self, request, *args, **kwargs):  # noqa: D401
         payload = request.data or {}
 
+        # Temporary debug: log a safe summary of incoming body_transforms and environment
+        try:
+            transforms = payload.get("body_transforms")
+            if isinstance(transforms, dict):
+                summary = []
+                for ov in transforms.get("overrides", []) or []:
+                    try:
+                        summary.append(
+                            {
+                                "path": ov.get("path"),
+                                "has_value": bool(ov.get("value") not in (None, "")),
+                                "isRandom": bool(ov.get("isRandom") or ov.get("is_random")),
+                                "charLimitProvided": ov.get("charLimit") is not None or ov.get("char_limit") is not None,
+                            }
+                        )
+                    except Exception:
+                        # ignore per-override errors
+                        continue
+                logger.info("execute payload.transforms summary: %s", json.dumps(summary))
+        except Exception:
+            logger.exception("failed to summarize incoming body_transforms")
+
+        try:
+            logger.info("execute payload.environment: %s", payload.get("environment"))
+        except Exception:
+            pass
+
         method = str(payload.get("method", "GET")).upper()
         url = payload.get("url")
         if not url:
@@ -936,15 +963,25 @@ class ApiAdhocRequestView(APIView):
         environment = None
         variables: dict[str, Any] = {}
         environment_id = payload.get("environment")
-        if environment_id:
-            environment = models.ApiEnvironment.objects.filter(pk=environment_id).first()
-            if not environment:
-                raise NotFound("Environment not found.")
-            variables.update(environment.variables or {})
-            default_headers = environment.default_headers or {}
-            headers = {**default_headers, **headers}
+        # If an explicit environment is provided, accept either an integer id or an environment name.
+        if environment_id is not None and environment_id != "":
+            # Try numeric pk first
+            try:
+                environment = models.ApiEnvironment.objects.filter(pk=int(environment_id)).first()
+            except Exception:
+                environment = None
 
-        variables.update(overrides)
+            # If numeric lookup failed, try to match by environment name (case-insensitive)
+            if environment is None:
+                try:
+                    environment = models.ApiEnvironment.objects.filter(name__iexact=str(environment_id)).first()
+                except Exception:
+                    environment = None
+
+            if environment:
+                variables.update(environment.variables or {})
+                default_headers = environment.default_headers or {}
+                headers = {**default_headers, **headers}
 
         collection = None
         collection_id = payload.get("collection_id")
@@ -954,7 +991,7 @@ class ApiAdhocRequestView(APIView):
             except (TypeError, ValueError) as exc:
                 raise ValidationError({"collection": "Collection must be a valid integer."}) from exc
             try:
-                collection = models.ApiCollection.objects.get(pk=collection_id)
+                collection = models.ApiCollection.objects.prefetch_related('environments').get(pk=collection_id)
             except models.ApiCollection.DoesNotExist as exc:
                 raise ValidationError({"collection": "Collection not found."}) from exc
 
@@ -972,6 +1009,59 @@ class ApiAdhocRequestView(APIView):
                 elif not collection:
                     collection = api_request.collection
 
+        # If no explicit environment was provided but the collection has environments,
+        # prefer an environment that contains any template variables referenced by
+        # the request's body_transforms (for example `non_realtime_mid`). If none
+        # match, fall back to the first environment.
+        if environment is None and collection is not None:
+            try:
+                transforms_to_apply = None
+                if isinstance(payload.get("body_transforms"), dict):
+                    transforms_to_apply = payload.get("body_transforms")
+                elif api_request and getattr(api_request, "body_transforms", None):
+                    transforms_to_apply = api_request.body_transforms
+
+                chosen_env = None
+                envs_qs = collection.environments.all()
+                # If transforms reference template variables, try to pick an env that contains them
+                if transforms_to_apply:
+                    try:
+                        import json as _json
+                        raw_text = _json.dumps(transforms_to_apply)
+                        keys = set(services.VARIABLE_PATTERN.findall(raw_text))
+                        if keys:
+                            # Prefer an environment that contains all referenced keys (strong match)
+                            for candidate in envs_qs:
+                                vars_map = candidate.variables or {}
+                                if all(k in vars_map for k in keys):
+                                    chosen_env = candidate
+                                    break
+                            # If no env contains all keys, fall back to any env that has at least one of the keys
+                            if chosen_env is None:
+                                for candidate in envs_qs:
+                                    vars_map = candidate.variables or {}
+                                    if any(k in vars_map for k in keys):
+                                        chosen_env = candidate
+                                        break
+                    except Exception:
+                        chosen_env = None
+
+                if chosen_env is None:
+                    chosen_env = envs_qs.first()
+
+                if chosen_env is not None:
+                    environment = chosen_env
+                    variables.update(environment.variables or {})
+                    default_headers = environment.default_headers or {}
+                    headers = {**default_headers, **headers}
+            except Exception:
+                # ignore failures to read collection environments and continue
+                pass
+
+        # Finally, merge any runtime overrides which should take precedence over environment vars
+        variables.update(overrides)
+
+        # Resolve url/headers/params after collection/environment and overrides have been merged
         resolved_url = services._resolve_variables(url, variables)  # type: ignore[attr-defined]
         resolved_headers = services._resolve_variables(headers, variables)  # type: ignore[attr-defined]
         resolved_params = services._resolve_variables(params, variables)  # type: ignore[attr-defined]
@@ -1057,11 +1147,42 @@ class ApiAdhocRequestView(APIView):
             if not isinstance(json_body, (dict, list)):
                 raise ValidationError({"json": "JSON body must be an object or array."})
             resolved_json = services._resolve_variables(json_body, variables)  # type: ignore[attr-defined]
+            # If JSON payload is an object, apply body_transforms (overrides/signatures).
+            if isinstance(resolved_json, dict):
+                transforms_to_apply = None
+                if isinstance(payload.get("body_transforms"), dict):
+                    transforms_to_apply = payload.get("body_transforms")
+                elif api_request and getattr(api_request, "body_transforms", None):
+                    transforms_to_apply = api_request.body_transforms
+                if transforms_to_apply:
+                    try:
+                        overrides_map = services._apply_body_transforms(resolved_json, transforms_to_apply, variables)
+                        # update variables with any values produced by signature builders
+                        variables.update(overrides_map or {})
+                    except Exception:
+                        # best-effort: continue with untransformed payload
+                        pass
         elif body not in (None, ""):
             if isinstance(body, (dict, list)):
                 resolved_json = services._resolve_variables(body, variables)  # type: ignore[attr-defined]
             else:
                 resolved_body = services._resolve_variables(str(body), variables)  # type: ignore[attr-defined]
+                # If body is raw XML and transforms are present, apply XML transforms
+                try:
+                    raw_type = payload.get("body_raw_type") or ""
+                    if isinstance(raw_type, str) and raw_type.lower() == "xml":
+                        transforms_to_apply = None
+                        if isinstance(payload.get("body_transforms"), dict):
+                            transforms_to_apply = payload.get("body_transforms")
+                        elif api_request and getattr(api_request, "body_transforms", None):
+                            transforms_to_apply = api_request.body_transforms
+                        if transforms_to_apply:
+                            try:
+                                resolved_body = services._apply_xml_body_transforms(resolved_body, transforms_to_apply, variables)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
 
         signature_value = None
         if isinstance(resolved_json, dict):
