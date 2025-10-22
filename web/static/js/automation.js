@@ -406,6 +406,15 @@
                     }
                     // populate options freshly (will use state.plans)
                     try { populateModalCaseSelects(); } catch (e) { console.debug('[automation] populateModalCaseSelects error', e); }
+                    // If the page has a selected plan, auto-select it in the modal
+                    try {
+                        const modalPlanElAuto = document.getElementById('modal-case-plan') || els.modalCasePlan;
+                        if (modalPlanElAuto && state.selectedPlanId) {
+                            modalPlanElAuto.value = String(state.selectedPlanId);
+                            // trigger change so module list is populated/enabled
+                            modalPlanElAuto.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    } catch (e) { /* ignore */ }
                     try { console.debug('[automation] modal open - state.plans length', Array.isArray(state.plans) ? state.plans.length : 0, 'initialModules length', Array.isArray(initialModules) ? initialModules.length : 0); } catch (e) { }
                     // remember currently focused element so we can restore focus on close
                     _previouslyFocused = document.activeElement;
@@ -552,11 +561,7 @@
                             const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.title || `Module ${m.id}`; moduleSelect.appendChild(opt);
                         });
                         // enable module select when a plan is selected (mirror main page behaviour)
-                        try {
-                            moduleSelect.disabled = !pid ? !modules.length : false;
-                        } catch (_err) {
-                            moduleSelect.disabled = !modules.length;
-                        }
+                        try { moduleSelect.disabled = !modules.length; } catch (_err) { moduleSelect.disabled = !modules.length; }
                         // reset scenario select
                         if (modalScenarioElLocal) {
                             modalScenarioElLocal.innerHTML = '';
@@ -613,7 +618,7 @@
                                         modulesFromFetch.forEach((m) => {
                                             const opt2 = document.createElement('option'); opt2.value = m.id; opt2.textContent = m.title || `Module ${m.id}`; moduleSelectRef.appendChild(opt2);
                                         });
-                                        try { moduleSelectRef.disabled = !state.selectedPlanId ? !modulesFromFetch.length : false; } catch (_err) { moduleSelectRef.disabled = !modulesFromFetch.length; }
+                                        try { moduleSelectRef.disabled = !modulesFromFetch.length; } catch (_err) { moduleSelectRef.disabled = !modulesFromFetch.length; }
                                     }
                                 } catch (err) { /* ignore */ }
                             } catch (err) { /* ignore */ }
@@ -686,11 +691,7 @@
                                                 modulesFromFetch.forEach((m) => {
                                                     const opt2 = document.createElement('option'); opt2.value = m.id; opt2.textContent = m.title || `Module ${m.id}`; modalModuleElLocal.appendChild(opt2);
                                                 });
-                                                try {
-                                                    modalModuleElLocal.disabled = !state.selectedPlanId ? !modulesFromFetch.length : false;
-                                                } catch (_err2) {
-                                                    modalModuleElLocal.disabled = !modulesFromFetch.length;
-                                                }
+                                                try { modalModuleElLocal.disabled = !modulesFromFetch.length; } catch (_err2) { modalModuleElLocal.disabled = !modulesFromFetch.length; }
                                             }
                                             if (modalScenarioElLocal) {
                                                 modalScenarioElLocal.innerHTML = '';

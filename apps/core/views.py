@@ -792,6 +792,13 @@ def automation_test_cases(request):
         "initial_selected_plan": data["selected_plan"],
         "initial_selected_scenario": data["selected_scenario"],
     }
+    # include initial modules so the test cases page can populate modal selects
+    try:
+        context["initial_modules"] = serializers.TestModulesSerializer(
+            models.TestModules.objects.all(), many=True
+        ).data
+    except Exception:
+        context["initial_modules"] = []
     return render(request, "core/automation_test_cases.html", context)
 
 

@@ -266,6 +266,7 @@ payload.plan=premium"></textarea>
     {{ initial_plans|json_script:"automation-initial-plans" }}
     {{ api_endpoints|json_script:"automation-api-endpoints" }}
     {{ initial_metrics|json_script:"automation-initial-metrics" }}
+    {{ initial_modules|default:"[]"|json_script:"automation-initial-modules" }}
 </div>
 <!-- Hidden response modal reused from API tester layout (minimal) -->
 <div class="modal" id="testcase-response-modal" hidden aria-hidden="true" tabindex="-1">
