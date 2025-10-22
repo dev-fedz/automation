@@ -262,7 +262,7 @@ payload.plan=premium"></textarea>
         </div>
         <div class="modal-body">
             <div id="testcase-response-loading" class="response-loading">Running request…</div>
-            <div id="testcase-response-content" hidden>
+                <div id="testcase-response-content" hidden>
                 <div id="testcase-response-summary" class="response-summary">No request executed yet.</div>
                 <div class="response-section">
                     <h4>Headers</h4>
@@ -272,13 +272,25 @@ payload.plan=premium"></textarea>
                     <pre id="testcase-response-headers" class="response-pre expandable" data-min-height="80">{}</pre>
                 </div>
                 <div class="response-section">
-                    <h4>Body</h4>
-                    <div class="response-section-controls">
-                        <button type="button" class="action-button" data-action="toggle-section" data-target="testcase-response-body">Toggle</button>
+                    <div class="response-section__header">
+                        <h4>Body</h4>
+                        <div class="response-body__controls" role="group" aria-label="Response body view options">
+                            <div class="response-body__views" role="group" aria-label="Format type">
+                                <button type="button" class="response-body__view-button is-active" data-response-body-view="json" aria-pressed="true">JSON</button>
+                                <button type="button" class="response-body__view-button" data-response-body-view="xml" aria-pressed="false">XML</button>
+                                <button type="button" class="response-body__view-button" data-response-body-view="html" aria-pressed="false">HTML</button>
+                            </div>
+                            <div class="response-body__modes" role="group" aria-label="Display mode">
+                                <button type="button" class="response-body__mode-button is-active" data-response-body-mode="pretty" aria-pressed="true">Pretty</button>
+                                <button type="button" class="response-body__mode-button" data-response-body-mode="preview" aria-pressed="false">Preview</button>
+                            </div>
+                        </div>
                     </div>
-                    <pre id="testcase-response-body" class="response-pre expandable" data-min-height="100">{}</pre>
-                    <div class="resizer" data-resize-target="testcase-response-body" title="Drag to resize"></div>
-                    <iframe id="testcase-response-preview" class="response-preview" title="Response preview" hidden></iframe>
+                    <div class="response-body__content">
+                        <pre id="testcase-response-body" class="response-pre expandable" data-min-height="100">{}</pre>
+                        <div class="resizer" data-resize-target="testcase-response-body" title="Drag to resize"></div>
+                        <iframe id="testcase-response-preview" class="response-preview" title="Response preview" hidden></iframe>
+                    </div>
                 </div>
                 <div class="response-section">
                     <h4>Assertions</h4>

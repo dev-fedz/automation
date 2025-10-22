@@ -1038,3 +1038,8 @@ body.automation-modal-open {
 .resizer { height: 8px; background: linear-gradient(90deg, rgba(0,0,0,0.06), rgba(0,0,0,0.12)); cursor: ns-resize; margin: 6px 0 8px 0; border-radius: 4px; }
 .resizer:hover { background: linear-gradient(90deg, rgba(0,0,0,0.12), rgba(0,0,0,0.18)); }
 .response-section .action-button { font-size: 0.7rem; padding: 0.25rem 0.5rem; }
+
+/* Response format tabs */
+.response-format-tabs { display: flex; gap: 0.4rem; margin: 0.45rem 0 0.8rem 0; }
+.response-format-tabs .action-button { background: transparent; border: 1px solid rgba(255,255,255,0.06); color: inherit; }
+.response-format-tabs .action-button[aria-selected="true"] { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.12); }
