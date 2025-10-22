@@ -59,6 +59,9 @@
         const idSafe = String(caseId).replace(/[^a-zA-Z0-9\-_]/g, '-');
         const headerId = `tc-${idSafe}-header`;
         const bodyId = `tc-${idSafe}-body`;
+        const headersId = `testcase-response-headers-${idSafe}`;
+        const bodyPreId = `testcase-response-body-${idSafe}`;
+        const previewId = `testcase-response-preview-${idSafe}`;
         const container = document.createElement('div');
         container.className = 'multi-item';
         container.innerHTML = `
@@ -71,13 +74,34 @@
                 <div class="response-content" hidden>
                     <div class="response-summary"></div>
                     <div class="response-section">
-                        <h4>Headers</h4>
-                        <pre class="response-pre response-headers" data-min-height="80">{}</pre>
+                        <div class="response-section__header">
+                            <h4>Headers</h4>
+                            <div class="response-section-controls">
+                                <button type="button" class="action-button" data-action="toggle-section" data-target="${headersId}">Toggle</button>
+                            </div>
+                        </div>
+                        <pre id="${headersId}" class="response-pre response-headers expandable" data-min-height="80">{}</pre>
                     </div>
                     <div class="response-section">
-                        <h4>Body</h4>
-                        <pre class="response-pre response-body" data-min-height="100">{}</pre>
-                        <iframe class="response-preview" title="Response preview" hidden></iframe>
+                        <div class="response-section__header">
+                            <h4>Body</h4>
+                            <div class="response-body__controls" role="group" aria-label="Response body view options">
+                                <div class="response-body__views" role="group" aria-label="Format type">
+                                    <button type="button" class="response-body__view-button is-active" data-response-body-view="json" aria-pressed="true">JSON</button>
+                                    <button type="button" class="response-body__view-button" data-response-body-view="xml" aria-pressed="false">XML</button>
+                                    <button type="button" class="response-body__view-button" data-response-body-view="html" aria-pressed="false">HTML</button>
+                                </div>
+                                <div class="response-body__modes" role="group" aria-label="Display mode">
+                                    <button type="button" class="response-body__mode-button is-active" data-response-body-mode="pretty" aria-pressed="true">Pretty</button>
+                                    <button type="button" class="response-body__mode-button" data-response-body-mode="preview" aria-pressed="false">Preview</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="response-body__content">
+                            <pre id="${bodyPreId}" class="response-pre response-body expandable" data-min-height="100">{}</pre>
+                            <div class="resizer" data-resize-target="${bodyPreId}" title="Drag to resize"></div>
+                            <iframe id="${previewId}" class="response-preview" title="Response preview" hidden></iframe>
+                        </div>
                     </div>
                     <div class="response-section">
                         <h4>Assertions</h4>
@@ -105,6 +129,73 @@
         return String(str).replace(/[&<>"']/g, function (m) {
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
         });
+    }
+
+    // Render response body for a specific panel (container)
+    function renderPanel(container, view, mode) {
+        if (!container) return;
+        const last = container._lastResponse || { text: '', json: null };
+        const pre = container.querySelector('.response-body');
+        const preview = container.querySelector('.response-preview');
+        if (!pre) return;
+        view = view || (container.querySelector('.response-body__view-button.is-active') && container.querySelector('.response-body__view-button.is-active').getAttribute('data-response-body-view')) || 'json';
+        mode = mode || (container.querySelector('.response-body__mode-button.is-active') && container.querySelector('.response-body__mode-button.is-active').getAttribute('data-response-body-mode')) || 'pretty';
+
+        function setPreText(txt) { try { pre.textContent = txt == null ? '' : String(txt); } catch (e) { pre.textContent = String(txt || ''); } }
+
+        switch (view) {
+            case 'json':
+                if (last.json) setPreText(JSON.stringify(last.json, null, 2));
+                else {
+                    try { setPreText(JSON.stringify(JSON.parse(last.text || ''), null, 2)); } catch (e) { setPreText(last.text || ''); }
+                }
+                if (preview) preview.hidden = true;
+                break;
+            case 'xml':
+                try { const txt = last.text || ''; setPreText(txt.replace(/>(\s*)</g, '>' + '\n' + '<').trim()); } catch (e) { setPreText(last.text || ''); }
+                if (preview) preview.hidden = true;
+                break;
+            case 'html':
+                if (mode === 'preview') {
+                    if (preview) {
+                        try {
+                            preview.hidden = false;
+                            if ('srcdoc' in preview) {
+                                preview.srcdoc = last.text || '';
+                            } else if (preview.contentDocument) {
+                                // fallback - avoid document.write if possible but keep fallback
+                                try { preview.contentDocument.open(); preview.contentDocument.write(last.text || ''); preview.contentDocument.close(); } catch (e) { /* ignore */ }
+                            }
+                        } catch (e) { preview.hidden = true; }
+                        setPreText((last.text || '').slice(0, 20000));
+                    }
+                } else {
+                    setPreText(last.text || '');
+                    if (preview) preview.hidden = true;
+                }
+                break;
+            case 'pretty':
+                if (last.json) setPreText(JSON.stringify(last.json, null, 2)); else setPreText(last.text || '');
+                if (preview) preview.hidden = true;
+                break;
+            case 'raw':
+                setPreText(last.text || '');
+                if (preview) preview.hidden = true;
+                break;
+            case 'preview':
+                if (preview) {
+                    try {
+                        preview.hidden = false;
+                        if ('srcdoc' in preview) preview.srcdoc = last.text || '';
+                        else if (preview.contentDocument) { preview.contentDocument.open(); preview.contentDocument.write(last.text || ''); preview.contentDocument.close(); }
+                    } catch (e) { preview.hidden = true; }
+                    setPreText((last.text || '').slice(0, 20000));
+                }
+                break;
+            default:
+                setPreText(last.text || '');
+                if (preview) preview.hidden = true;
+        }
     }
 
     async function executeForPanel(requestId, envId, container) {
@@ -203,16 +294,13 @@
             const elapsed = result.elapsed_ms || result.response_time_ms || null;
             const resolvedUrl = result.resolved_url || (result.request && result.request.url) || '';
             summaryEl.textContent = 'Status: ' + (statusCode || '') + (elapsed ? (' — ' + Math.round(elapsed) + 'ms') : '') + (resolvedUrl ? (' — ' + resolvedUrl) : '');
-            headersEl.textContent = JSON.stringify(result.headers || result.response_headers || {}, null, 2);
+            const headersObj = result.headers || result.response_headers || {};
             const bodyText = result.body || result.response_body || '';
-            // try JSON
-            try { const parsed = typeof bodyText === 'string' ? JSON.parse(bodyText) : bodyText; bodyEl.textContent = JSON.stringify(parsed, null, 2); } catch (e) { bodyEl.textContent = String(bodyText || ''); }
-            // preview if html
-            const looksLikeHtml = /<\s*html|<\s*div|<\s*span|<!DOCTYPE html/i.test(String(bodyText || ''));
-            if (looksLikeHtml && preview) {
-                try { preview.hidden = false; if (preview.contentDocument) { preview.contentDocument.open(); preview.contentDocument.write(bodyText || ''); preview.contentDocument.close(); } }
-                catch (e) { preview.hidden = true; }
-            } else if (preview) preview.hidden = true;
+            // store lastResponse on container for rendering
+            container._lastResponse = { text: typeof bodyText === 'string' ? bodyText : (JSON.stringify(bodyText) || ''), json: result.json || null };
+            headersEl.textContent = JSON.stringify(headersObj, null, 2);
+            // render according to current view/mode
+            try { renderPanel(container); } catch (e) { /* ignore */ }
 
             assertionsEl.innerHTML = '';
             if (result.assertions_passed && result.assertions_passed.length) {
@@ -286,6 +374,51 @@
             modal.addEventListener('click', (ev2) => { if (ev2.target === modal) { closeModal(modal); setTimeout(() => modal.remove(), 250); } });
 
             openModal(modal);
+        });
+
+        // Delegated controls for view/mode/toggle inside the multi modal
+        document.addEventListener('click', function (ev) {
+            const t = ev.target;
+            if (!t) return;
+            // toggle-section
+            const toggleBtn = t.closest && t.closest('button[data-action="toggle-section"]');
+            if (toggleBtn) {
+                const targetId = toggleBtn.getAttribute('data-target');
+                if (!targetId) return;
+                const el = document.getElementById(targetId);
+                if (!el) return;
+                if (el.hidden || el.style.display === 'none') { el.hidden = false; el.style.display = ''; }
+                else { el.hidden = true; el.style.display = 'none'; }
+                return;
+            }
+
+            // response body view buttons
+            const viewBtn = t.closest && t.closest('button[data-response-body-view]');
+            if (viewBtn) {
+                const view = viewBtn.getAttribute('data-response-body-view');
+                if (!view) return;
+                const controls = viewBtn.closest && viewBtn.closest('.response-body__controls');
+                if (!controls) return;
+                Array.from(controls.querySelectorAll('button[data-response-body-view]')).forEach(b => { b.classList.remove('is-active'); b.setAttribute('aria-pressed', 'false'); });
+                viewBtn.classList.add('is-active'); viewBtn.setAttribute('aria-pressed', 'true');
+                const multiItem = viewBtn.closest && viewBtn.closest('.multi-item');
+                if (multiItem) try { renderPanel(multiItem); } catch (e) { }
+                return;
+            }
+
+            // response body mode buttons
+            const modeBtn = t.closest && t.closest('button[data-response-body-mode]');
+            if (modeBtn) {
+                const mode = modeBtn.getAttribute('data-response-body-mode');
+                if (!mode) return;
+                const controls = modeBtn.closest && modeBtn.closest('.response-body__modes');
+                if (!controls) return;
+                Array.from(controls.querySelectorAll('button[data-response-body-mode]')).forEach(b => { b.classList.remove('is-active'); b.setAttribute('aria-pressed', 'false'); });
+                modeBtn.classList.add('is-active'); modeBtn.setAttribute('aria-pressed', 'true');
+                const multiItem2 = modeBtn.closest && modeBtn.closest('.multi-item');
+                if (multiItem2) try { renderPanel(multiItem2); } catch (e) { }
+                return;
+            }
         });
     }
 
