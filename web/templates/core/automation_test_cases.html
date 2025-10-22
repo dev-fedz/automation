@@ -57,8 +57,11 @@
                                     <td>{{ test_case.updated_at }}</td>
                                     <td>
                                         <div class="table-action-group">
-                                            <button type="button" class="action-button" data-action="view-case" data-case-id="{{ test_case.id }}" data-related-api-request-name="{{ test_case.related_api_request.name|default:'' }}">View</button>
-                                            <button type="button" class="action-button" data-action="edit-case" data-case-id="{{ test_case.id }}" data-related-api-request-name="{{ test_case.related_api_request.name|default:'' }}">Edit</button>
+                                            <button type="button" class="action-button" data-action="view-case" data-case-id="{{ test_case.id }}" data-related-api-request-name="{{ test_case.related_api_request_name|default:'' }}">View</button>
+                                            <button type="button" class="action-button" data-action="edit-case" data-case-id="{{ test_case.id }}" data-related-api-request-name="{{ test_case.related_api_request_name|default:'' }}">Edit</button>
+                                                    {% if test_case.related_api_request %}
+                                                        <button type="button" class="action-button" data-action="run-case" data-case-id="{{ test_case.id }}" data-request-id="{{ test_case.related_api_request }}" title="Run related API request">Run</button>
+                                                    {% endif %}
                                             <button type="button" class="action-button" data-action="delete-case" data-case-id="{{ test_case.id }}" data-variant="danger">Delete</button>
                                         </div>
                                     </td>
@@ -250,9 +253,38 @@ payload.plan=premium"></textarea>
     {{ api_endpoints|json_script:"automation-api-endpoints" }}
     {{ initial_metrics|json_script:"automation-initial-metrics" }}
 </div>
+<!-- Hidden response modal reused from API tester layout (minimal) -->
+<div class="modal" id="testcase-response-modal" hidden aria-hidden="true" tabindex="-1">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="testcase-response-title">
+        <div class="modal-header">
+            <h3 id="testcase-response-title">Request Response</h3>
+            <button type="button" id="testcase-response-close" class="btn btn-tertiary">Close</button>
+        </div>
+        <div class="modal-body">
+            <div id="testcase-response-loading" class="response-loading">Running request…</div>
+            <div id="testcase-response-content" hidden>
+                <div id="testcase-response-summary" class="response-summary">No request executed yet.</div>
+                <div class="response-section">
+                    <h4>Headers</h4>
+                    <pre id="testcase-response-headers" class="response-pre">{}</pre>
+                </div>
+                <div class="response-section">
+                    <h4>Body</h4>
+                    <pre id="testcase-response-body" class="response-pre">{}</pre>
+                    <iframe id="testcase-response-preview" class="response-preview" title="Response preview" hidden></iframe>
+                </div>
+                <div class="response-section">
+                    <h4>Assertions</h4>
+                    <div id="testcase-response-assertions" class="assertions-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block body_js %}
     {{ block.super }}
     <script src="{% static 'js/automation.js' %}"></script>
+    <script src="{% static 'js/testcase-runner.js' %}"></script>
 {% endblock %}
