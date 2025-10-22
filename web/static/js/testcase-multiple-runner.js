@@ -236,30 +236,132 @@
 
         statusEl.textContent = 'Running…';
 
-        // build payload (simplified reuse of existing logic)
+        // build payload (reuse logic from single-runner)
         const payload = { request_id: requestId };
         try {
             payload.method = requestObj.method || 'GET';
             payload.url = requestObj.url || '';
             payload.headers = requestObj.headers || {};
             payload.params = requestObj.query_params || {};
+
             if (requestObj.body_type === 'json' && requestObj.body_json) payload.json = requestObj.body_json;
             else if (requestObj.body_type === 'form' && requestObj.body_form) {
                 const formEntries = [];
                 Object.entries(requestObj.body_form || {}).forEach(([k, v]) => formEntries.push({ key: k, type: 'text', value: v }));
                 payload.form_data = formEntries;
             } else if (requestObj.body_type === 'raw' && requestObj.body_raw) payload.body = requestObj.body_raw;
+
             if (typeof requestObj.timeout_ms === 'number') payload.timeout = Math.max(1, (requestObj.timeout_ms || 30000) / 1000);
             if (requestObj.collection_id) payload.collection_id = requestObj.collection_id;
-            if (envId) payload.environment = envId;
-            // simple auth handling
+
+            try {
+                // attempt to read environment id from a run-case button in the main table (fallback)
+                const btn = document.querySelector(`button[data-action="run-case"][data-request-id="${requestId}"]`);
+                const btnEnvId = btn ? btn.getAttribute('data-environment-id') : null;
+                if (btnEnvId) payload.environment = Number.isFinite(Number(btnEnvId)) ? Number(btnEnvId) : btnEnvId;
+            } catch (e) { }
+
+            const resolveTemplate = (v, vars) => {
+                if (!v || typeof v !== 'string') return v;
+                const m = v.match(/^\{\{\s*([\w\.\-]+)\s*\}\}$/);
+                if (!m) return v;
+                const key = m[1];
+                if (vars && Object.prototype.hasOwnProperty.call(vars, key)) return vars[key];
+                return v;
+            };
+
+            let collectionVars = null;
+            if (requestObj.collection_id) {
+                try {
+                    const collectionsBase = endpoints.collections || '/api/core/collections/';
+                    const colUrl = collectionsBase.endsWith('/') ? `${collectionsBase}${requestObj.collection_id}/` : `${collectionsBase}/${requestObj.collection_id}/`;
+                    const colResp = await fetch(colUrl, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                    if (colResp.ok) {
+                        const colData = await colResp.json();
+                        const envs = Array.isArray(colData.environments) ? colData.environments : [];
+                        if (envs.length) {
+                            let chosenEnv = null;
+                            try {
+                                const btn = document.querySelector(`button[data-action="run-case"][data-request-id="${requestId}"]`);
+                                const btnEnvId = btn ? btn.getAttribute('data-environment-id') : null;
+                                if (btnEnvId) {
+                                    const parsed = envs.find(e => String(e.id) === String(btnEnvId));
+                                    if (parsed) chosenEnv = parsed;
+                                }
+                            } catch (e) { }
+                            if (!chosenEnv) chosenEnv = envs.find(e => e && e.variables && Object.prototype.hasOwnProperty.call(e.variables, 'non_realtime_mid') && Object.prototype.hasOwnProperty.call(e.variables, 'non_realtime_mkey')) || null;
+                            if (!chosenEnv) chosenEnv = envs.find(e => e && e.variables && Object.prototype.hasOwnProperty.call(e.variables, 'non_realtime_mid')) || null;
+                            if (!chosenEnv) chosenEnv = envs[0];
+                            collectionVars = chosenEnv ? (chosenEnv.variables || {}) : {};
+                            if ((!payload.environment || payload.environment === null || payload.environment === undefined) && chosenEnv && chosenEnv.id) payload.environment = chosenEnv.id;
+                        }
+                    }
+                } catch (e) { }
+            }
+
             if (requestObj.auth_type === 'basic' && requestObj.auth_basic) {
-                try { const token = btoa(`${requestObj.auth_basic.username || ''}:${requestObj.auth_basic.password || ''}`); payload.headers = payload.headers || {}; payload.headers['Authorization'] = `Basic ${token}`; } catch (e) { }
+                const ab = requestObj.auth_basic || {};
+                const resolvedUsername = resolveTemplate(typeof ab.username === 'string' ? ab.username : '', collectionVars);
+                const resolvedPassword = resolveTemplate(typeof ab.password === 'string' ? ab.password : '', collectionVars);
+                if (resolvedUsername || resolvedPassword) {
+                    try {
+                        const token = btoa(`${resolvedUsername}:${resolvedPassword}`);
+                        payload.headers = payload.headers || {};
+                        payload.headers['Authorization'] = `Basic ${token}`;
+                    } catch (e) { }
+                }
             }
+
+            try {
+                const transforms = requestObj.body_transforms || null;
+                if (transforms && typeof transforms === 'object') {
+                    const cloned = JSON.parse(JSON.stringify(transforms));
+                    if (Array.isArray(cloned.overrides)) {
+                        cloned.overrides = cloned.overrides.map((ov) => {
+                            try {
+                                if (ov && ov.isRandom) {
+                                    let base = (ov.value === undefined || ov.value === null) ? '' : String(ov.value);
+                                    if (base.length > 10) base = base.slice(0, 10);
+                                    const now = new Date();
+                                    const ms = String(now.getMilliseconds()).padStart(3, '0');
+                                    let nano = '';
+                                    if (typeof performance !== 'undefined' && performance.now) {
+                                        const frac = performance.now();
+                                        const nanos = Math.floor((frac % 1) * 1e6);
+                                        nano = String(nanos).padStart(6, '0');
+                                    }
+                                    const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}.${ms}${nano}`;
+                                    let combined = `${base}${timestamp}`;
+                                    const limit = Number.isFinite(Number(ov.charLimit)) && Number(ov.charLimit) > 0 ? Number(ov.charLimit) : null;
+                                    if (limit) {
+                                        if (combined.length > limit) {
+                                            const allowedTimestampLen = Math.max(0, limit - String(base).length);
+                                            const truncatedTimestamp = allowedTimestampLen > 0 ? timestamp.slice(0, allowedTimestampLen) : '';
+                                            combined = `${base}${truncatedTimestamp}`;
+                                        }
+                                    }
+                                    ov.value = combined;
+                                    delete ov.isRandom;
+                                    delete ov.charLimit;
+                                }
+                            } catch (e) { }
+                            return ov;
+                        });
+                    }
+                    payload.body_transforms = cloned;
+                }
+            } catch (e) { }
+
             if (requestObj.auth_type === 'bearer' && requestObj.auth_bearer) {
-                payload.headers = payload.headers || {}; payload.headers['Authorization'] = `Bearer ${requestObj.auth_bearer}`;
+                const resolved = resolveTemplate(requestObj.auth_bearer, collectionVars);
+                if (resolved) {
+                    payload.headers = payload.headers || {};
+                    payload.headers['Authorization'] = `Bearer ${resolved}`;
+                }
             }
-        } catch (e) { }
+        } catch (e) {
+            // ignore building errors and continue
+        }
 
         // CSRF
         let csrftoken = null;
