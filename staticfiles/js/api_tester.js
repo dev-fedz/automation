@@ -2989,7 +2989,7 @@
             state.activeScriptTab = 'pre';
             state.scriptOutputs = {
                 pre: { logs: [], error: null, timestamp: null },
-                tests: { logs: [], error: null, tests: [], timestamp: null },
+                post: { logs: [], error: null, tests: [], timestamp: null },
             };
             state.scriptContexts = {
                 pre: null,
@@ -3025,6 +3025,10 @@
             bodyFormData: cloneBodyFormDataRows(state.builder.bodyFormData),
             bodyUrlEncoded: cloneKeyValueRows(state.builder.bodyUrlEncoded),
             bodyBinary: cloneBodyBinary(state.builder.bodyBinary),
+            scripts: {
+                pre: state.builder.scripts.pre || '',
+                post: state.builder.scripts.post || '',
+            },
         });
 
         const persistActiveRequestDraft = () => {
@@ -3069,6 +3073,15 @@
                 state.builder.bodyBinary = cloneBodyBinary(draft.bodyBinary);
             } else {
                 state.builder.bodyBinary = null;
+            }
+            if (draft.scripts && typeof draft.scripts === 'object') {
+                if (typeof draft.scripts.pre === 'string') {
+                    setScriptValue('pre', draft.scripts.pre);
+                }
+                const postScriptValue = typeof draft.scripts.post === 'string' ? draft.scripts.post : typeof draft.scripts.tests === 'string' ? draft.scripts.tests : null;
+                if (typeof postScriptValue === 'string') {
+                    setScriptValue('post', postScriptValue);
+                }
             }
             return true;
         };
