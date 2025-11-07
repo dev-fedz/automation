@@ -1,6 +1,6 @@
 """Django settings for the automation project."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import environ  # type: ignore
@@ -28,6 +28,9 @@ env = environ.Env(
     DEFAULT_FROM_EMAIL=(str, "dev@example.com"),
     CORS_ALLOW_ALL_ORIGINS=(bool, True),
     DJANGO_LOG_LEVEL=(str, "INFO"),
+    OPENAI_API_KEY=(str, ""),
+    OPENAI_API_BASE=(str, "https://api.openai.com/v1"),
+    STATIC_VERSION=(str, ""),
 )
 
 env_file = BASE_DIR / ".env"
@@ -42,6 +45,7 @@ ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 SERVICE = env("SERVICE").strip().lower()
 SERVICE_NAME = SERVICE or "accounts"
 DJANGO_LOG_LEVEL = env("DJANGO_LOG_LEVEL").upper()
+STATIC_VERSION = env("STATIC_VERSION", default="") or datetime.utcnow().strftime("%Y%m%d%H%M%S")
 
 
 DJANGO_APPS = [
@@ -111,6 +115,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "config.context_processors.static_version",
             ],
         },
     },
@@ -202,6 +207,9 @@ EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD")
 EMAIL_USE_TLS = env("EMAIL_USE_TLS")
 EMAIL_USE_SSL = env("EMAIL_USE_SSL")
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL")
+
+OPENAI_API_KEY = env("OPENAI_API_KEY").strip()
+OPENAI_API_BASE = env("OPENAI_API_BASE").rstrip("/") or "https://api.openai.com/v1"
 
 
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=env("REDIS_URL", default="redis://redis:6379/0"))

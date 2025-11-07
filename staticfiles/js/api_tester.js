@@ -39,7 +39,171 @@
     ];
     const VARIABLE_TEMPLATE_PATTERN = /{{\s*([\w\.-]+)\s*}}/g;
     const GLOBAL_STORAGE_KEY = 'automation.apiTester.globals';
+    const VARIABLE_SERIALIZE_MAX_DEPTH = 10;
 
+    const createCoercibleRequestBody = (bodySnapshot) => {
+        const base = bodySnapshot && typeof bodySnapshot === 'object'
+            ? { ...bodySnapshot }
+            : { mode: 'raw', raw: '' };
+
+        const computeRawString = () => {
+            if (typeof base.raw === 'string') {
+                return base.raw;
+            }
+            if (base.json !== undefined) {
+                try {
+                    return JSON.stringify(base.json);
+                } catch (error) {
+                    return '';
+                }
+            }
+            if (base.urlencoded && typeof base.urlencoded === 'object') {
+                try {
+                    return JSON.stringify(base.urlencoded);
+                } catch (error) {
+                    return '';
+                }
+            }
+            if (Array.isArray(base.formData)) {
+                try {
+                    return JSON.stringify(base.formData);
+                } catch (error) {
+                    return '';
+                }
+            }
+            if (base.body !== undefined) {
+                try {
+                    return String(base.body);
+                } catch (error) {
+                    return '';
+                }
+            }
+            return '';
+        };
+
+        const stringifier = () => computeRawString();
+
+        try {
+            Object.defineProperty(base, 'toString', {
+                value: stringifier,
+                writable: true,
+                configurable: true,
+            });
+            Object.defineProperty(base, 'valueOf', {
+                value: stringifier,
+                writable: true,
+                configurable: true,
+            });
+            if (typeof Symbol === 'function' && Symbol.toPrimitive) {
+                Object.defineProperty(base, Symbol.toPrimitive, {
+                    value: () => stringifier(),
+                    writable: true,
+                    configurable: true,
+                });
+            }
+        } catch (error) {
+            // Non-critical; continue without custom coercion if defineProperty fails.
+        }
+
+        return base;
+    };
+
+    const safeSerializeStructure = (value, seen = new WeakSet(), depth = 0) => {
+        if (value === null || value === undefined) {
+            return null;
+        }
+        if (depth > VARIABLE_SERIALIZE_MAX_DEPTH) {
+            return '[MaxDepth]';
+        }
+        const valueType = typeof value;
+        if (valueType === 'string' || valueType === 'number' || valueType === 'boolean') {
+            return value;
+        }
+        if (valueType === 'bigint') {
+            return value.toString();
+        }
+        if (valueType === 'symbol') {
+            try {
+                return value.toString();
+            } catch (error) {
+                return '[Symbol]';
+            }
+        }
+        if (value instanceof Date) {
+            return value.toISOString();
+        }
+        if (value instanceof RegExp) {
+            return value.toString();
+        }
+        if (value instanceof Error) {
+            return value.stack || value.message || value.toString();
+        }
+        if (valueType === 'function') {
+            try {
+                return value.toString();
+            } catch (error) {
+                return '[Function]';
+            }
+        }
+        if (Array.isArray(value)) {
+            if (seen.has(value)) {
+                return '[Circular]';
+            }
+            seen.add(value);
+            return value.map((item) => safeSerializeStructure(item, seen, depth + 1));
+        }
+        if (value instanceof Set) {
+            if (seen.has(value)) {
+                return '[Circular]';
+            }
+            seen.add(value);
+            return Array.from(value).map((item) => safeSerializeStructure(item, seen, depth + 1));
+        }
+        if (value instanceof Map) {
+            if (seen.has(value)) {
+                return '[Circular]';
+            }
+            seen.add(value);
+            const entries = {};
+            value.forEach((mapValue, key) => {
+                const serializedKey = typeof key === 'string'
+                    ? key
+                    : safeSerializeStructure(key, seen, depth + 1);
+                entries[String(serializedKey)] = safeSerializeStructure(mapValue, seen, depth + 1);
+            });
+            return entries;
+        }
+        if (typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer) {
+            const view = new Uint8Array(value);
+            return Array.from(view);
+        }
+        if (typeof value === 'object') {
+            if (seen.has(value)) {
+                return '[Circular]';
+            }
+            seen.add(value);
+            const descriptor = Object.getOwnPropertyDescriptors(value);
+            const result = {};
+            Object.keys(descriptor).forEach((key) => {
+                if (!descriptor[key] || !Object.prototype.hasOwnProperty.call(descriptor[key], 'value')) {
+                    return;
+                }
+                try {
+                    result[key] = safeSerializeStructure(descriptor[key].value, seen, depth + 1);
+                } catch (error) {
+                    result[key] = `[Unserializable:${error && error.message ? error.message : 'error'}]`;
+                }
+            });
+            return result;
+        }
+        try {
+            return String(value);
+        } catch (error) {
+            return '';
+        }
+    };
+
+    // Safely stringify variable values so templates receive JSON-friendly strings.
     const normalizeVariableValue = (value) => {
         if (value === null || value === undefined) {
             return '';
@@ -47,14 +211,61 @@
         if (typeof value === 'string') {
             return value;
         }
-        if (typeof value === 'object') {
+        if (typeof value === 'number' || typeof value === 'boolean') {
+            return String(value);
+        }
+        if (typeof value === 'bigint') {
+            return value.toString();
+        }
+        if (typeof value === 'symbol') {
             try {
-                return JSON.stringify(value);
+                return value.toString();
             } catch (error) {
-                return String(value);
+                return '';
             }
         }
-        return String(value);
+        if (typeof value === 'function') {
+            try {
+                return value.toString();
+            } catch (error) {
+                return '[Function]';
+            }
+        }
+        if (value instanceof Date) {
+            return value.toISOString();
+        }
+        if (typeof value === 'object') {
+            try {
+                const serializable = safeSerializeStructure(value, new WeakSet(), 0);
+                if (typeof serializable === 'string') {
+                    return serializable;
+                }
+                return JSON.stringify(serializable);
+            } catch (error) {
+                if (typeof value.toJSON === 'function') {
+                    try {
+                        const viaToJson = value.toJSON();
+                        const serializable = safeSerializeStructure(viaToJson, new WeakSet(), 0);
+                        if (typeof serializable === 'string') {
+                            return serializable;
+                        }
+                        return JSON.stringify(serializable);
+                    } catch (nestedError) {
+                        // fall through to final stringify fallback
+                    }
+                }
+                try {
+                    return String(value);
+                } catch (stringError) {
+                    return '';
+                }
+            }
+        }
+        try {
+            return String(value);
+        } catch (error) {
+            return '';
+        }
     };
 
     const cloneVariableStore = (source) => {
@@ -80,7 +291,13 @@
             for (const store of lookupStores) {
                 if (store && Object.prototype.hasOwnProperty.call(store, key)) {
                     const value = store[key];
-                    return value === undefined || value === null ? '' : String(value);
+                    if (value === undefined || value === null) {
+                        return '';
+                    }
+                    if (typeof value === 'string') {
+                        return value;
+                    }
+                    return normalizeVariableValue(value);
                 }
             }
             return match;
@@ -162,6 +379,31 @@
         });
     };
 
+    const collectJsonTemplatePlaceholders = (value, basePath = '') => {
+        const references = [];
+        if (typeof value === 'string') {
+            const match = value.match(/^{{\s*([\w\.-]+)\s*}}$/);
+            if (match) {
+                references.push({ path: basePath, key: match[1] });
+            }
+            return references;
+        }
+        if (Array.isArray(value)) {
+            value.forEach((item, index) => {
+                const nextPath = basePath ? `${basePath}.${index}` : String(index);
+                references.push(...collectJsonTemplatePlaceholders(item, nextPath));
+            });
+            return references;
+        }
+        if (value && typeof value === 'object') {
+            Object.entries(value).forEach(([key, nested]) => {
+                const nextPath = basePath ? `${basePath}.${key}` : key;
+                references.push(...collectJsonTemplatePlaceholders(nested, nextPath));
+            });
+        }
+        return references;
+    };
+
     const bufferToHex = (buffer) => {
         if (!(buffer instanceof ArrayBuffer)) {
             return '';
@@ -169,6 +411,604 @@
         return Array.from(new Uint8Array(buffer))
             .map((byte) => byte.toString(16).padStart(2, '0'))
             .join('');
+    };
+
+    const getCryptoJs = () => {
+        if (typeof window !== 'undefined' && window.CryptoJS) {
+            return window.CryptoJS;
+        }
+        if (typeof globalThis !== 'undefined' && globalThis.CryptoJS) {
+            return globalThis.CryptoJS;
+        }
+        if (typeof self !== 'undefined' && self.CryptoJS) {
+            return self.CryptoJS;
+        }
+        return undefined;
+    };
+
+    const CRYPTO_JS_CDN_URL = 'https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js';
+    let cachedCryptoJsInstance = null;
+    let cryptoJsReadyPromise = null;
+    const cryptoJsLoadedSources = new Set();
+
+    const getMoment = () => {
+        if (typeof window !== 'undefined' && window.moment) {
+            return window.moment;
+        }
+        if (typeof globalThis !== 'undefined' && globalThis.moment) {
+            return globalThis.moment;
+        }
+        if (typeof self !== 'undefined' && self.moment) {
+            return self.moment;
+        }
+        return undefined;
+    };
+
+    const MOMENT_LOCAL_URL = '/static/js/vendor/moment.min.js';
+    const MOMENT_CDN_URL = 'https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js';
+    let cachedMomentInstance = null;
+    let momentReadyPromise = null;
+    const momentLoadedSources = new Set();
+    let momentAmdRegistered = false;
+
+    const isLikelyHtmlContentType = (contentType) => {
+        if (!contentType) {
+            return false;
+        }
+        return contentType.toLowerCase().includes('text/html');
+    };
+
+    const isLikelyScriptContentType = (contentType) => {
+        if (!contentType) {
+            return true;
+        }
+        const lowered = contentType.toLowerCase();
+        if (lowered.includes('javascript') || lowered.includes('ecmascript')) {
+            return true;
+        }
+        if (lowered.includes('json') || lowered.includes('text/plain')) {
+            return true;
+        }
+        if (isLikelyHtmlContentType(contentType)) {
+            return false;
+        }
+        return true;
+    };
+
+    const verifyScriptSourceLooksExecutable = async (absoluteSrc) => {
+        if (typeof fetch !== 'function') {
+            return true;
+        }
+        try {
+            const response = await fetch(absoluteSrc, {
+                method: 'HEAD',
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
+            if (!response || !response.ok) {
+                return false;
+            }
+            const contentType = response.headers && typeof response.headers.get === 'function'
+                ? response.headers.get('content-type')
+                : '';
+            if (isLikelyHtmlContentType(contentType)) {
+                return false;
+            }
+            return isLikelyScriptContentType(contentType);
+        } catch (error) {
+            // Ignore preflight errors (e.g., CORS) and allow traditional script loading to proceed.
+            return true;
+        }
+    };
+
+    const registerMomentAmdModule = (momentLib, options = {}) => {
+        if (!momentLib) {
+            return;
+        }
+        const { skipIfIntercepted = false } = options;
+        const hostWindow = (typeof window !== 'undefined' ? window : typeof globalThis !== 'undefined' ? globalThis : undefined);
+        if (!hostWindow) {
+            return;
+        }
+        const amdDefine = hostWindow.define;
+        if (typeof amdDefine !== 'function' || !amdDefine.amd) {
+            return;
+        }
+        const amdRequire = hostWindow.requirejs || hostWindow.require;
+        let alreadyDefined = false;
+        try {
+            alreadyDefined = typeof amdRequire === 'function'
+                && typeof amdRequire.defined === 'function'
+                && amdRequire.defined('moment');
+        } catch (error) {
+            alreadyDefined = false;
+        }
+        if (alreadyDefined) {
+            momentAmdRegistered = true;
+            return;
+        }
+        if (skipIfIntercepted) {
+            return;
+        }
+        if (momentAmdRegistered) {
+            return;
+        }
+        try {
+            amdDefine('moment', [], () => momentLib);
+            momentAmdRegistered = true;
+        } catch (error) {
+            momentAmdRegistered = true;
+        }
+    };
+
+    const toAbsoluteUrl = (src) => {
+        if (!src || typeof window === 'undefined') {
+            return src || '';
+        }
+        try {
+            return new URL(src, window.location.href).href;
+        } catch (error) {
+            return src;
+        }
+    };
+
+    const waitForCryptoJsInstance = (timeoutMs = 3000) => new Promise((resolve) => {
+        const start = Date.now();
+        const check = () => {
+            const instance = getCryptoJs();
+            if (instance) {
+                resolve(instance);
+                return;
+            }
+            if (Date.now() - start >= timeoutMs) {
+                resolve(undefined);
+                return;
+            }
+            if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+                window.requestAnimationFrame(check);
+            } else {
+                setTimeout(check, 50);
+            }
+        };
+        check();
+    });
+
+    const loadCryptoJsFromSource = async (src) => {
+        if (!src || typeof document === 'undefined') {
+            return undefined;
+        }
+        const absoluteSrc = toAbsoluteUrl(src);
+        if (!absoluteSrc) {
+            return undefined;
+        }
+
+        const instanceBeforeLoad = getCryptoJs();
+        if (instanceBeforeLoad) {
+            return instanceBeforeLoad;
+        }
+
+        const existingTag = Array.from(document.getElementsByTagName('script')).find((el) => toAbsoluteUrl(el.src) === absoluteSrc);
+        if (existingTag) {
+            const instance = getCryptoJs();
+            if (instance) {
+                return instance;
+            }
+            const waited = await waitForCryptoJsInstance();
+            if (waited) {
+                return waited;
+            }
+        }
+
+        if (cryptoJsLoadedSources.has(absoluteSrc)) {
+            const waited = await waitForCryptoJsInstance();
+            return waited || undefined;
+        }
+
+        cryptoJsLoadedSources.add(absoluteSrc);
+
+        const head = document.head || document.getElementsByTagName('head')[0];
+        if (!head) {
+            return undefined;
+        }
+
+        const script = document.createElement('script');
+        script.src = absoluteSrc;
+        script.async = false;
+        script.crossOrigin = 'anonymous';
+
+        const loadResult = await new Promise((resolve) => {
+            const handleLoad = () => {
+                script.removeEventListener('load', handleLoad);
+                script.removeEventListener('error', handleError);
+                resolve(true);
+            };
+            const handleError = () => {
+                script.removeEventListener('load', handleLoad);
+                script.removeEventListener('error', handleError);
+                resolve(false);
+            };
+            script.addEventListener('load', handleLoad);
+            script.addEventListener('error', handleError);
+            head.appendChild(script);
+        });
+
+        if (!loadResult) {
+            return undefined;
+        }
+
+        const waited = await waitForCryptoJsInstance();
+        return waited || undefined;
+    };
+
+    const waitForMomentInstance = (timeoutMs = 3000) => new Promise((resolve) => {
+        const immediate = getMoment();
+        if (immediate) {
+            resolve(immediate);
+            return;
+        }
+
+        const hostWindow = (typeof window !== 'undefined' ? window : typeof globalThis !== 'undefined' ? globalThis : undefined);
+        const amdRequire = hostWindow && (hostWindow.requirejs || hostWindow.require);
+        let resolved = false;
+        const finish = (instance) => {
+            if (resolved) {
+                return;
+            }
+            resolved = true;
+            if (instance && hostWindow && !hostWindow.moment) {
+                hostWindow.moment = instance;
+            }
+            resolve(instance);
+        };
+
+        if (amdRequire && typeof amdRequire === 'function') {
+            try {
+                if (typeof amdRequire.defined === 'function' && amdRequire.defined('moment')) {
+                    const module = amdRequire('moment');
+                    if (module) {
+                        finish(module);
+                    }
+                }
+            } catch (error) {
+                // Ignore synchronous AMD resolution errors.
+            }
+
+            if (!resolved) {
+                try {
+                    amdRequire(['moment'], (module) => {
+                        finish(module);
+                    }, () => {
+                        // Ignore failures and fall back to polling.
+                    });
+                } catch (error) {
+                    // Ignore AMD invocation errors and fall back to polling.
+                }
+            }
+        }
+
+        const start = Date.now();
+        const poll = () => {
+            if (resolved) {
+                return;
+            }
+            const instance = getMoment();
+            if (instance) {
+                finish(instance);
+                return;
+            }
+            if (Date.now() - start >= timeoutMs) {
+                finish(undefined);
+                return;
+            }
+            if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+                window.requestAnimationFrame(poll);
+            } else {
+                setTimeout(poll, 50);
+            }
+        };
+        poll();
+    });
+
+    const loadMomentFromSource = async (src) => {
+        if (!src || typeof document === 'undefined') {
+            return undefined;
+        }
+        const absoluteSrc = toAbsoluteUrl(src);
+        if (!absoluteSrc) {
+            return undefined;
+        }
+
+        const instanceBeforeLoad = getMoment();
+        if (instanceBeforeLoad) {
+            return instanceBeforeLoad;
+        }
+
+        const existingTag = Array.from(document.getElementsByTagName('script')).find((el) => toAbsoluteUrl(el.src) === absoluteSrc);
+        if (existingTag) {
+            const instance = getMoment();
+            if (instance) {
+                return instance;
+            }
+            const waitedExisting = await waitForMomentInstance();
+            if (waitedExisting) {
+                return waitedExisting;
+            }
+        }
+
+        if (momentLoadedSources.has(absoluteSrc)) {
+            const waitedCached = await waitForMomentInstance();
+            return waitedCached || undefined;
+        }
+
+        const head = document.head || document.getElementsByTagName('head')[0];
+        if (!head) {
+            return undefined;
+        }
+
+        const hostWindow = (document && document.defaultView) || (typeof window !== 'undefined' ? window : undefined);
+        const originalDefine = hostWindow && hostWindow.define;
+        const hadAmdDefine = Boolean(originalDefine && typeof originalDefine === 'function' && originalDefine.amd);
+        let defineHandledForScript = false;
+        const installAmdDefineInterceptor = (scriptEl) => {
+            if (!hadAmdDefine || !hostWindow || !scriptEl || typeof originalDefine !== 'function') {
+                return () => { };
+            }
+            const previousDefine = originalDefine;
+            let restored = false;
+            const interceptor = function momentSafeDefine(...defineArgs) {
+                const currentScript = typeof document !== 'undefined' ? document.currentScript : null;
+                let isMomentScript = false;
+                if (currentScript) {
+                    if (typeof currentScript.getAttribute === 'function' && currentScript.getAttribute('data-api-tester-moment') === '1') {
+                        isMomentScript = true;
+                    }
+                    if (currentScript === scriptEl) {
+                        isMomentScript = true;
+                    } else {
+                        const currentSrc = toAbsoluteUrl(currentScript.src || '');
+                        const targetSrc = toAbsoluteUrl(scriptEl.src || '');
+                        if (currentSrc && targetSrc && currentSrc === targetSrc) {
+                            isMomentScript = true;
+                        }
+                    }
+                }
+                if (!isMomentScript) {
+                    const targetSrc = toAbsoluteUrl(scriptEl.src || '');
+                    const anonymousCall = typeof defineArgs[0] !== 'string';
+                    if (!(anonymousCall && targetSrc && targetSrc.toLowerCase().includes('moment'))) {
+                        return previousDefine.apply(this, defineArgs);
+                    }
+                }
+
+                defineHandledForScript = true;
+                let normalizedArgs;
+                if (typeof defineArgs[0] === 'string') {
+                    normalizedArgs = defineArgs;
+                } else if (Array.isArray(defineArgs[0])) {
+                    normalizedArgs = ['moment', defineArgs[0], defineArgs[1]];
+                } else {
+                    normalizedArgs = ['moment', [], defineArgs[0]];
+                }
+
+                return previousDefine.apply(this, normalizedArgs);
+            };
+            interceptor.amd = previousDefine.amd;
+            hostWindow.define = interceptor;
+            return () => {
+                if (!restored && hostWindow) {
+                    hostWindow.define = previousDefine;
+                    restored = true;
+                }
+            };
+        };
+
+        const looksExecutable = await verifyScriptSourceLooksExecutable(absoluteSrc);
+        if (!looksExecutable) {
+            console.warn('Skipping Moment.js source due to unexpected response type.', absoluteSrc);
+            return undefined;
+        }
+
+        momentLoadedSources.add(absoluteSrc);
+
+        let loadResult = false;
+        let removeAmdInterceptor = () => { };
+        try {
+            const script = document.createElement('script');
+            script.src = absoluteSrc;
+            script.async = false;
+            script.crossOrigin = 'anonymous';
+            script.setAttribute('data-api-tester-moment', '1');
+
+            removeAmdInterceptor = installAmdDefineInterceptor(script);
+
+            loadResult = await new Promise((resolve) => {
+                let settled = false;
+                let timerId;
+                const finalize = (value) => {
+                    if (settled) {
+                        return;
+                    }
+                    settled = true;
+                    if (typeof timerId === 'number') {
+                        clearTimeout(timerId);
+                    }
+                    removeAmdInterceptor();
+                    resolve(value);
+                };
+                const handleLoad = () => {
+                    script.removeEventListener('load', handleLoad);
+                    script.removeEventListener('error', handleError);
+                    finalize(true);
+                };
+                const handleError = () => {
+                    script.removeEventListener('load', handleLoad);
+                    script.removeEventListener('error', handleError);
+                    finalize(false);
+                };
+                script.addEventListener('load', handleLoad);
+                script.addEventListener('error', handleError);
+                head.appendChild(script);
+
+                timerId = setTimeout(() => {
+                    script.removeEventListener('load', handleLoad);
+                    script.removeEventListener('error', handleError);
+                    finalize(false);
+                }, 4000);
+            });
+        } finally {
+            removeAmdInterceptor();
+        }
+
+        if (!loadResult) {
+            momentLoadedSources.delete(absoluteSrc);
+            return undefined;
+        }
+
+        const waited = await waitForMomentInstance();
+        if (waited) {
+            registerMomentAmdModule(waited, { skipIfIntercepted: defineHandledForScript });
+        }
+        return waited || undefined;
+    };
+
+    const ensureCryptoJsReady = async () => {
+        const existing = getCryptoJs();
+        if (existing) {
+            cachedCryptoJsInstance = existing;
+            return existing;
+        }
+        if (cachedCryptoJsInstance) {
+            return cachedCryptoJsInstance;
+        }
+        if (typeof document === 'undefined') {
+            return undefined;
+        }
+
+        if (!cryptoJsReadyPromise) {
+            cryptoJsReadyPromise = (async () => {
+                const sources = [];
+                const taggedScript = document.querySelector('script[data-api-tester-crypto-js]');
+                if (taggedScript && taggedScript.src) {
+                    sources.push(taggedScript.src);
+                    const baseSrc = taggedScript.src.split('?')[0];
+                    if (baseSrc && baseSrc !== taggedScript.src) {
+                        sources.push(baseSrc);
+                    }
+                }
+
+                // Ensure there is always a CDN fallback last.
+                if (!sources.includes(CRYPTO_JS_CDN_URL)) {
+                    sources.push(CRYPTO_JS_CDN_URL);
+                }
+
+                for (let index = 0; index < sources.length; index += 1) {
+                    const instance = await loadCryptoJsFromSource(sources[index]);
+                    if (instance) {
+                        cachedCryptoJsInstance = instance;
+                        return instance;
+                    }
+                }
+                cachedCryptoJsInstance = null;
+                return undefined;
+            })()
+                .catch((error) => {
+                    console.warn('Unable to prepare CryptoJS for API tester.', error);
+                    cachedCryptoJsInstance = null;
+                    return undefined;
+                })
+                .finally(() => {
+                    cryptoJsReadyPromise = null;
+                });
+        }
+
+        const instance = await cryptoJsReadyPromise;
+        if (instance) {
+            cachedCryptoJsInstance = instance;
+        }
+        return instance || cachedCryptoJsInstance || getCryptoJs();
+    };
+
+    const ensureMomentReady = async () => {
+        const existing = getMoment();
+        if (existing) {
+            cachedMomentInstance = existing;
+            registerMomentAmdModule(existing);
+            return existing;
+        }
+        if (cachedMomentInstance) {
+            registerMomentAmdModule(cachedMomentInstance);
+            return cachedMomentInstance;
+        }
+        if (typeof document === 'undefined') {
+            return undefined;
+        }
+
+        if (!momentReadyPromise) {
+            momentReadyPromise = (async () => {
+                const sources = [];
+                const pushSource = (value) => {
+                    if (!value) {
+                        return;
+                    }
+                    const normalizedCandidate = toAbsoluteUrl(value);
+                    const alreadyPresent = sources.some((existing) => toAbsoluteUrl(existing) === normalizedCandidate);
+                    if (!alreadyPresent) {
+                        sources.push(value);
+                    }
+                };
+
+                const inlineMomentScript = document.querySelector('script[data-api-tester-moment-inline]');
+                if (inlineMomentScript && inlineMomentScript.textContent && inlineMomentScript.textContent.trim()) {
+                    try {
+                        const module = new Function(`${inlineMomentScript.textContent}\nreturn typeof moment !== "undefined" ? moment : (typeof window !== "undefined" ? window.moment : undefined);`)();
+                        if (module) {
+                            cachedMomentInstance = module;
+                            return module;
+                        }
+                    } catch (error) {
+                        console.warn('Failed to evaluate inline Moment script.', error);
+                    }
+                }
+
+                const taggedScript = document.querySelector('script[data-api-tester-moment]');
+                if (taggedScript && taggedScript.src) {
+                    pushSource(taggedScript.src);
+                    const baseSrc = taggedScript.src.split('?')[0];
+                    if (baseSrc && baseSrc !== taggedScript.src) {
+                        pushSource(baseSrc);
+                    }
+                }
+
+                pushSource(MOMENT_LOCAL_URL);
+                pushSource(MOMENT_CDN_URL);
+
+                for (let index = 0; index < sources.length; index += 1) {
+                    const instance = await loadMomentFromSource(sources[index]);
+                    if (instance) {
+                        cachedMomentInstance = instance;
+                        registerMomentAmdModule(instance);
+                        return instance;
+                    }
+                }
+                cachedMomentInstance = null;
+                return undefined;
+            })()
+                .catch((error) => {
+                    console.warn('Unable to prepare Moment.js for API tester.', error);
+                    cachedMomentInstance = null;
+                    return undefined;
+                })
+                .finally(() => {
+                    momentReadyPromise = null;
+                });
+        }
+
+        const instance = await momentReadyPromise;
+        if (instance) {
+            cachedMomentInstance = instance;
+            registerMomentAmdModule(instance);
+        }
+        return instance || cachedMomentInstance || getMoment();
     };
 
     const computeHashHex = async (algorithmKey, message) => {
@@ -180,6 +1020,10 @@
             sha512: 'SHA-512',
         };
         const subtleName = subtleAlgorithms[normalizedKey];
+        let cryptoJs = getCryptoJs();
+        if (!cryptoJs) {
+            cryptoJs = await ensureCryptoJsReady();
+        }
         if (subtleName && typeof window !== 'undefined' && window.crypto?.subtle) {
             try {
                 const encoder = new TextEncoder();
@@ -191,18 +1035,18 @@
             }
         }
 
-        if (typeof window !== 'undefined' && window.CryptoJS) {
+        if (cryptoJs) {
             try {
                 const cryptoFns = {
-                    sha256: window.CryptoJS.SHA256,
-                    sha384: window.CryptoJS.SHA384,
-                    sha512: window.CryptoJS.SHA512,
+                    sha256: cryptoJs.SHA256,
+                    sha384: cryptoJs.SHA384,
+                    sha512: cryptoJs.SHA512,
                 };
                 const fn = cryptoFns[normalizedKey];
                 if (fn) {
                     const hash = fn(normalizedMessage);
-                    if (window.CryptoJS.enc && window.CryptoJS.enc.Hex) {
-                        return window.CryptoJS.enc.Hex.stringify(hash);
+                    if (cryptoJs.enc && cryptoJs.enc.Hex) {
+                        return cryptoJs.enc.Hex.stringify(hash);
                     }
                     return String(hash);
                 }
@@ -259,14 +1103,24 @@
         }
     };
 
-    const createVariableScope = ({ store, onMutate } = {}) => {
+    const createVariableScope = ({ store, onMutate, fallbackStores } = {}) => {
         const scopeStore = store || {};
+        const lookups = Array.isArray(fallbackStores) ? fallbackStores : [];
         const scope = {
             get: (key) => {
                 if (!key) {
                     return undefined;
                 }
-                return scopeStore[key];
+                if (Object.prototype.hasOwnProperty.call(scopeStore, key)) {
+                    return scopeStore[key];
+                }
+                for (let index = 0; index < lookups.length; index += 1) {
+                    const fallback = lookups[index];
+                    if (fallback && Object.prototype.hasOwnProperty.call(fallback, key)) {
+                        return fallback[key];
+                    }
+                }
+                return undefined;
             },
             set: (key, value) => {
                 if (!key) {
@@ -367,6 +1221,54 @@
         } catch (e) {
             return text;
         }
+    };
+
+    // Try to convert a JS-style object literal into JSON. This handles simple
+    // cases like unquoted keys and values like pm.environment.get('name') by
+    // converting them to quoted keys and "{{name}}" template tokens.
+    const convertJsObjectLikeToJson = (text) => {
+        if (typeof text !== 'string') return text;
+        // quick check: must contain braces
+        const trimmed = text.trim();
+        if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return text;
+        // extract inner lines
+        const inner = trimmed.slice(1, -1).trim();
+        const lines = inner.split(/\r?\n/);
+        const outLines = [];
+        for (const rawLine of lines) {
+            let line = rawLine.trim();
+            if (!line) continue;
+            // remove trailing comma
+            if (line.endsWith(',')) line = line.slice(0, -1).trim();
+            // match key: value
+            const m = line.match(/^(["']?)([\w@.\-]+)\1\s*:\s*(.+)$/);
+            if (!m) {
+                // if line doesn't match, keep as-is
+                outLines.push(line);
+                continue;
+            }
+            const key = m[2];
+            let value = m[3].trim();
+            // convert common pm.environment.get('name') and pm.variables.get('name') or pm.getEnvironmentVariable
+            const envMatch = value.match(/pm\.environment\.get\(['"]([\w.\-]+)['"]\)/) || value.match(/pm\.variables\.get\(['"]([\w.\-]+)['"]\)/) || value.match(/pm\.getEnvironmentVariable\(['"]([\w.\-]+)['"]\)/);
+            if (envMatch) {
+                value = `"{{${envMatch[1]}}}"`;
+            } else if (/^(['"]).*\1$/.test(value)) {
+                // already quoted string
+                // keep as-is
+            } else if (/^[0-9.+-]+$/.test(value)) {
+                // numeric
+            } else if (/^\{/.test(value) || /^\[/.test(value)) {
+                // nested object/array: leave as-is
+            } else {
+                // default: treat as string
+                value = JSON.stringify(value.replace(/,$/, ''));
+            }
+            outLines.push(`"${key}": ${value}`);
+        }
+        return `{
+  ${outLines.join(',\n  ')}
+}`;
     };
 
     const escapeHtml = (value) => {
@@ -513,10 +1415,7 @@
         urlBase: '',
         builder: getInitialBuilderState(),
         activeTab: 'params',
-        bodyTools: {
-            overridesIdSeed: 0,
-            signaturesIdSeed: 0,
-        },
+        activeScriptTab: 'pre',
         requestDrafts: new Map(),
         activeRequestDraftKey: null,
         responseCache: new Map(),
@@ -553,6 +1452,15 @@
         responseBodyView: 'json',
         responseBodyMode: 'pretty',
         responseBodyManualView: false,
+        scriptOutputs: {
+            pre: { logs: [], error: null, timestamp: null },
+            tests: { logs: [], error: null, tests: [], timestamp: null },
+        },
+        scriptContexts: {
+            pre: null,
+            requestSnapshot: null,
+            environmentId: null,
+        },
     };
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -589,6 +1497,13 @@
             builderMeta: document.getElementById('builder-meta'),
             tabButtons: Array.from(root.querySelectorAll('[data-tab]')),
             tabPanels: Array.from(root.querySelectorAll('[data-tab-panel]')),
+            scriptTabButtons: Array.from(root.querySelectorAll('[data-script-tab]')),
+            scriptPanels: Array.from(root.querySelectorAll('[data-script-panel]')),
+            preScriptEditor: document.getElementById('pre-script-editor'),
+            testsScriptEditor: document.getElementById('tests-script-editor'),
+            preScriptOutput: document.getElementById('pre-script-output'),
+            preScriptConsoleResponse: document.getElementById('pre-script-console-response'),
+            testsScriptOutput: document.getElementById('tests-script-output'),
             paramsBody: document.getElementById('params-rows'),
             addParamRow: document.getElementById('add-param-row'),
             headersBody: document.getElementById('headers-rows'),
@@ -608,10 +1523,6 @@
             addBodyUrlencodedRow: document.getElementById('add-body-urlencoded-row'),
             bodyBinaryInput: document.getElementById('body-binary-input'),
             bodyBinaryInfo: document.getElementById('body-binary-info'),
-            bodyOverridesBody: document.getElementById('body-overrides-rows'),
-            addBodyOverrideRow: document.getElementById('add-body-override'),
-            bodySignaturesBody: document.getElementById('body-signatures-rows'),
-            addBodySignatureRow: document.getElementById('add-body-signature'),
             collectionsActionsToggle: document.getElementById('collections-actions-toggle'),
             collectionsActionsMenu: document.getElementById('collections-actions-menu'),
             collectionsCreateAction: document.getElementById('collections-action-create'),
@@ -635,6 +1546,25 @@
                 return '';
             }
             return url.endsWith('/') ? url : `${url}/`;
+        };
+
+        const getCollectionsEndpointBase = () => {
+            if (!endpoints.collections) {
+                return null;
+            }
+            return ensureTrailingSlash(endpoints.collections);
+        };
+
+        const getCollectionDetailUrl = (collectionId) => {
+            const base = getCollectionsEndpointBase();
+            if (!base) {
+                return null;
+            }
+            const numericId = Number(collectionId);
+            if (!Number.isFinite(numericId)) {
+                return null;
+            }
+            return `${base}${numericId}/`;
         };
 
         const getDirectoriesEndpoint = () => {
@@ -714,8 +1644,8 @@
 
         const tabButtons = elements.tabButtons;
         const tabPanels = elements.tabPanels;
-        const overridesTable = elements.bodyOverridesBody;
-        const signaturesTable = elements.bodySignaturesBody;
+        const scriptTabButtons = elements.scriptTabButtons;
+        const scriptPanels = elements.scriptPanels;
         let suppressUrlSync = false;
         let rawEditor = null;
         let rawEditorResizeObserver = null;
@@ -724,13 +1654,20 @@
         let monacoLoaderPromise = null;
         let hasConfiguredJsonDiagnostics = false;
         let isRequestInFlight = false;
-        const createTransformRowId = (type) => {
-            if (type === 'override') {
-                state.bodyTools.overridesIdSeed += 1;
-                return `override-${state.bodyTools.overridesIdSeed}`;
-            }
-            state.bodyTools.signaturesIdSeed += 1;
-            return `signature-${state.bodyTools.signaturesIdSeed}`;
+        const SCRIPT_STATE_KEY = { pre: 'pre', tests: 'post' };
+        const scriptEditorMeta = {
+            pre: {
+                container: elements.preScriptEditor,
+                placeholder: '// Access pm.environment, pm.variables, pm.request',
+            },
+            tests: {
+                container: elements.testsScriptEditor,
+                placeholder: '// pm.test("Status code is 200", () => { pm.expect(pm.response.code).to.eql(200); });',
+            },
+        };
+        const scriptEditors = {
+            pre: { editor: null, fallback: null, resizeObserver: null, suppress: false },
+            tests: { editor: null, fallback: null, resizeObserver: null, suppress: false },
         };
 
         const setStatus = (message, variant = 'neutral') => {
@@ -1012,6 +1949,381 @@
             }
         };
 
+        const initializeScriptContainers = () => {
+            Object.keys(scriptEditorMeta).forEach((key) => {
+                const meta = scriptEditorMeta[key];
+                if (meta?.container && meta.placeholder) {
+                    meta.container.setAttribute('data-placeholder', meta.placeholder);
+                }
+            });
+        };
+
+        const syncScriptEditorEmptyState = (key, value) => {
+            const meta = scriptEditorMeta[key];
+            if (!meta?.container) {
+                return;
+            }
+            if (value && String(value).trim()) {
+                meta.container.classList.remove('is-empty');
+            } else {
+                meta.container.classList.add('is-empty');
+            }
+        };
+
+        const applyScriptValueToEditor = (key, value) => {
+            const editorState = scriptEditors[key];
+            const normalized = value === undefined || value === null ? '' : String(value);
+            if (!editorState) {
+                return;
+            }
+            if (editorState.editor) {
+                if (editorState.editor.getValue() !== normalized) {
+                    editorState.suppress = true;
+                    editorState.editor.setValue(normalized);
+                    editorState.suppress = false;
+                }
+            } else if (editorState.fallback) {
+                if (editorState.fallback.value !== normalized) {
+                    editorState.fallback.value = normalized;
+                }
+            }
+            syncScriptEditorEmptyState(key, normalized);
+        };
+
+        const setScriptValue = (key, value, { fromEditor = false } = {}) => {
+            const stateKey = SCRIPT_STATE_KEY[key];
+            if (!stateKey) {
+                return;
+            }
+            const normalized = value === undefined || value === null ? '' : String(value);
+            state.builder.scripts[stateKey] = normalized;
+            if (!fromEditor) {
+                applyScriptValueToEditor(key, normalized);
+            } else {
+                syncScriptEditorEmptyState(key, normalized);
+            }
+        };
+
+        const getScriptValue = (key) => {
+            const stateKey = SCRIPT_STATE_KEY[key];
+            if (!stateKey) {
+                return '';
+            }
+            return state.builder.scripts[stateKey] || '';
+        };
+
+        const initializeScriptEditor = (key) => {
+            const meta = scriptEditorMeta[key];
+            const editorState = scriptEditors[key];
+            const stateKey = SCRIPT_STATE_KEY[key];
+            if (!meta?.container || !editorState || !stateKey) {
+                return;
+            }
+            if (editorState.editor || editorState.fallback || editorState.initializing) {
+                return;
+            }
+
+            editorState.initializing = true;
+
+            ensureMonaco()
+                .then((monaco) => {
+                    editorState.initializing = false;
+                    if (editorState.editor || !meta.container) {
+                        return;
+                    }
+                    const editor = monaco.editor.create(meta.container, {
+                        value: getScriptValue(key),
+                        language: 'javascript',
+                        automaticLayout: true,
+                        minimap: { enabled: false },
+                        fontSize: 14,
+                        fontFamily: 'ui-monospace, Consolas, Menlo, monospace',
+                        lineNumbers: 'on',
+                        wordWrap: 'on',
+                        tabSize: 2,
+                        insertSpaces: true,
+                        smoothScrolling: true,
+                    });
+
+                    editorState.editor = editor;
+
+                    const toggleEmpty = () => {
+                        syncScriptEditorEmptyState(key, editor.getValue());
+                    };
+
+                    toggleEmpty();
+
+                    editor.onDidChangeModelContent(() => {
+                        if (editorState.suppress) {
+                            return;
+                        }
+                        setScriptValue(key, editor.getValue(), { fromEditor: true });
+                    });
+
+                    editor.onDidFocusEditorText(() => {
+                        state.activeInputTarget = { type: 'monaco', editor };
+                    });
+
+                    editor.onDidBlurEditorText(() => {
+                        if (state.activeInputTarget?.type === 'monaco' && state.activeInputTarget.editor === editor) {
+                            state.activeInputTarget = null;
+                        }
+                    });
+
+                    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF, () => {
+                        try {
+                            const formatAction = editor.getAction('editor.action.formatDocument');
+                            if (formatAction && typeof formatAction.run === 'function') {
+                                formatAction.run();
+                            }
+                        } catch (error) {
+                            // ignore formatting issues
+                        }
+                    });
+
+                    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Space, () => {
+                        try {
+                            monaco.commands.executeCommand('editor.action.triggerSuggest');
+                        } catch (error) {
+                            // ignore suggest failures
+                        }
+                    });
+
+                    syncScriptEditorEmptyState(key, getScriptValue(key));
+
+                    if (typeof ResizeObserver !== 'undefined') {
+                        if (!editorState.resizeObserver) {
+                            editorState.resizeObserver = new ResizeObserver(() => {
+                                if (editorState.editor) {
+                                    editorState.editor.layout();
+                                }
+                            });
+                        } else {
+                            editorState.resizeObserver.disconnect();
+                        }
+                        editorState.resizeObserver.observe(meta.container);
+                        editor.layout();
+                    }
+                })
+                .catch(() => {
+                    editorState.initializing = false;
+                    if (!meta.container || editorState.fallback) {
+                        return;
+                    }
+                    const textarea = document.createElement('textarea');
+                    textarea.className = 'script-textarea-fallback';
+                    textarea.value = getScriptValue(key);
+                    meta.container.appendChild(textarea);
+                    editorState.fallback = textarea;
+                    syncScriptEditorEmptyState(key, textarea.value);
+                    textarea.addEventListener('input', (event) => {
+                        setScriptValue(key, event.target.value, { fromEditor: true });
+                    });
+                    textarea.addEventListener('focus', () => {
+                        state.activeInputTarget = { type: 'dom', element: textarea };
+                    });
+                    textarea.addEventListener('blur', () => {
+                        if (state.activeInputTarget?.type === 'dom' && state.activeInputTarget.element === textarea) {
+                            state.activeInputTarget = null;
+                        }
+                    });
+                });
+        };
+
+        const refreshScriptEditors = () => {
+            Object.keys(scriptEditorMeta).forEach((key) => {
+                applyScriptValueToEditor(key, getScriptValue(key));
+            });
+        };
+
+        const activateScriptTab = (target) => {
+            if (!scriptTabButtons.length || !scriptPanels.length) {
+                return;
+            }
+            const normalized = target === 'tests' ? 'tests' : 'pre';
+            state.activeScriptTab = normalized;
+            scriptTabButtons.forEach((button, index) => {
+                const tabName = button.dataset.scriptTab;
+                const isActive = tabName === normalized;
+                button.classList.toggle('is-active', isActive);
+                button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                button.setAttribute('tabindex', isActive ? '0' : '-1');
+                if (isActive) {
+                    button.removeAttribute('aria-disabled');
+                }
+            });
+            scriptPanels.forEach((panel) => {
+                const panelName = panel.dataset.scriptPanel;
+                const isActive = panelName === normalized;
+                panel.classList.toggle('is-active', isActive);
+                panel.hidden = !isActive;
+                panel.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+            });
+            initializeScriptEditor(normalized);
+        };
+
+        const normalizeLogLevel = (level) => {
+            const normalized = typeof level === 'string' ? level.toLowerCase() : '';
+            if (normalized === 'warn' || normalized === 'warning') {
+                return 'warn';
+            }
+            if (normalized === 'error') {
+                return 'error';
+            }
+            if (normalized === 'debug') {
+                return 'debug';
+            }
+            return 'info';
+        };
+
+        const formatLogArgs = (args) => {
+            if (!Array.isArray(args)) {
+                return '';
+            }
+            return args
+                .map((arg) => {
+                    if (arg === null || arg === undefined) {
+                        return String(arg);
+                    }
+                    if (typeof arg === 'string') {
+                        return arg;
+                    }
+                    if (typeof arg === 'number' || typeof arg === 'boolean') {
+                        return String(arg);
+                    }
+                    try {
+                        return JSON.stringify(arg);
+                    } catch (error) {
+                        return Object.prototype.toString.call(arg);
+                    }
+                })
+                .join(' ');
+        };
+
+        const formatTimestamp = (timestamp) => {
+            if (!timestamp) {
+                return '';
+            }
+            try {
+                return new Date(timestamp).toLocaleTimeString();
+            } catch (error) {
+                return '';
+            }
+        };
+
+        const renderPreScriptOutput = () => {
+            const outputEl = elements.preScriptOutput;
+            const consoleEls = [elements.preScriptConsoleResponse].filter(Boolean);
+            const record = state.scriptOutputs.pre;
+
+            if (!record || !record.timestamp) {
+                if (outputEl) {
+                    outputEl.innerHTML = '<span class="script-output__empty">No pre-request script run yet.</span>';
+                }
+                consoleEls.forEach((el) => {
+                    el.innerHTML = '<div class="script-console__empty">Console idle. Send a request to view logs.</div>';
+                });
+                return;
+            }
+
+            const summaryParts = [];
+            const timestampLabel = formatTimestamp(record.timestamp);
+            if (timestampLabel) {
+                summaryParts.push(`<div class="script-output__meta">Last run ${escapeHtml(timestampLabel)}</div>`);
+            }
+            if (record.error) {
+                summaryParts.push(`<div class="script-test fail"><span class="script-test__name">Pre-request error</span><span class="script-test__error">${escapeHtml(record.error)}</span></div>`);
+            }
+
+            const logEntries = Array.isArray(record.logs) ? record.logs : [];
+            if (!record.error && !logEntries.length) {
+                summaryParts.push('<span class="script-output__empty">Pre-request script ran without console output.</span>');
+            }
+            if (!summaryParts.length) {
+                summaryParts.push('<span class="script-output__empty">Pre-request script ran.</span>');
+            }
+
+            if (outputEl) {
+                outputEl.innerHTML = summaryParts.join('');
+            }
+
+            consoleEls.forEach((el) => {
+                if (logEntries.length) {
+                    const logMarkup = logEntries
+                        .map((entry) => {
+                            const level = normalizeLogLevel(entry?.level);
+                            const label = (entry?.level || level || 'LOG').toString().toUpperCase();
+                            const message = formatLogArgs(entry?.args || []);
+                            return `<div class="script-log script-log--${level}"><span class="script-log__label">${escapeHtml(label)}</span><span>${escapeHtml(message)}</span></div>`;
+                        })
+                        .join('');
+                    el.innerHTML = logMarkup;
+                    el.scrollTop = el.scrollHeight;
+                } else {
+                    const emptyLabel = record.error
+                        ? 'No console output captured before the error.'
+                        : 'No console output.';
+                    el.innerHTML = `<div class="script-console__empty">${escapeHtml(emptyLabel)}</div>`;
+                }
+            });
+        };
+
+        const renderTestsScriptOutput = () => {
+            const outputEl = elements.testsScriptOutput;
+            if (!outputEl) {
+                return;
+            }
+            const record = state.scriptOutputs.tests;
+            if (!record || !record.timestamp) {
+                outputEl.innerHTML = '<span class="script-output__empty">No tests script run yet.</span>';
+                return;
+            }
+            const parts = [];
+            const timestampLabel = formatTimestamp(record.timestamp);
+            if (timestampLabel) {
+                parts.push(`<div class="script-output__meta">Last run ${escapeHtml(timestampLabel)}</div>`);
+            }
+
+            if (Array.isArray(record.tests) && record.tests.length) {
+                const passedCount = record.tests.filter((item) => item?.passed).length;
+                parts.push(`<div class="script-output__meta">Assertions ${passedCount}/${record.tests.length} passed</div>`);
+                const testMarkup = record.tests
+                    .map((item) => {
+                        const statusClass = item?.passed ? 'pass' : 'fail';
+                        const name = item?.name ? escapeHtml(item.name) : 'Unnamed test';
+                        const errorMessage = item?.error ? `<div class="script-test__error">${escapeHtml(item.error)}</div>` : '';
+                        return `<div class="script-test ${statusClass}"><span class="script-test__name">${name}</span>${errorMessage}</div>`;
+                    })
+                    .join('');
+                parts.push(`<div class="script-tests">${testMarkup}</div>`);
+            } else if (!record.error) {
+                parts.push('<span class="script-output__empty">No assertions recorded.</span>');
+            }
+
+            if (record.error) {
+                parts.push(`<div class="script-test fail"><span class="script-test__name">Tests script error</span><span class="script-test__error">${escapeHtml(record.error)}</span></div>`);
+            }
+
+            if (Array.isArray(record.logs) && record.logs.length) {
+                const logMarkup = record.logs
+                    .map((entry) => {
+                        const level = normalizeLogLevel(entry?.level);
+                        const label = (entry?.level || level || 'LOG').toString().toUpperCase();
+                        const message = formatLogArgs(entry?.args || []);
+                        return `<div class="script-log script-log--${level}"><span class="script-log__label">${escapeHtml(label)}</span><span>${escapeHtml(message)}</span></div>`;
+                    })
+                    .join('');
+                parts.push(logMarkup);
+            }
+
+            outputEl.innerHTML = parts.join('');
+        };
+
+        const renderScriptOutputs = () => {
+            renderPreScriptOutput();
+            renderTestsScriptOutput();
+        };
+
         const activateTab = (tabName) => {
             if (!tabButtons.length || !tabPanels.length) {
                 return;
@@ -1029,6 +2341,10 @@
                 panel.hidden = !isActive;
                 panel.setAttribute('aria-hidden', isActive ? 'false' : 'true');
             });
+            if (target === 'scripts') {
+                activateScriptTab(state.activeScriptTab || 'pre');
+                refreshScriptEditors();
+            }
             if (target === 'body') {
                 refreshRawEditor();
             }
@@ -1046,185 +2362,61 @@
             }
         };
 
-        const createOverrideTransform = (override = {}) => ({
-            id: override.id || createTransformRowId('override'),
-            path: override.path || '',
-            // type: 'simple' | 'external'
-            type: override.type || 'simple',
-            // when simple: use value/isRandom/charLimit as before
-            value: override.value === undefined ? '' : String(override.value),
-            // when external: provide externalJson (string) and encryptionKey (string)
-            externalJson: override.externalJson === undefined ? '' : String(override.externalJson),
-            externalName: override.externalName === undefined ? '' : String(override.externalName),
-            encryptionKey: override.encryptionKey === undefined ? '' : String(override.encryptionKey),
-            isRandom: !!override.isRandom,
-            charLimit: Number.isFinite(Number(override.charLimit)) && Number(override.charLimit) > 0 ? Number(override.charLimit) : null,
-        });
 
-        const createSignatureTransform = (signature = {}) => ({
-            id: signature.id || createTransformRowId('signature'),
-            targetPath: signature.targetPath || signature.target_path || signature.target || '',
-            algorithm: (signature.algorithm || SIGNATURE_ALGORITHMS[2].key).toLowerCase(),
-            components: signature.components || '',
-            storeAs: signature.storeAs || signature.store_as || '',
-        });
 
-        const renderBodyOverrides = () => {
-            ensureTransformState();
-            if (!overridesTable) {
-                return;
+        // Helper: apply a signature defined as type 'external'
+        // - row: signature row
+        // - overrideRows: array of override rows (to find the external override)
+        // - jsonBody: the current request JSON body (modified in-place)
+        // - signature: the computed signature string
+        // - resultOverrides: accumulator for storeAs variables
+        const applyExternalSignature = async (row, overrideRows, jsonBody, signature, resultOverrides) => {
+            // choose external override (prefer match by name/path)
+            const nameToFind = String(row.externalName || row.external_name || '').trim();
+            let extOverride = null;
+            if (nameToFind) {
+                extOverride = overrideRows.find((o) => o && o.type === 'external' && ((o.name && String(o.name) === nameToFind) || (o.externalName && String(o.externalName) === nameToFind) || (o.path && String(o.path) === nameToFind) || (o.id && String(o.id) === nameToFind)));
             }
-            const rows = state.builder.transforms.overrides;
-            if (!rows.length) {
-                overridesTable.innerHTML = '<tr class="empty"><td colspan="6" class="muted">No overrides defined.</td></tr>';
-                return;
+            if (!extOverride) {
+                extOverride = overrideRows.find((o) => o && o.type === 'external') || null;
             }
-            const markup = rows
-                .map((row) => {
-                    const safePath = escapeHtml(row.path || '');
-                    const safeValue = escapeHtml(row.value || '');
-                    const isRandomChecked = row.isRandom ? ' checked' : '';
-                    const charLimitVal = row.charLimit ? String(row.charLimit) : '';
-                    const type = row.type === 'external' ? 'external' : 'simple';
-                    const typeSelect = `<select class="kv-input body-override-type" data-field="type">
-                            <option value="simple"${type === 'simple' ? ' selected' : ''}>Simple</option>
-                            <option value="external"${type === 'external' ? ' selected' : ''}>External Object</option>
-                        </select>`;
-                    let externalJsonText = '';
-                    if (row.externalJson) {
-                        try {
-                            externalJsonText = formatJsonWithTemplates(String(row.externalJson));
-                        } catch (e) {
-                            externalJsonText = String(row.externalJson);
-                        }
-                    }
-                    const externalNameVal = escapeHtml(row.externalName || '');
-                    const externalFields = row.type === 'external' ?
-                        `<div class="override-external-fields">
-                            <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
-                                <input type="text" class="kv-input override-external-name" data-field="externalName" placeholder="External object name (optional)" value="${externalNameVal}" />
-                                <button type="button" class="btn btn-secondary override-external-format">Format</button>
-                            </div>
-                            <textarea class="kv-input override-external-json" data-field="externalJson" placeholder='{"pchannel":"pchannel","amount":"amount","pay_reference":"pay_reference","pmethod":"pmethod"}'>${escapeHtml(externalJsonText || '')}</textarea>
-                            <input type="text" class="kv-input override-encryption-key" data-field="encryptionKey" value="${escapeHtml(row.encryptionKey || '')}" placeholder="Encryption key (optional)" />
-                        </div>` : '';
-
-                    const mainRow = `<tr data-row-id="${row.id}">
-                        <td>${typeSelect}</td>
-                        <td><input type="text" class="kv-input body-override-input" data-field="path" value="${safePath}" placeholder="transaction.request_id" /></td>
-                        <td><input type="text" class="kv-input body-override-input override-value-input" data-field="value" value="${safeValue}" placeholder="New value" /></td>
-                        <td><input type="checkbox" class="override-is-random" data-field="isRandom"${isRandomChecked} aria-label="Is random" /></td>
-                        <td><input type="number" min="1" class="kv-input override-char-limit" data-field="charLimit" value="${escapeHtml(charLimitVal)}" placeholder="e.g. 32" ${row.isRandom ? '' : 'disabled'} /></td>
-                        <td class="kv-actions"><button type="button" class="kv-remove body-override-remove" data-row-id="${row.id}" aria-label="Remove override">×</button></td>
-                    </tr>`;
-
-                    const extraRow = row.type === 'external' ?
-                        `<tr class="override-external-row" data-row-id="${row.id}-external"><td colspan="6">${externalFields}</td></tr>` : '';
-
-                    return `${mainRow}${extraRow}`;
-                })
-                .join('');
-            overridesTable.innerHTML = markup;
-        };
-
-        const renderBodySignatures = () => {
-            ensureTransformState();
-            if (!signaturesTable) {
-                return;
+            if (!extOverride) {
+                // no external override available, fall back to returning the signature
+                return { applied: false, signature };
             }
-            const rows = state.builder.transforms.signatures;
-            if (!rows.length) {
-                signaturesTable.innerHTML = '<tr class="empty"><td colspan="5" class="muted">No signatures configured.</td></tr>';
-                return;
+            // build externalObj from whichever shape is present
+            let externalObj = {};
+            try {
+                if (extOverride.external_json !== undefined) {
+                    externalObj = extOverride.external_json || {};
+                } else if (extOverride.externalJson !== undefined) {
+                    externalObj = tryParseJsonSilent(String(extOverride.externalJson)) || {};
+                } else {
+                    externalObj = {};
+                }
+            } catch (e) {
+                externalObj = {};
             }
-            const markup = rows
-                .map((row) => {
-                    const safeTarget = escapeHtml(row.targetPath || '');
-                    const safeComponents = escapeHtml(row.components || '');
-                    const safeStoreAs = escapeHtml(row.storeAs || '');
-                    const algorithmOptions = SIGNATURE_ALGORITHMS.map((item) => `<option value="${item.key}"${item.key === row.algorithm ? ' selected' : ''}>${item.label}</option>`).join('');
-                    return `<tr data-row-id="${row.id}">
-                        <td><input type="text" class="kv-input body-signature-input" data-field="targetPath" value="${safeTarget}" placeholder="transaction.signature" /></td>
-                        <td><select class="kv-input body-signature-select" data-field="algorithm">${algorithmOptions}</select></td>
-                        <td><textarea class="kv-input body-signature-textarea" data-field="components" placeholder="path:transaction.merchantid\npath:transaction.request_id\nliteral:SECRET">${safeComponents}</textarea></td>
-                        <td><input type="text" class="kv-input body-signature-input" data-field="storeAs" value="${safeStoreAs}" placeholder="signature variable (optional)" /></td>
-                        <td class="kv-actions"><button type="button" class="kv-remove body-signature-remove" data-row-id="${row.id}" aria-label="Remove signature">×</button></td>
-                    </tr>`;
-                })
-                .join('');
-            signaturesTable.innerHTML = markup;
-        };
-
-        const renderBodyTools = () => {
-            renderBodyOverrides();
-            renderBodySignatures();
-        };
-
-        const addOverrideTransform = () => {
-            ensureTransformState();
-            state.builder.transforms.overrides.push(createOverrideTransform());
-            renderBodyOverrides();
-        };
-
-        const removeOverrideTransform = (rowId) => {
-            ensureTransformState();
-            state.builder.transforms.overrides = state.builder.transforms.overrides.filter((row) => row.id !== rowId);
-            renderBodyOverrides();
-        };
-
-        const updateOverrideTransform = (rowId, field, value) => {
-            ensureTransformState();
-            const row = state.builder.transforms.overrides.find((item) => item.id === rowId);
-            if (!row) {
-                return;
+            // set signature inside external object at externalPath
+            const extPathToWrite = (row.externalPath || row.external_path || 'signature');
+            setValueAtObjectPath(externalObj, extPathToWrite, signature);
+            // if encrypted flag, encode externalObj and set that string at targetPath; else set the object
+            const targetPath = String(row.targetPath || row.target_path || row.target || '').trim();
+            if (row.encrypted) {
+                const txt = JSON.stringify(externalObj);
+                let enc = '';
+                try {
+                    if (typeof btoa === 'function') enc = btoa(unescape(encodeURIComponent(txt))); else enc = txt;
+                } catch (e) { enc = txt; }
+                setValueAtObjectPath(jsonBody, targetPath, enc);
+            } else {
+                setValueAtObjectPath(jsonBody, targetPath, externalObj);
             }
-            if (field === 'path') {
-                row.path = value;
-            } else if (field === 'value') {
-                row.value = value;
-            } else if (field === 'type') {
-                row.type = value === 'external' ? 'external' : 'simple';
-            } else if (field === 'externalJson') {
-                row.externalJson = value;
-            } else if (field === 'externalName') {
-                row.externalName = value;
-            } else if (field === 'encryptionKey') {
-                row.encryptionKey = value;
-            } else if (field === 'isRandom') {
-                row.isRandom = !!value;
-            } else if (field === 'charLimit') {
-                const n = Number(value);
-                row.charLimit = Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+            // optionally store signature variable
+            if (row.storeAs && String(row.storeAs).trim()) {
+                resultOverrides[String(row.storeAs).trim()] = signature;
             }
-        };
-
-        const addSignatureTransform = () => {
-            ensureTransformState();
-            state.builder.transforms.signatures.push(createSignatureTransform());
-            renderBodySignatures();
-        };
-
-        const removeSignatureTransform = (rowId) => {
-            ensureTransformState();
-            state.builder.transforms.signatures = state.builder.transforms.signatures.filter((row) => row.id !== rowId);
-            renderBodySignatures();
-        };
-
-        const updateSignatureTransform = (rowId, field, value) => {
-            ensureTransformState();
-            const row = state.builder.transforms.signatures.find((item) => item.id === rowId);
-            if (!row) {
-                return;
-            }
-            if (field === 'targetPath') {
-                row.targetPath = value;
-            } else if (field === 'algorithm') {
-                row.algorithm = value.toLowerCase();
-            } else if (field === 'components') {
-                row.components = value;
-            } else if (field === 'storeAs') {
-                row.storeAs = value;
-            }
+            return { applied: true, signature };
         };
 
         const applyBodyTransforms = async (jsonBody, transforms, overridesAccumulator, templateResolver) => {
@@ -1266,28 +2458,15 @@
                     // after signatures are computed and possibly stored in resultOverrides (done below), encrypt externalObj
                     const externalJsonText = JSON.stringify(externalObj);
                     let encrypted = '';
-                    // prefer CryptoJS AES if available and key provided
+                    // client-side encryption key removed — always use base64 encoding (or raw text if btoa unavailable)
                     try {
-                        if (typeof window !== 'undefined' && window.CryptoJS && row.encryptionKey) {
-                            const key = row.encryptionKey || '';
-                            // use AES encrypt with key as passphrase, output base64
-                            const cipher = window.CryptoJS.AES.encrypt(externalJsonText, key);
-                            encrypted = String(cipher.toString());
-                        } else {
-                            // fallback: base64 encode
-                            if (typeof btoa === 'function') {
-                                encrypted = btoa(unescape(encodeURIComponent(externalJsonText)));
-                            } else {
-                                encrypted = externalJsonText;
-                            }
-                        }
-                    } catch (e) {
-                        // fallback to base64
-                        try {
+                        if (typeof btoa === 'function') {
                             encrypted = btoa(unescape(encodeURIComponent(externalJsonText)));
-                        } catch (e2) {
+                        } else {
                             encrypted = externalJsonText;
                         }
+                    } catch (e) {
+                        encrypted = externalJsonText;
                     }
 
                     setValueAtObjectPath(jsonBody, path, encrypted);
@@ -1340,6 +2519,20 @@
                 if (!components.length) {
                     continue;
                 }
+                // If signature targets an external object, prefer that external override for resolving external.* components
+                let extOverrideForSig = null;
+                if (row.type === 'external') {
+                    // try find external override by name/path
+                    const nameToFind = String(row.externalName || row.external_name || '').trim();
+                    if (nameToFind) {
+                        extOverrideForSig = overrideRows.find((o) => o && o.type === 'external' && ((o.name && String(o.name) === nameToFind) || (o.externalName && String(o.externalName) === nameToFind) || (o.path && String(o.path) === nameToFind) || (o.id && String(o.id) === nameToFind)));
+                    }
+                    if (!extOverrideForSig) {
+                        // fallback to first external override
+                        extOverrideForSig = overrideRows.find((o) => o && o.type === 'external') || null;
+                    }
+                }
+
                 const rawParts = components.map((component) => {
                     if (component.type === 'literal') {
                         return resolveLiteral(component.value);
@@ -1348,11 +2541,19 @@
                     // support external.* paths by resolving into external object if present on transforms
                     if (compPath.startsWith('external.')) {
                         const extPath = compPath.slice('external.'.length);
-                        // try to find a matching external override (first one)
-                        const extOverride = (overrideRows.find((o) => o.type === 'external') || {});
+                        // decide which external override to use: signature-specific or generic
+                        const extOverride = extOverrideForSig || (overrideRows.find((o) => o.type === 'external') || {});
                         let externalObj = {};
                         try {
-                            externalObj = tryParseJsonSilent(extOverride.externalJson) || {};
+                            if (extOverride) {
+                                if (extOverride.external_json !== undefined) {
+                                    externalObj = extOverride.external_json || {};
+                                } else if (extOverride.externalJson !== undefined) {
+                                    externalObj = tryParseJsonSilent(String(extOverride.externalJson)) || {};
+                                } else {
+                                    externalObj = {};
+                                }
+                            }
                         } catch (e) {
                             externalObj = {};
                         }
@@ -1369,6 +2570,15 @@
                     const message = error instanceof Error ? error.message : 'Unknown hashing error';
                     throw new Error(`Unable to compute signature for '${targetPath}': ${message}`);
                 }
+                // handle external-type signature: write signature into external object and pass object or encrypted string to targetPath
+                if (row.type === 'external') {
+                    const res = await applyExternalSignature(row, overrideRows, jsonBody, signature, resultOverrides);
+                    if (res && res.applied) {
+                        continue;
+                    }
+                    // if not applied, fallthrough to simple behavior
+                }
+                // default/simple signature writes signature value to targetPath
                 setValueAtObjectPath(jsonBody, targetPath, signature);
                 if (row.storeAs && String(row.storeAs).trim()) {
                     resultOverrides[String(row.storeAs).trim()] = signature;
@@ -1636,6 +2846,9 @@
         };
 
         initializeRawEditor();
+        initializeScriptContainers();
+        refreshScriptEditors();
+        activateScriptTab(state.activeScriptTab);
 
         const renderBodyFormData = () => {
             const rows = state.builder.bodyFormData;
@@ -1748,15 +2961,24 @@
             renderHeaders();
             updateAuthUI();
             updateBodyUI();
-            renderBodyTools();
+            refreshScriptEditors();
+            renderScriptOutputs();
             activateTab(state.activeTab || 'params');
             updateRunButtonState();
         };
 
         const resetBuilderState = () => {
             state.builder = getInitialBuilderState();
-            state.bodyTools.overridesIdSeed = 0;
-            state.bodyTools.signaturesIdSeed = 0;
+            state.activeScriptTab = 'pre';
+            state.scriptOutputs = {
+                pre: { logs: [], error: null, timestamp: null },
+                tests: { logs: [], error: null, tests: [], timestamp: null },
+            };
+            state.scriptContexts = {
+                pre: null,
+                requestSnapshot: null,
+                environmentId: null,
+            };
         };
 
         const setUrlValue = (value, parseParams = true) => {
@@ -1902,10 +3124,87 @@
                 : {};
             const overrideItems = Array.isArray(rawTransforms.overrides) ? rawTransforms.overrides : [];
             const signatureItems = Array.isArray(rawTransforms.signatures) ? rawTransforms.signatures : [];
-            state.builder.transforms.overrides = overrideItems.map((item) => createOverrideTransform(item));
-            state.builder.transforms.signatures = signatureItems.map((item) => createSignatureTransform(item));
-            state.builder.scripts.pre = '';
-            state.builder.scripts.post = '';
+            // normalize saved override/signature shapes for runtime consumption
+            const convertSavedOverrideToState = (saved) => {
+                if (!saved || typeof saved !== 'object') {
+                    return null;
+                }
+                const path = saved.path === '' ? '' : (saved.path || '');
+                const type = saved.type === 'external' ? 'external' : 'simple';
+                if (type === 'external') {
+                    let externalJsonText = '';
+                    if (saved.externalJson !== undefined && saved.externalJson !== null) {
+                        externalJsonText = String(saved.externalJson);
+                    } else if (saved.external_json !== undefined && saved.external_json !== null) {
+                        try {
+                            externalJsonText = JSON.stringify(saved.external_json, null, 2);
+                        } catch (error) {
+                            externalJsonText = String(saved.external_json);
+                        }
+                    } else if (saved.external_json_raw !== undefined && saved.external_json_raw !== null) {
+                        if (typeof saved.external_json_raw === 'object') {
+                            try {
+                                externalJsonText = JSON.stringify(saved.external_json_raw, null, 2);
+                            } catch (error) {
+                                externalJsonText = '';
+                            }
+                        } else {
+                            externalJsonText = String(saved.external_json_raw);
+                        }
+                    }
+
+                    let externalName = saved.externalName || saved.external_name || saved.name || '';
+                    if (!externalName && saved.external_json && typeof saved.external_json === 'object' && saved.external_json.name) {
+                        externalName = String(saved.external_json.name);
+                    }
+                    if (!externalName && saved.external_json_raw && typeof saved.external_json_raw === 'object' && saved.external_json_raw.name) {
+                        externalName = String(saved.external_json_raw.name);
+                    }
+                    if (!externalName && path) {
+                        externalName = String(path);
+                    }
+
+                    return {
+                        path,
+                        type: 'external',
+                        externalJson: externalJsonText,
+                        externalName,
+                    };
+                }
+
+                return {
+                    path,
+                    type: 'simple',
+                    value: saved.value ?? saved.val ?? '',
+                    isRandom: !!saved.isRandom,
+                    charLimit: Number.isFinite(Number(saved.charLimit)) && Number(saved.charLimit) > 0 ? Number(saved.charLimit) : null,
+                };
+            };
+
+            const convertSavedSignatureToState = (saved) => {
+                if (!saved || typeof saved !== 'object') {
+                    return null;
+                }
+                return {
+                    type: saved.type === 'external' ? 'external' : 'simple',
+                    targetPath: saved.targetPath || saved.target_path || saved.target || '',
+                    algorithm: (saved.algorithm || SIGNATURE_ALGORITHMS[2].key).toLowerCase(),
+                    components: saved.components || '',
+                    storeAs: saved.storeAs || saved.store_as || '',
+                    externalName: saved.externalName || saved.external_name || saved.external || '',
+                    externalPath: saved.externalPath || saved.external_path || 'signature',
+                    encrypted: !!saved.encrypted,
+                };
+            };
+
+            state.builder.transforms.overrides = overrideItems
+                .map((item) => convertSavedOverrideToState(item))
+                .filter(Boolean);
+            state.builder.transforms.signatures = signatureItems
+                .map((item) => convertSavedSignatureToState(item))
+                .filter(Boolean);
+            setScriptValue('pre', request.pre_request_script || '');
+            setScriptValue('tests', request.tests_script || '');
 
             if (elements.runCollectionButton) {
                 elements.runCollectionButton.disabled = false;
@@ -2143,6 +3442,51 @@
         };
 
         const getCurrentFilterText = () => (elements.search ? elements.search.value || '' : '');
+
+        const getFallbackCollectionId = (collectionId) => {
+            const numericId = Number(collectionId);
+            if (!Number.isFinite(numericId)) {
+                return null;
+            }
+            const collections = state.collections || [];
+            const index = collections.findIndex((item) => item.id === numericId);
+            if (index === -1) {
+                return null;
+            }
+            const neighbor = collections[index + 1] || collections[index - 1] || null;
+            return neighbor ? neighbor.id : null;
+        };
+
+        const deleteCollectionWithConfirmation = async (collection) => {
+            if (!collection) {
+                return;
+            }
+            const confirmed = window.confirm(
+                `Delete collection "${collection.name}"? All requests inside it will be removed.`,
+            );
+            if (!confirmed) {
+                setStatus('Collection delete cancelled.', 'neutral');
+                return;
+            }
+            const detailUrl = getCollectionDetailUrl(collection.id);
+            if (!detailUrl) {
+                setStatus('Collection endpoint unavailable.', 'error');
+                return;
+            }
+            const wasSelected = state.selectedCollectionId === collection.id;
+            const fallbackCollectionId = wasSelected ? getFallbackCollectionId(collection.id) : state.selectedCollectionId;
+            setStatus('Deleting collection...', 'loading');
+            try {
+                await deleteResource(detailUrl);
+                await refreshCollections({
+                    preserveSelection: !wasSelected,
+                    focusCollectionId: wasSelected ? fallbackCollectionId : state.selectedCollectionId,
+                });
+                setStatus('Collection deleted.', 'success');
+            } catch (error) {
+                setStatus(error instanceof Error ? error.message : 'Failed to delete collection.', 'error');
+            }
+        };
 
         const hideMenuForCollection = (collectionId) => {
             if (!elements.collectionsList || collectionId === null || collectionId === undefined) {
@@ -4000,6 +5344,20 @@
                 });
 
                 menu.appendChild(addRequestButton);
+
+                const deleteCollectionButton = document.createElement('button');
+                deleteCollectionButton.type = 'button';
+                deleteCollectionButton.className = 'collection-menu-item collection-menu-item--danger';
+                deleteCollectionButton.textContent = 'Delete Collection';
+                deleteCollectionButton.addEventListener('click', async (event) => {
+                    event.stopPropagation();
+                    closeDirectoryMenu();
+                    hideMenuForCollection(collection.id);
+                    state.openCollectionMenuId = null;
+                    await deleteCollectionWithConfirmation(collection);
+                });
+
+                menu.appendChild(deleteCollectionButton);
                 menuWrapper.appendChild(menuButton);
                 menuWrapper.appendChild(menu);
                 header.appendChild(menuWrapper);
@@ -4910,6 +6268,7 @@
                 elements.responseHeaders.textContent = '{}';
                 resetResponseBodyState();
                 elements.responseAssertions.innerHTML = '<p class="muted">No assertions evaluated.</p>';
+                renderTestsScriptOutput();
                 return;
             }
 
@@ -4965,6 +6324,8 @@
             } else {
                 elements.responseAssertions.innerHTML = '<p class="muted">No assertions evaluated for this request.</p>';
             }
+
+            renderTestsScriptOutput();
         };
 
         const cacheActiveResponse = (payload, cacheKey = state.activeResponseKey) => {
@@ -5093,8 +6454,520 @@
             return { proxy, buffer };
         };
 
-        const runPreRequestScript = (scriptText, { environmentId = null, requestSnapshot }) => {
+        const deepEqual = (a, b) => {
+            if (a === b) {
+                return true;
+            }
+            if (Number.isNaN(a) && Number.isNaN(b)) {
+                return true;
+            }
+            if (typeof a !== typeof b) {
+                return false;
+            }
+            if (a === null || b === null) {
+                return false;
+            }
+            if (Array.isArray(a)) {
+                if (!Array.isArray(b) || a.length !== b.length) {
+                    return false;
+                }
+                for (let index = 0; index < a.length; index += 1) {
+                    if (!deepEqual(a[index], b[index])) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            if (typeof a === 'object') {
+                const keysA = Object.keys(a);
+                const keysB = Object.keys(b);
+                if (keysA.length !== keysB.length) {
+                    return false;
+                }
+                for (let i = 0; i < keysA.length; i += 1) {
+                    const key = keysA[i];
+                    if (!Object.prototype.hasOwnProperty.call(b, key) || !deepEqual(a[key], b[key])) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            return false;
+        };
+
+        const formatAssertionValue = (value) => {
+            if (typeof value === 'string') {
+                return `"${value}"`;
+            }
+            if (typeof value === 'number' || typeof value === 'boolean') {
+                return String(value);
+            }
+            if (value === null) {
+                return 'null';
+            }
+            if (value === undefined) {
+                return 'undefined';
+            }
+            try {
+                return JSON.stringify(value);
+            } catch (error) {
+                return Object.prototype.toString.call(value);
+            }
+        };
+
+        const createExpectation = (actual, negate = false) => {
+            const expectation = {};
+
+            const assertCondition = (condition, message, negatedMessage) => {
+                if (!negate && !condition) {
+                    throw new Error(message);
+                }
+                if (negate && condition) {
+                    throw new Error(negatedMessage || message);
+                }
+            };
+
+            const to = {};
+            expectation.to = to;
+
+            const addMethod = (target, name, handler) => {
+                // eslint-disable-next-line no-param-reassign
+                target[name] = (...args) => {
+                    handler(...args);
+                    return expectation;
+                };
+            };
+
+            addMethod(to, 'equal', (expected) => {
+                const msg = `Expected ${formatAssertionValue(actual)} to equal ${formatAssertionValue(expected)}`;
+                const negated = `Expected ${formatAssertionValue(actual)} not to equal ${formatAssertionValue(expected)}`;
+                assertCondition(actual === expected, msg, negated);
+            });
+
+            addMethod(to, 'eql', (expected) => {
+                const msg = `Expected values to deeply equal. Expected ${formatAssertionValue(expected)} but received ${formatAssertionValue(actual)}`;
+                const negated = 'Expected values not to deeply equal.';
+                assertCondition(deepEqual(actual, expected), msg, negated);
+            });
+
+            to.deep = {
+                equal(expected) {
+                    const msg = `Expected values to deeply equal. Expected ${formatAssertionValue(expected)} but received ${formatAssertionValue(actual)}`;
+                    const negated = 'Expected values not to deeply equal.';
+                    assertCondition(deepEqual(actual, expected), msg, negated);
+                    return expectation;
+                },
+            };
+
+            addMethod(to, 'match', (pattern) => {
+                const regex = pattern instanceof RegExp ? pattern : new RegExp(String(pattern));
+                const valueStr = typeof actual === 'string' ? actual : formatAssertionValue(actual);
+                const msg = `Expected ${valueStr} to match ${regex}.`;
+                const negated = `Expected ${valueStr} not to match ${regex}.`;
+                assertCondition(regex.test(valueStr), msg, negated);
+            });
+
+            const includeHandler = (needle) => {
+                let condition = false;
+                if (typeof actual === 'string') {
+                    condition = actual.includes(String(needle));
+                } else if (Array.isArray(actual)) {
+                    condition = actual.some((item) => deepEqual(item, needle));
+                } else if (actual && typeof actual === 'object') {
+                    condition = Object.values(actual).some((value) => deepEqual(value, needle));
+                }
+                const msg = `Expected ${formatAssertionValue(actual)} to include ${formatAssertionValue(needle)}.`;
+                const negated = `Expected value not to include ${formatAssertionValue(needle)}.`;
+                assertCondition(condition, msg, negated);
+            };
+
+            addMethod(to, 'include', includeHandler);
+            addMethod(to, 'contain', includeHandler);
+
+            Object.defineProperty(to, 'exist', {
+                get() {
+                    const msg = 'Expected value to exist.';
+                    const negated = 'Expected value not to exist.';
+                    assertCondition(actual !== undefined && actual !== null, msg, negated);
+                    return expectation;
+                },
+            });
+
+            const be = {};
+            const addBeGetter = (name, validator, message, negatedMessage) => {
+                Object.defineProperty(be, name, {
+                    get() {
+                        assertCondition(validator(), message, negatedMessage);
+                        return expectation;
+                    },
+                });
+            };
+
+            addMethod(be, 'a', (type) => {
+                let actualType = typeof actual;
+                if (Array.isArray(actual)) {
+                    actualType = 'array';
+                } else if (actual === null) {
+                    actualType = 'null';
+                }
+                const msg = `Expected type ${type} but found ${actualType}.`;
+                const negated = `Expected type not to be ${type}.`;
+                assertCondition(actualType === type, msg, negated);
+            });
+            be.an = be.a;
+
+            addMethod(be, 'above', (value) => {
+                const msg = `Expected ${formatAssertionValue(actual)} to be above ${formatAssertionValue(value)}.`;
+                const negated = `Expected value not to be above ${formatAssertionValue(value)}.`;
+                assertCondition(Number(actual) > Number(value), msg, negated);
+            });
+
+            addMethod(be, 'atLeast', (value) => {
+                const msg = `Expected ${formatAssertionValue(actual)} to be at least ${formatAssertionValue(value)}.`;
+                const negated = `Expected value not to be at least ${formatAssertionValue(value)}.`;
+                assertCondition(Number(actual) >= Number(value), msg, negated);
+            });
+
+            addMethod(be, 'below', (value) => {
+                const msg = `Expected ${formatAssertionValue(actual)} to be below ${formatAssertionValue(value)}.`;
+                const negated = `Expected value not to be below ${formatAssertionValue(value)}.`;
+                assertCondition(Number(actual) < Number(value), msg, negated);
+            });
+
+            addMethod(be, 'atMost', (value) => {
+                const msg = `Expected ${formatAssertionValue(actual)} to be at most ${formatAssertionValue(value)}.`;
+                const negated = `Expected value not to be at most ${formatAssertionValue(value)}.`;
+                assertCondition(Number(actual) <= Number(value), msg, negated);
+            });
+
+            be.greaterThan = be.above;
+            be.lessThan = be.below;
+
+            addBeGetter('true', () => actual === true, 'Expected value to be true.', 'Expected value not to be true.');
+            addBeGetter('false', () => actual === false, 'Expected value to be false.', 'Expected value not to be false.');
+            addBeGetter('ok', () => Boolean(actual), 'Expected value to be truthy.', 'Expected value to be falsy.');
+            addBeGetter('undefined', () => actual === undefined, 'Expected value to be undefined.', 'Expected value not to be undefined.');
+            addBeGetter('null', () => actual === null, 'Expected value to be null.', 'Expected value not to be null.');
+            addBeGetter('empty', () => {
+                if (actual == null) {
+                    return true;
+                }
+                if (typeof actual === 'string' || Array.isArray(actual)) {
+                    return actual.length === 0;
+                }
+                if (actual && typeof actual === 'object') {
+                    return Object.keys(actual).length === 0;
+                }
+                return false;
+            }, 'Expected value to be empty.', 'Expected value not to be empty.');
+
+            to.be = be;
+
+            const have = {};
+            addMethod(have, 'property', (name, expected) => {
+                const hasProp = actual !== null && typeof actual === 'object' && Object.prototype.hasOwnProperty.call(actual, name);
+                let condition = hasProp;
+                if (expected !== undefined) {
+                    condition = condition && deepEqual(actual[name], expected);
+                }
+                const expectationText = expected !== undefined
+                    ? `property '${name}' equal to ${formatAssertionValue(expected)}`
+                    : `property '${name}'`;
+                const msg = `Expected object to have ${expectationText}.`;
+                const negated = `Expected object not to have ${expectationText}.`;
+                assertCondition(condition, msg, negated);
+            });
+
+            const handleLength = (expected) => {
+                const lengthValue = actual != null && typeof actual.length === 'number' ? actual.length : NaN;
+                const msg = `Expected length ${formatAssertionValue(expected)} but found ${formatAssertionValue(lengthValue)}.`;
+                const negated = `Expected length not to be ${formatAssertionValue(expected)}.`;
+                assertCondition(lengthValue === expected, msg, negated);
+            };
+
+            addMethod(have, 'length', handleLength);
+            addMethod(have, 'lengthOf', handleLength);
+
+            addMethod(have, 'keys', (...keys) => {
+                const list = Array.isArray(keys[0]) ? keys[0] : keys;
+                const actualKeys = actual && typeof actual === 'object' ? Object.keys(actual) : [];
+                const condition = list.every((key) => actualKeys.includes(key));
+                const msg = `Expected object to include keys ${formatAssertionValue(list)}.`;
+                const negated = `Expected object not to include keys ${formatAssertionValue(list)}.`;
+                assertCondition(condition, msg, negated);
+            });
+
+            to.have = have;
+
+            Object.defineProperty(expectation, 'not', {
+                get() {
+                    return createExpectation(actual, !negate);
+                },
+            });
+
+            Object.defineProperty(to, 'not', {
+                get() {
+                    return createExpectation(actual, !negate).to;
+                },
+            });
+
+            return expectation;
+        };
+
+        const createResponseExpectation = (snapshot) => {
+            const expectation = {};
+
+            const applyAssertion = (negate, condition, message, negatedMessage) => {
+                if (!negate && !condition) {
+                    throw new Error(message);
+                }
+                if (negate && condition) {
+                    throw new Error(negatedMessage || message);
+                }
+            };
+
+            const findHeaderValue = (name) => {
+                if (!name || !snapshot || !snapshot.headers) {
+                    return undefined;
+                }
+                const lower = String(name).toLowerCase();
+                const entries = Object.entries(snapshot.headers);
+                for (let i = 0; i < entries.length; i += 1) {
+                    const [key, value] = entries[i];
+                    if (key.toLowerCase() === lower) {
+                        return value;
+                    }
+                }
+                return undefined;
+            };
+
+            const normalizeHeaderValue = (value) => {
+                if (Array.isArray(value)) {
+                    return value.map((item) => (item === undefined || item === null ? '' : String(item))).join(', ');
+                }
+                if (value === undefined || value === null) {
+                    return undefined;
+                }
+                return String(value);
+            };
+
+            const bodyText = snapshot && typeof snapshot.body === 'string'
+                ? snapshot.body
+                : snapshot && snapshot.body !== undefined && snapshot.body !== null
+                    ? String(snapshot.body)
+                    : '';
+
+            const buildTo = (negate) => {
+                const to = {};
+
+                const have = {};
+                have.status = (expected) => {
+                    const actualStatus = snapshot?.status;
+                    const message = `Expected response status ${expected} but received ${actualStatus ?? 'N/A'}.`;
+                    const negatedMessage = `Expected response status not to be ${expected}.`;
+                    applyAssertion(negate, actualStatus === expected, message, negatedMessage);
+                    return expectation;
+                };
+
+                have.header = (name, value) => {
+                    const raw = findHeaderValue(name);
+                    const normalized = normalizeHeaderValue(raw);
+                    const hasHeader = normalized !== undefined;
+                    let condition = hasHeader;
+                    if (value !== undefined && value !== null) {
+                        condition = condition && normalized !== undefined && normalized.includes(String(value));
+                    }
+                    const expectationText = value !== undefined && value !== null
+                        ? `header '${name}' including '${value}'`
+                        : `header '${name}'`;
+                    const message = `Expected response to include ${expectationText}.`;
+                    const negatedMessage = `Expected response not to include ${expectationText}.`;
+                    applyAssertion(negate, condition, message, negatedMessage);
+                    return expectation;
+                };
+
+                have.jsonBody = (expected) => {
+                    const message = 'Expected response JSON to match expectation.';
+                    const negatedMessage = 'Expected response JSON not to match expectation.';
+                    applyAssertion(negate, deepEqual(snapshot?.json, expected), message, negatedMessage);
+                    return expectation;
+                };
+
+                have.body = (expected) => {
+                    let condition = false;
+                    if (expected instanceof RegExp) {
+                        condition = expected.test(bodyText);
+                    } else if (expected !== undefined && expected !== null) {
+                        condition = bodyText.includes(String(expected));
+                    }
+                    const message = 'Expected response body to satisfy expectation.';
+                    const negatedMessage = 'Expected response body not to satisfy expectation.';
+                    applyAssertion(negate, condition, message, negatedMessage);
+                    return expectation;
+                };
+
+                to.have = have;
+
+                const be = {};
+                be.success = () => {
+                    const status = snapshot?.status;
+                    const condition = typeof status === 'number' ? status >= 200 && status < 300 : false;
+                    const message = `Expected response to be successful (2xx) but received ${status ?? 'N/A'}.`;
+                    const negatedMessage = 'Expected response not to be successful (2xx).';
+                    applyAssertion(negate, condition, message, negatedMessage);
+                    return expectation;
+                };
+
+                to.be = be;
+
+                Object.defineProperty(to, 'not', {
+                    get() {
+                        return buildTo(!negate);
+                    },
+                });
+
+                return to;
+            };
+
+            const to = buildTo(false);
+            expectation.to = to;
+            Object.defineProperty(expectation, 'not', {
+                get() {
+                    return { to: buildTo(true) };
+                },
+            });
+            return expectation;
+        };
+
+        const createPmResponseInterface = (snapshot) => {
+            const safeSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : {};
+            const headers = safeSnapshot.headers && typeof safeSnapshot.headers === 'object' ? { ...safeSnapshot.headers } : {};
+
+            const findHeader = (name) => {
+                if (!name) {
+                    return undefined;
+                }
+                const lower = String(name).toLowerCase();
+                const entries = Object.entries(headers);
+                for (let i = 0; i < entries.length; i += 1) {
+                    const [key, value] = entries[i];
+                    if (key.toLowerCase() === lower) {
+                        return value;
+                    }
+                }
+                return undefined;
+            };
+
+            const rawBody = typeof safeSnapshot.body === 'string'
+                ? safeSnapshot.body
+                : safeSnapshot.body !== undefined && safeSnapshot.body !== null
+                    ? String(safeSnapshot.body)
+                    : '';
+            const parsedJson = safeSnapshot.json !== undefined ? safeSnapshot.json : tryParseJsonSilent(rawBody);
+            const expectation = createResponseExpectation({
+                status: safeSnapshot.status,
+                statusText: safeSnapshot.statusText,
+                headers,
+                body: rawBody,
+                json: parsedJson,
+                elapsed: safeSnapshot.elapsed,
+            });
+
+            const headersApi = {
+                get(name) {
+                    const value = findHeader(name);
+                    if (Array.isArray(value)) {
+                        return value[0];
+                    }
+                    return value;
+                },
+                has(name) {
+                    return findHeader(name) !== undefined;
+                },
+                toJSON() {
+                    return { ...headers };
+                },
+                all() {
+                    return { ...headers };
+                },
+            };
+
+            return {
+                code: safeSnapshot.status ?? null,
+                status: safeSnapshot.statusText || '',
+                responseTime: safeSnapshot.elapsed ?? null,
+                reason: safeSnapshot.statusText || '',
+                headers: headersApi,
+                cookies: [],
+                size: {
+                    body: rawBody.length,
+                    headers: Object.keys(headers).length,
+                    total: rawBody.length,
+                },
+                json() {
+                    return parsedJson;
+                },
+                text() {
+                    return rawBody;
+                },
+                body: rawBody,
+                stream() {
+                    return rawBody;
+                },
+                to: expectation.to,
+                not: expectation.not,
+            };
+        };
+
+        const createSandboxRequire = (modules = {}) => {
+            const registry = new Map();
+            const register = (names, value) => {
+                if (!Array.isArray(names)) {
+                    return;
+                }
+                if (value === undefined || value === null) {
+                    return;
+                }
+                names
+                    .map((name) => (name === undefined || name === null ? '' : String(name).trim()).toLowerCase())
+                    .filter(Boolean)
+                    .forEach((key) => {
+                        registry.set(key, value);
+                    });
+            };
+
+            Object.entries(modules).forEach(([name, value]) => {
+                register([name], value);
+            });
+
+            return (request) => {
+                const rawName = request === undefined || request === null ? '' : String(request);
+                const normalized = rawName.trim().toLowerCase();
+                if (!normalized) {
+                    throw new Error('Module name is required for require().');
+                }
+                if (registry.has(normalized)) {
+                    return registry.get(normalized);
+                }
+                if (normalized.startsWith('crypto-js') || normalized.startsWith('cryptojs')) {
+                    const cryptoModule = registry.get('crypto-js') || registry.get('cryptojs');
+                    if (cryptoModule) {
+                        return cryptoModule;
+                    }
+                }
+                if (normalized === 'moment-timezone' || normalized.startsWith('moment')) {
+                    const momentModule = registry.get('moment') || registry.get('moment-timezone');
+                    if (momentModule) {
+                        return momentModule;
+                    }
+                }
+                throw new Error(`Module '${rawName}' is not available in the API tester sandbox.`);
+            };
+        };
+
+        const runPreRequestScript = async (scriptText, { environmentId = null, requestSnapshot }) => {
             const trimmed = (scriptText || '').trim();
+            const cryptoJs = await ensureCryptoJsReady();
 
             const environmentInstance = environmentId !== null ? getEnvironmentById(environmentId) : null;
             const baseEnvironmentStore = cloneVariableStore(environmentInstance?.variables);
@@ -5113,6 +6986,7 @@
                     onMutate: () => {
                         saveStoredGlobals(state.globalVariables);
                     },
+                    fallbackStores: [workingEnvironmentStore],
                 }),
             );
 
@@ -5136,7 +7010,7 @@
                 method: requestSnapshot?.method || 'GET',
                 url: requestSnapshot?.url || '',
                 headers: { ...(requestSnapshot?.headers || {}) },
-                body: { ...(requestSnapshot?.body || {}) },
+                body: createCoercibleRequestBody(requestSnapshot?.body || {}),
             };
 
             const pm = {
@@ -5156,14 +7030,29 @@
 
             if (trimmed) {
                 try {
-                    const scriptFunction = new Function('pm', 'postman', 'console', 'require', 'module', 'exports', 'process', 'global', 'window', 'document', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'XMLHttpRequest', 'fetch', 'FormData', 'Headers', 'Request', 'Response', 'btoa', 'atob', 'URLSearchParams', 'CryptoJS', `"use strict";\n${trimmed}`);
+                    if (!cryptoJs) {
+                        throw new Error('CryptoJS failed to load. Refresh the page and ensure static assets are available.');
+                    }
+                    const momentLib = await ensureMomentReady();
+                    const module = { exports: {} };
+                    const exports = module.exports;
+                    const moduleMap = {
+                        'crypto-js': cryptoJs,
+                        cryptojs: cryptoJs,
+                    };
+                    if (momentLib) {
+                        moduleMap.moment = momentLib;
+                        moduleMap['moment-timezone'] = momentLib;
+                    }
+                    const sandboxRequire = createSandboxRequire(moduleMap);
+                    const scriptFunction = new Function('pm', 'postman', 'console', 'require', 'module', 'exports', 'process', 'global', 'window', 'document', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'XMLHttpRequest', 'fetch', 'FormData', 'Headers', 'Request', 'Response', 'btoa', 'atob', 'URLSearchParams', `"use strict";\n${trimmed}`);
                     scriptFunction(
                         pm,
                         postman,
                         consoleProxy,
-                        undefined,
-                        undefined,
-                        undefined,
+                        sandboxRequire,
+                        module,
+                        exports,
                         undefined,
                         undefined,
                         undefined,
@@ -5181,7 +7070,6 @@
                         typeof btoa === 'function' ? btoa : undefined,
                         typeof atob === 'function' ? atob : undefined,
                         typeof URLSearchParams !== 'undefined' ? URLSearchParams : undefined,
-                        typeof window !== 'undefined' ? window.CryptoJS : undefined,
                     );
                 } catch (error) {
                     throw new Error(`Pre-request script error: ${error && error.message ? error.message : String(error)}`);
@@ -5220,6 +7108,254 @@
             };
         };
 
+        const runTestsScript = async (
+            scriptText,
+            { environmentId = null, requestSnapshot, responseSnapshot, preContext },
+        ) => {
+            const trimmed = (scriptText || '').trim();
+            const cryptoJs = await ensureCryptoJsReady();
+
+            const environmentInstance = environmentId !== null ? getEnvironmentById(environmentId) : null;
+            const baseEnvironmentStore = cloneVariableStore(environmentInstance?.variables);
+            const seededEnvironmentStore = {
+                ...baseEnvironmentStore,
+                ...(preContext?.environmentVariables || {}),
+            };
+            const localStore = {
+                ...(preContext?.localVariables || {}),
+            };
+            const overridesStore = preContext?.overrides && typeof preContext.overrides === 'object'
+                ? { ...preContext.overrides }
+                : {};
+
+            const { proxy: consoleProxy, buffer: consoleBuffer } = createScriptConsoleProxy();
+
+            const activeLookups = [localStore, seededEnvironmentStore, state.globalVariables, overridesStore]
+                .filter((store) => store && Object.keys(store).length);
+
+            const attachReplaceIn = (scope) => {
+                scope.replaceIn = (template) => resolveTemplateWithLookups(template, activeLookups);
+                return scope;
+            };
+
+            const globalsScope = attachReplaceIn(
+                createVariableScope({
+                    store: state.globalVariables,
+                    onMutate: () => {
+                        saveStoredGlobals(state.globalVariables);
+                    },
+                    fallbackStores: [seededEnvironmentStore],
+                }),
+            );
+
+            const environmentScope = attachReplaceIn(
+                createVariableScope({
+                    store: seededEnvironmentStore,
+                }),
+            );
+
+            const variablesScope = attachReplaceIn(
+                createVariableScope({
+                    store: localStore,
+                }),
+            );
+
+            const collectionScope = attachReplaceIn(createVariableScope({ store: {} }));
+
+            const safeRequestSnapshot = {
+                method: requestSnapshot?.method || 'GET',
+                url: requestSnapshot?.url || '',
+                headers: { ...(requestSnapshot?.headers || {}) },
+                body: createCoercibleRequestBody(requestSnapshot?.body || {}),
+            };
+
+            const pmResponse = createPmResponseInterface(responseSnapshot || null);
+
+            const tests = [];
+            const recordTest = (name, passed, errorMessage = null, options = {}) => {
+                tests.push({
+                    name: name || `Test ${tests.length + 1}`,
+                    passed,
+                    error: errorMessage ? String(errorMessage) : null,
+                    skipped: Boolean(options.skipped),
+                });
+            };
+
+            const pmTest = (name, fn) => {
+                let testName = name;
+                let testFn = fn;
+                if (typeof name === 'function') {
+                    testFn = name;
+                    testName = `Test ${tests.length + 1}`;
+                } else if (typeof name !== 'string') {
+                    testName = `Test ${tests.length + 1}`;
+                }
+                if (typeof testFn !== 'function') {
+                    return;
+                }
+                try {
+                    const result = testFn();
+                    if (result && typeof result.then === 'function') {
+                        throw new Error('Async tests are not supported in this workspace.');
+                    }
+                    recordTest(testName, true);
+                } catch (error) {
+                    recordTest(
+                        testName,
+                        false,
+                        error instanceof Error ? error.message : String(error),
+                    );
+                }
+            };
+
+            pmTest.skip = (name) => {
+                const testName = typeof name === 'string' ? name : `Test ${tests.length + 1}`;
+                recordTest(testName, true, null, { skipped: true });
+            };
+
+            const pm = {
+                globals: globalsScope,
+                environment: environmentScope,
+                variables: variablesScope,
+                collectionVariables: collectionScope,
+                request: safeRequestSnapshot,
+                response: pmResponse,
+                info: { eventName: 'test' },
+                console: consoleProxy,
+                test: pmTest,
+                expect: (value) => createExpectation(value, false),
+                iterationData: {
+                    get: () => undefined,
+                    toObject: () => ({}),
+                },
+            };
+            const postman = pm;
+            postman.expect = pm.expect;
+
+            if (trimmed) {
+                try {
+                    if (!cryptoJs) {
+                        throw new Error('CryptoJS failed to load. Refresh the page and ensure static assets are available.');
+                    }
+                    const momentLib = await ensureMomentReady();
+                    const moduleMap = {
+                        'crypto-js': cryptoJs,
+                        cryptojs: cryptoJs,
+                    };
+                    if (momentLib) {
+                        moduleMap.moment = momentLib;
+                        moduleMap['moment-timezone'] = momentLib;
+                    }
+                    const sandboxRequire = createSandboxRequire(moduleMap);
+                    const module = { exports: {} };
+                    const exports = module.exports;
+                    const scriptFunction = new Function(
+                        'pm',
+                        'postman',
+                        'console',
+                        'require',
+                        'module',
+                        'exports',
+                        'process',
+                        'global',
+                        'window',
+                        'document',
+                        'setTimeout',
+                        'setInterval',
+                        'clearTimeout',
+                        'clearInterval',
+                        'XMLHttpRequest',
+                        'fetch',
+                        'FormData',
+                        'Headers',
+                        'Request',
+                        'Response',
+                        'btoa',
+                        'atob',
+                        'URLSearchParams',
+                        `"use strict";\n${trimmed}`,
+                    );
+                    scriptFunction(
+                        pm,
+                        postman,
+                        consoleProxy,
+                        sandboxRequire,
+                        module,
+                        exports,
+                        undefined,
+                        undefined,
+                        undefined,
+                        undefined,
+                        setTimeout,
+                        setInterval,
+                        clearTimeout,
+                        clearInterval,
+                        undefined,
+                        undefined,
+                        undefined,
+                        undefined,
+                        undefined,
+                        undefined,
+                        typeof btoa === 'function' ? btoa : undefined,
+                        typeof atob === 'function' ? atob : undefined,
+                        typeof URLSearchParams !== 'undefined' ? URLSearchParams : undefined,
+                    );
+                } catch (error) {
+                    throw new Error(`Tests script error: ${error && error.message ? error.message : String(error)}`);
+                }
+            }
+
+            saveStoredGlobals(state.globalVariables);
+            if (environmentInstance) {
+                environmentInstance.variables = { ...seededEnvironmentStore };
+            }
+            if (preContext) {
+                preContext.environmentVariables = { ...seededEnvironmentStore };
+                preContext.localVariables = { ...localStore };
+            }
+
+            return {
+                tests,
+                logs: consoleBuffer,
+            };
+        };
+
+        const buildScriptResponseSnapshot = ({ payload, response, rawBody = '', error = null }) => {
+            const normalizedPayload = payload && typeof payload === 'object' ? payload : null;
+            let headers = {};
+            if (normalizedPayload && typeof normalizedPayload.headers === 'object') {
+                headers = { ...normalizedPayload.headers };
+            } else if (response && response.headers && typeof response.headers.forEach === 'function') {
+                const collector = {};
+                response.headers.forEach((value, key) => {
+                    collector[key] = value;
+                });
+                headers = collector;
+            }
+
+            const bodyText = typeof normalizedPayload?.body === 'string'
+                ? normalizedPayload.body
+                : rawBody || '';
+
+            const jsonData = normalizedPayload && Object.prototype.hasOwnProperty.call(normalizedPayload, 'json')
+                ? normalizedPayload.json
+                : tryParseJsonSilent(bodyText);
+
+            return {
+                status: normalizedPayload?.status_code ?? response?.status ?? null,
+                statusText: response?.statusText ?? '',
+                headers,
+                body: bodyText,
+                json: jsonData,
+                elapsed: normalizedPayload?.elapsed_ms ?? null,
+                environment: normalizedPayload?.environment ?? null,
+                resolvedUrl: normalizedPayload?.resolved_url ?? null,
+                request: normalizedPayload?.request ?? null,
+                error: normalizedPayload?.error
+                    ?? (error ? (error instanceof Error ? error.message : String(error)) : null),
+            };
+        };
+
         const buildPayloadFromBuilder = async (collection, request) => {
             const headersPayload = rowsToObject(state.builder.headers);
             const paramsPayload = rowsToObject(state.builder.params);
@@ -5247,10 +7383,33 @@
             };
 
             const selectedEnvironmentId = normalizeEnvironmentId(elements.environmentSelect?.value ?? state.activeEnvironmentId);
-            const scriptResult = runPreRequestScript(state.builder.scripts.pre || '', {
-                environmentId: selectedEnvironmentId,
-                requestSnapshot,
-            });
+            let scriptResult;
+            try {
+                scriptResult = await runPreRequestScript(state.builder.scripts.pre || '', {
+                    environmentId: selectedEnvironmentId,
+                    requestSnapshot,
+                });
+                state.scriptContexts.pre = scriptResult;
+                state.scriptContexts.requestSnapshot = requestSnapshot;
+                state.scriptContexts.environmentId = selectedEnvironmentId;
+                state.scriptOutputs.pre = {
+                    logs: scriptResult?.logs || [],
+                    error: null,
+                    timestamp: Date.now(),
+                };
+            } catch (error) {
+                state.scriptContexts.pre = null;
+                state.scriptContexts.requestSnapshot = requestSnapshot;
+                state.scriptContexts.environmentId = selectedEnvironmentId;
+                state.scriptOutputs.pre = {
+                    logs: [],
+                    error: error instanceof Error ? error.message : String(error),
+                    timestamp: Date.now(),
+                };
+                renderScriptOutputs();
+                throw error;
+            }
+            renderScriptOutputs();
             const scriptOverrides = scriptResult?.overrides ? { ...scriptResult.overrides } : { ...state.globalVariables };
             const activeStores = [
                 clonePlainObject(scriptResult?.localVariables),
@@ -5307,11 +7466,18 @@
                 Object.entries(paramsPayload).map(([key, value]) => [key, resolveStringTemplate(value)]),
             );
 
+            const replacedPlaceholderKeys = new Set();
+            let skipTransforms = false;
             const { bodyMode, bodyRawType, bodyRawText, bodyFormData, bodyUrlEncoded, bodyBinary } = state.builder;
             if (bodyMode === 'raw') {
                 if (bodyRawType === 'json') {
                     try {
-                        const parsedJson = JSON.parse(bodyRawText || '{}');
+                        const baseJsonText = bodyRawText || '{}';
+                        if (typeof baseJsonText !== 'string') {
+                            throw new Error('Raw body must be valid JSON.');
+                        }
+                        const parsedJson = JSON.parse(baseJsonText);
+                        const templatePlaceholders = collectJsonTemplatePlaceholders(parsedJson);
                         const resolvedJson = resolveJsonTemplate(parsedJson);
                         const transformResult = await applyBodyTransforms(
                             resolvedJson,
@@ -5321,6 +7487,27 @@
                         );
                         payload.json = transformResult.json;
                         Object.assign(payload.overrides, transformResult.overrides);
+
+                        if (Array.isArray(templatePlaceholders) && templatePlaceholders.length && payload.json && typeof payload.json === 'object') {
+                            templatePlaceholders.forEach(({ path, key }) => {
+                                const template = `{{${key}}}`;
+                                const resolved = resolveTemplateWithLookups(template, activeStores);
+                                if (resolved === template) {
+                                    return;
+                                }
+                                replacedPlaceholderKeys.add(key);
+                                if (!path) {
+                                    payload.json = resolved;
+                                    return;
+                                }
+                                setValueAtObjectPath(payload.json, path, resolved);
+                            });
+                        }
+
+                        if (payload.body_transforms && replacedPlaceholderKeys.size) {
+                            payload.body_transforms = {};
+                            skipTransforms = true;
+                        }
                     } catch (error) {
                         throw new Error('Raw body must be valid JSON.');
                     }
@@ -5386,6 +7573,11 @@
                 const overrideRows = Array.isArray(rawTransforms.overrides) ? rawTransforms.overrides : [];
                 const signatureRows = Array.isArray(rawTransforms.signatures) ? rawTransforms.signatures : [];
 
+                if (skipTransforms) {
+                    payload.body_transforms = {};
+                    return payload;
+                }
+
                 const cloned = {
                     overrides: overrideRows.map((row) => {
                         try {
@@ -5447,6 +7639,37 @@
                 }
             } catch (e) { }
 
+            if (state.scriptOutputs?.pre) {
+                const formatForConsole = (value) => {
+                    if (typeof value === 'string') {
+                        return value;
+                    }
+                    try {
+                        return JSON.stringify(value, null, 2);
+                    } catch (error) {
+                        return String(value);
+                    }
+                };
+                let bodyPreview = null;
+                if (payload.json !== undefined) {
+                    bodyPreview = payload.json;
+                } else if (typeof payload.body === 'string' && payload.body) {
+                    bodyPreview = payload.body;
+                } else if (Array.isArray(payload.form_data) && payload.form_data.length) {
+                    bodyPreview = payload.form_data;
+                }
+                if (bodyPreview !== null) {
+                    if (!Array.isArray(state.scriptOutputs.pre.logs)) {
+                        state.scriptOutputs.pre.logs = [];
+                    }
+                    state.scriptOutputs.pre.logs.push({
+                        level: 'info',
+                        args: ['Request payload preview:', formatForConsole(bodyPreview)],
+                    });
+                    renderScriptOutputs();
+                }
+            }
+
             return payload;
         };
 
@@ -5479,13 +7702,26 @@
                 return;
             }
 
+            state.scriptOutputs.tests = {
+                logs: [],
+                error: null,
+                tests: [],
+                timestamp: null,
+            };
+            renderScriptOutputs();
+
+            let scriptResponseSnapshot = null;
+            let fetchResponse = null;
+            let rawResponseText = '';
+            let parsedResponsePayload = null;
+
             setStatus('Sending request...', 'loading');
             activateTab('request');
             isRequestInFlight = true;
             updateRunButtonState();
 
             try {
-                const response = await fetch(endpoints.execute, {
+                fetchResponse = await fetch(endpoints.execute, {
                     method: 'POST',
                     credentials: 'include',
                     headers: {
@@ -5496,8 +7732,34 @@
                     body: JSON.stringify(payload),
                 });
 
-                const data = await response.json();
-                if (!response.ok) {
+                try {
+                    rawResponseText = await fetchResponse.clone().text();
+                } catch (error) {
+                    rawResponseText = '';
+                }
+
+                let data;
+                try {
+                    data = await fetchResponse.json();
+                } catch (error) {
+                    if (rawResponseText) {
+                        try {
+                            data = JSON.parse(rawResponseText);
+                        } catch (innerError) {
+                            throw error;
+                        }
+                    } else {
+                        throw error;
+                    }
+                }
+                parsedResponsePayload = data;
+                scriptResponseSnapshot = buildScriptResponseSnapshot({
+                    payload: data,
+                    response: fetchResponse,
+                    rawBody: rawResponseText,
+                });
+
+                if (!fetchResponse.ok) {
                     const message = data?.error || 'Request failed.';
                     setStatus(message, 'error');
                     const isActive = state.activeResponseKey === responseCacheKey;
@@ -5514,6 +7776,14 @@
                     cacheActiveResponse(data, responseCacheKey);
                 }
             } catch (error) {
+                if (!scriptResponseSnapshot) {
+                    scriptResponseSnapshot = buildScriptResponseSnapshot({
+                        payload: parsedResponsePayload,
+                        response: fetchResponse,
+                        rawBody: rawResponseText,
+                        error,
+                    });
+                }
                 setStatus(error instanceof Error ? error.message : 'Unexpected error during request.', 'error');
                 const isActive = state.activeResponseKey === responseCacheKey;
                 if (isActive) {
@@ -5523,6 +7793,43 @@
             } finally {
                 isRequestInFlight = false;
                 updateRunButtonState();
+                const testsScript = state.builder.scripts.post || '';
+                if ((testsScript && testsScript.trim()) || scriptResponseSnapshot) {
+                    const timestamp = Date.now();
+                    const environmentIdForTests = state.scriptContexts.environmentId
+                        ?? normalizeEnvironmentId(elements.environmentSelect?.value ?? null);
+                    if (testsScript && testsScript.trim()) {
+                        try {
+                            const result = await runTestsScript(testsScript, {
+                                environmentId: environmentIdForTests,
+                                requestSnapshot: state.scriptContexts.requestSnapshot,
+                                responseSnapshot: scriptResponseSnapshot,
+                                preContext: state.scriptContexts.pre,
+                            });
+                            state.scriptOutputs.tests = {
+                                logs: result?.logs || [],
+                                error: null,
+                                tests: Array.isArray(result?.tests) ? result.tests : [],
+                                timestamp,
+                            };
+                        } catch (error) {
+                            state.scriptOutputs.tests = {
+                                logs: [],
+                                error: error instanceof Error ? error.message : String(error),
+                                tests: [],
+                                timestamp,
+                            };
+                        }
+                    } else {
+                        state.scriptOutputs.tests = {
+                            logs: [],
+                            error: null,
+                            tests: [],
+                            timestamp,
+                        };
+                    }
+                    renderScriptOutputs();
+                }
             }
         };
 
@@ -5538,6 +7845,8 @@
 
             const headersPayload = rowsToObject(state.builder.headers);
             const paramsPayload = rowsToObject(state.builder.params);
+            const preRequestScript = typeof state.builder.scripts.pre === 'string' ? state.builder.scripts.pre : '';
+            const testsScript = typeof state.builder.scripts.post === 'string' ? state.builder.scripts.post : '';
 
             const definition = {
                 collection: collectionId,
@@ -5557,8 +7866,8 @@
                 auth_type: state.builder.auth.type || 'none',
                 auth_basic: {},
                 auth_bearer: '',
-                pre_request_script: '',
-                tests_script: '',
+                pre_request_script: preRequestScript,
+                tests_script: testsScript,
                 body_transforms: {
                     overrides: [],
                     signatures: [],
@@ -5619,10 +7928,12 @@
             }
 
             ensureTransformState();
+            try { console.debug && console.debug('Raw override rows:', state.builder.transforms.overrides); } catch (e) { }
             const normalizedOverrides = state.builder.transforms.overrides
-                .filter((row) => row.path && row.path.trim())
+                // keep rows that have a path, or external rows (we'll default their path if missing)
+                .filter((row) => (row.type === 'external') || (row.path && row.path.trim()))
                 .map((row) => {
-                    const base = { path: row.path.trim() };
+                    const base = { path: (row.path && String(row.path).trim()) || (row.type === 'external' ? 'data' : '') };
                     if (row.type === 'external') {
                         // If external JSON contains template tokens we save the raw
                         // string as external_json_raw; if parsable and no templates,
@@ -5638,13 +7949,42 @@
                                 throw new Error(`External object JSON is invalid for override with path '${row.path}'.`);
                             }
                         }
+                        // attempt to provide external_json_raw as a JSON object when possible
+                        let rawJsonObj = null;
+                        try {
+                            // If we already parsed the object above (no templates), reuse it
+                            if (parsedObj !== null) {
+                                rawJsonObj = parsedObj;
+                            } else if (rawText) {
+                                // try parsing rawText directly
+                                const tryParsed = tryParseJsonSilent(rawText);
+                                if (tryParsed !== null) {
+                                    rawJsonObj = tryParsed;
+                                } else {
+                                    // try converting JS-like object literal into JSON and parse
+                                    try {
+                                        const converted = convertJsObjectLikeToJson(rawText);
+                                        const tryConverted = tryParseJsonSilent(converted);
+                                        if (tryConverted !== null) {
+                                            rawJsonObj = tryConverted;
+                                        }
+                                    } catch (e) {
+                                        // ignore
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            rawJsonObj = null;
+                        }
+
                         return {
                             ...base,
                             type: 'external',
                             name: row.externalName ? String(row.externalName).trim() : '',
                             external_json: parsedObj,
-                            external_json_raw: rawText || '',
-                            encryption_key: row.encryptionKey || '',
+                            // prefer object when possible; if not parseable, set null
+                            external_json_raw: rawJsonObj,
+                            // encryption removed on client-side
                         };
                     }
                     return {
@@ -5655,13 +7995,25 @@
                         charLimit: Number.isFinite(Number(row.charLimit)) && Number(row.charLimit) > 0 ? Number(row.charLimit) : null,
                     };
                 });
+            try { console.debug && console.debug('Normalized overrides to save:', normalizedOverrides); } catch (e) { }
+            // If there were external rows present but none were normalized, warn
+            try {
+                const hadExternal = Array.isArray(state.builder.transforms.overrides) && state.builder.transforms.overrides.some((r) => r.type === 'external');
+                if (hadExternal && (!Array.isArray(normalizedOverrides) || !normalizedOverrides.some((r) => r.type === 'external'))) {
+                    console.warn && console.warn('External overrides present in editor but none were included in the saved definition. Check that each external override has a non-empty path.');
+                }
+            } catch (e) { }
             const normalizedSignatures = state.builder.transforms.signatures
                 .filter((row) => row.targetPath && row.targetPath.trim() && row.components && row.components.trim())
                 .map((row) => ({
+                    type: row.type === 'external' ? 'external' : 'simple',
                     target_path: row.targetPath.trim(),
                     algorithm: (row.algorithm || SIGNATURE_ALGORITHMS[2].key).toLowerCase(),
                     components: row.components,
                     store_as: row.storeAs ? row.storeAs.trim() : '',
+                    external_name: row.externalName ? String(row.externalName).trim() : '',
+                    external_path: row.externalPath ? String(row.externalPath).trim() : 'signature',
+                    encrypted: !!row.encrypted,
                 }));
             definition.body_transforms = {
                 overrides: normalizedOverrides,
@@ -5814,200 +8166,30 @@
             });
         });
 
-        if (elements.addBodyOverrideRow) {
-            elements.addBodyOverrideRow.addEventListener('click', (event) => {
-                event.preventDefault();
-                addOverrideTransform();
-            });
-        }
-
-        if (overridesTable) {
-            overridesTable.addEventListener('input', (event) => {
-                const target = event.target;
-                const row = target.closest('tr');
-                if (!row) {
-                    return;
-                }
-                const rowId = row.dataset.rowId;
-                if (!rowId) {
-                    return;
-                }
-                if (target.classList.contains('body-override-input')) {
-                    const field = target.dataset.field;
-                    if (!field) return;
-                    updateOverrideTransform(rowId, field, target.value);
-                } else if (target.classList.contains('body-override-type')) {
-                    updateOverrideTransform(rowId, 'type', target.value);
-                    // re-render to show/hide external fields
-                    renderBodyOverrides();
-                } else if (target.classList.contains('override-external-json')) {
-                    // external inputs may live in a separate TR whose dataset row id
-                    // ends with '-external'. Normalize to base id.
-                    const baseRowId = rowId.replace(/-external$/, '');
-                    updateOverrideTransform(baseRowId, 'externalJson', target.value);
-                } else if (target.classList.contains('override-external-name')) {
-                    const baseRowId = rowId.replace(/-external$/, '');
-                    updateOverrideTransform(baseRowId, 'externalName', target.value);
-                } else if (target.classList.contains('override-encryption-key')) {
-                    const baseRowId = rowId.replace(/-external$/, '');
-                    updateOverrideTransform(baseRowId, 'encryptionKey', target.value);
-                } else if (target.classList.contains('override-is-random')) {
-                    const checked = !!target.checked;
-                    updateOverrideTransform(rowId, 'isRandom', checked);
-                    // enable/disable char limit input in the row
-                    const charInput = row.querySelector('.override-char-limit');
-                    if (charInput) {
-                        charInput.disabled = !checked;
+        if (scriptTabButtons.length) {
+            scriptTabButtons.forEach((button) => {
+                button.addEventListener('click', () => {
+                    const target = button.dataset.scriptTab;
+                    if (!target) {
+                        return;
                     }
-                    // if enabling random, enforce maxlength 10 on value input
-                    const valueInput = row.querySelector('.override-value-input');
-                    if (valueInput) {
-                        if (checked) {
-                            valueInput.setAttribute('maxlength', '10');
-                            if (valueInput.value.length > 10) {
-                                valueInput.value = valueInput.value.slice(0, 10);
-                                updateOverrideTransform(rowId, 'value', valueInput.value);
-                            }
-                        } else {
-                            valueInput.removeAttribute('maxlength');
-                        }
+                    activateScriptTab(target);
+                });
+                button.addEventListener('keydown', (event) => {
+                    if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') {
+                        return;
                     }
-                } else if (target.classList.contains('override-char-limit')) {
-                    updateOverrideTransform(rowId, 'charLimit', target.value);
-                }
-            });
-
-            overridesTable.addEventListener('click', (event) => {
-                const target = event.target;
-                if (!target.classList.contains('body-override-remove')) {
-                    // handle format button
-                    if (target.classList.contains('override-external-format')) {
-                        const row = target.closest('tr');
-                        if (!row) return;
-                        // compute base row id (strip '-external' suffix if present)
-                        const rawRowId = row.dataset.rowId || '';
-                        const baseRowId = rawRowId.replace(/-external$/, '') || rawRowId;
-                        // find the external textarea related to this baseRowId
-                        const externalRow = document.querySelector(`tr.override-external-row[data-row-id="${baseRowId}-external"]`);
-                        const textarea = (externalRow && externalRow.querySelector('textarea.override-external-json')) || document.querySelector(`tr[data-row-id="${baseRowId}"] textarea.override-external-json`);
-                        if (!textarea) return;
-                        try {
-                            const formatted = formatJsonWithTemplates(textarea.value || '');
-                            textarea.value = formatted;
-                            updateOverrideTransform(baseRowId, 'externalJson', formatted);
-                        } catch (e) {
-                            // no-op
-                        }
+                    event.preventDefault();
+                    const currentIndex = scriptTabButtons.findIndex((item) => item.dataset.scriptTab === state.activeScriptTab);
+                    if (currentIndex === -1) {
+                        return;
                     }
-                    return;
-                }
-                event.preventDefault();
-                const rowId = target.dataset.rowId;
-                if (!rowId) {
-                    return;
-                }
-                removeOverrideTransform(rowId);
-            });
-
-            // auto-format external JSON on paste
-            overridesTable.addEventListener('paste', (event) => {
-                const target = event.target;
-                if (!target || !target.classList || !target.classList.contains('override-external-json')) {
-                    return;
-                }
-                // Wait for paste to populate the textarea then format
-                const row = target.closest('tr');
-                if (!row) return;
-                const rawRowId = row.dataset.rowId || '';
-                const baseRowId = rawRowId.replace(/-external$/, '') || rawRowId;
-                setTimeout(() => {
-                    try {
-                        const formatted = formatJsonWithTemplates(target.value || '');
-                        if (formatted && formatted !== target.value) {
-                            target.value = formatted;
-                            updateOverrideTransform(baseRowId, 'externalJson', formatted);
-                        }
-                    } catch (e) {
-                        // leave as-is on error
-                    }
-                }, 50);
-            });
-
-            // auto-format external JSON on blur (listen on table via capture)
-            overridesTable.addEventListener('blur', (event) => {
-                const target = event.target;
-                if (!target.classList || !target.classList.contains('override-external-json')) {
-                    return;
-                }
-                const row = target.closest('tr');
-                if (!row) return;
-                const rawRowId = row.dataset.rowId || '';
-                const baseRowId = rawRowId.replace(/-external$/, '') || rawRowId;
-                try {
-                    const formatted = formatJsonWithTemplates(target.value || '');
-                    if (target.value !== formatted) {
-                        target.value = formatted;
-                        updateOverrideTransform(baseRowId, 'externalJson', formatted);
-                    }
-                } catch (e) {
-                    // leave as-is on error
-                }
-            }, true);
-        }
-
-        if (elements.addBodySignatureRow) {
-            elements.addBodySignatureRow.addEventListener('click', (event) => {
-                event.preventDefault();
-                addSignatureTransform();
-            });
-        }
-
-        if (signaturesTable) {
-            signaturesTable.addEventListener('input', (event) => {
-                const target = event.target;
-                if (!target.classList.contains('body-signature-input') && !target.classList.contains('body-signature-textarea')) {
-                    return;
-                }
-                const row = target.closest('tr');
-                if (!row) {
-                    return;
-                }
-                const rowId = row.dataset.rowId;
-                const field = target.dataset.field;
-                if (!rowId || !field) {
-                    return;
-                }
-                updateSignatureTransform(rowId, field, target.value);
-            });
-
-            signaturesTable.addEventListener('change', (event) => {
-                const target = event.target;
-                if (!target.classList.contains('body-signature-select')) {
-                    return;
-                }
-                const row = target.closest('tr');
-                if (!row) {
-                    return;
-                }
-                const rowId = row.dataset.rowId;
-                const field = target.dataset.field;
-                if (!rowId || !field) {
-                    return;
-                }
-                updateSignatureTransform(rowId, field, target.value);
-            });
-
-            signaturesTable.addEventListener('click', (event) => {
-                const target = event.target;
-                if (!target.classList.contains('body-signature-remove')) {
-                    return;
-                }
-                event.preventDefault();
-                const rowId = target.dataset.rowId;
-                if (!rowId) {
-                    return;
-                }
-                removeSignatureTransform(rowId);
+                    const delta = event.key === 'ArrowRight' ? 1 : -1;
+                    const nextIndex = (currentIndex + delta + scriptTabButtons.length) % scriptTabButtons.length;
+                    const nextTab = scriptTabButtons[nextIndex].dataset.scriptTab;
+                    activateScriptTab(nextTab);
+                    scriptTabButtons[nextIndex].focus();
+                });
             });
         }
 
@@ -6345,6 +8527,10 @@
 
                 setStatus('Saving request...', 'loading');
                 try {
+                    // Debug: log the request definition before sending so we can
+                    // verify external overrides are present. Remove this when
+                    // debugging is complete.
+                    try { console.debug && console.debug('Request definition to save:', definition); } catch (e) { }
                     const response = await postJson(detailUrl, definition, method);
                     const savedRequestId = existingRequest?.id || response?.id || null;
                     await refreshCollections({

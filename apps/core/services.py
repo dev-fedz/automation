@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
+import os
 import re
 import time
 from copy import deepcopy
@@ -13,8 +15,6 @@ from xml.etree import ElementTree as ET
 import requests
 from django.db import transaction
 from django.utils import timezone
-import os
-import base64
 
 from . import models
 

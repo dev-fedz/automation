@@ -117,11 +117,11 @@
             tabindex="-1">Body</button>
         <button type="button"
             class="builder-tab"
-            data-tab="body-tools"
+            data-tab="scripts"
             role="tab"
             aria-selected="false"
-            aria-controls="builder-panel-body-tools"
-            tabindex="-1">Body Tools</button>
+            aria-controls="builder-panel-scripts"
+            tabindex="-1">Scripts</button>
         <button type="button"
             class="builder-tab"
             data-tab="request"
@@ -305,66 +305,64 @@
                     </div>
                 </div>
             </section>
-
             <section class="builder-section"
-                     id="builder-panel-body-tools"
-                     data-tab-panel="body-tools"
-                     aria-labelledby="body-tools-heading"
+                     id="builder-panel-scripts"
+                     data-tab-panel="scripts"
+                     aria-labelledby="scripts-heading"
                      role="tabpanel"
                      aria-hidden="true"
                      hidden>
-                <h3 id="body-tools-heading" class="sr-only">Body Tools</h3>
-                <div class="builder-body-tools">
-                    <div class="builder-body-tools__group">
-                        <header class="builder-section__head builder-section__head--sub builder-section__head--centered">
-                            <h3>Field Overrides</h3>
-                            <button type="button" id="add-body-override" class="btn btn-tertiary">Add Override</button>
-                        </header>
-                        <p class="builder-hint">Set a JSON path and replacement value. Paths use dot notation, e.g. <code>transaction.request_id</code>.</p>
-                        <div class="kv-table">
-                            <div class="kv-table__scroll">
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th scope="col">Type</th>
-                                            <th scope="col">Path</th>
-                                            <th scope="col">Value</th>
-                                            <th scope="col">Is Random</th>
-                                            <th scope="col">Character limit</th>
-                                            <th scope="col" aria-hidden="true"></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="body-overrides-rows"></tbody>
-                                </table>
-                            </div>
-                        </div>
+                <h3 id="scripts-heading" class="sr-only">Scripts</h3>
+                <div class="scripts-wrapper">
+                    <div class="scripts-tabs" role="tablist" aria-label="Script types">
+                        <button type="button"
+                                class="scripts-tab is-active"
+                                data-script-tab="pre"
+                                role="tab"
+                                aria-selected="true"
+                                aria-controls="scripts-panel-pre">Pre-request</button>
+                        <button type="button"
+                                class="scripts-tab"
+                                data-script-tab="tests"
+                                role="tab"
+                                aria-selected="false"
+                                aria-controls="scripts-panel-tests"
+                                tabindex="-1">Tests</button>
                     </div>
-                    <div class="builder-body-tools__group">
-                        <header class="builder-section__head builder-section__head--sub builder-section__head--centered">
-                            <h3>Signature Builders</h3>
-                            <button type="button" id="add-body-signature" class="btn btn-tertiary">Add Signature</button>
-                        </header>
-                        <p class="builder-hint">Generate hashes by combining body fields and literals. Prefix literals with <code>literal:</code> or wrap in quotes.</p>
-                        <div class="kv-table">
-                            <div class="kv-table__scroll">
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th scope="col">Type</th>
-                                            <th scope="col">Target Path</th>
-                                            <th scope="col">Algorithm</th>
-                                            <th scope="col">Components</th>
-                                            <th scope="col" data-col="externalObject">Select Object</th>
-                                            <th scope="col" data-col="externalEncrypted">Is Encrypted</th>
-                                            <th scope="col">Store As</th>
-                                            <th scope="col" aria-hidden="true"></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="body-signatures-rows"></tbody>
-                                </table>
+                    <div class="scripts-panels">
+                        <div class="scripts-panel is-active"
+                             id="scripts-panel-pre"
+                             data-script-panel="pre"
+                             role="tabpanel"
+                             aria-hidden="false">
+                            <div class="form-field">
+                                <label id="pre-script-editor-label">Pre-request Script</label>
+                                <div id="pre-script-editor"
+                                     class="code-editor script-editor is-empty"
+                                     data-placeholder="// Access pm.environment, pm.variables, pm.request"
+                                     role="textbox"
+                                     aria-labelledby="pre-script-editor-label"
+                                     aria-multiline="true"></div>
                             </div>
+                            <div class="script-output" id="pre-script-output" role="status" aria-live="polite">No pre-request script run yet.</div>
                         </div>
-                        <p class="builder-hint">One component per line. Use <code>path:customer.email</code> for body fields or <code>literal:SECRET</code> for constants.</p>
+                        <div class="scripts-panel"
+                             id="scripts-panel-tests"
+                             data-script-panel="tests"
+                             role="tabpanel"
+                             aria-hidden="true"
+                             hidden>
+                            <div class="form-field">
+                                <label id="tests-script-editor-label">Tests Script</label>
+                                <div id="tests-script-editor"
+                                     class="code-editor script-editor is-empty"
+                                     data-placeholder="// pm.test(\"Status code is 200\", () => { pm.expect(pm.response.code).to.eql(200); });"
+                                     role="textbox"
+                                     aria-labelledby="tests-script-editor-label"
+                                     aria-multiline="true"></div>
+                            </div>
+                            <div class="script-output" id="tests-script-output" role="status" aria-live="polite">No tests script run yet.</div>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -409,6 +407,10 @@
                     <div class="response-section">
                         <h3>Assertions</h3>
                         <div id="response-assertions" class="assertions-list"></div>
+                        <div class="script-console" aria-live="polite">
+                            <div class="script-console__header">Pre-request Console</div>
+                            <div class="script-console__body" id="pre-script-console-response" role="log" aria-live="polite" aria-label="Pre-request script console output">Console idle. Send a request to view logs.</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -439,6 +441,7 @@
     window.require = {
         paths: {
             vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs',
+            moment: '{% static "js/vendor/moment.min" %}',
         },
     };
 </script>
@@ -452,6 +455,7 @@
         },
     };
 </script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
-<script src="{% static 'js/api_tester.js' %}?v=20251016"></script>
+<script src="{% static 'js/vendor/moment.min.js' %}?v={{ STATIC_VERSION|default:'20251107' }}" data-api-tester-moment="1"></script>
+<script src="{% static 'js/vendor/crypto-js.js' %}?v={{ STATIC_VERSION|default:'20251107' }}" data-api-tester-crypto-js="1"></script>
+<script src="{% static 'js/api_tester.js' %}?v={{ STATIC_VERSION|default:'20251107' }}"></script>
 {% endblock %}
