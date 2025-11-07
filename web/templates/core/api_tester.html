@@ -321,13 +321,13 @@
                                 role="tab"
                                 aria-selected="true"
                                 aria-controls="scripts-panel-pre">Pre-request</button>
-                        <button type="button"
-                                class="scripts-tab"
-                                data-script-tab="tests"
-                                role="tab"
-                                aria-selected="false"
-                                aria-controls="scripts-panel-tests"
-                                tabindex="-1">Tests</button>
+            <button type="button"
+                class="scripts-tab"
+                data-script-tab="post"
+                role="tab"
+                aria-selected="false"
+                aria-controls="scripts-panel-post"
+                tabindex="-1">Post-request</button>
                     </div>
                     <div class="scripts-panels">
                         <div class="scripts-panel is-active"
@@ -346,22 +346,22 @@
                             </div>
                             <div class="script-output" id="pre-script-output" role="status" aria-live="polite">No pre-request script run yet.</div>
                         </div>
-                        <div class="scripts-panel"
-                             id="scripts-panel-tests"
-                             data-script-panel="tests"
+                    <div class="scripts-panel"
+                        id="scripts-panel-post"
+                        data-script-panel="post"
                              role="tabpanel"
                              aria-hidden="true"
                              hidden>
                             <div class="form-field">
-                                <label id="tests-script-editor-label">Tests Script</label>
-                                <div id="tests-script-editor"
+                          <label id="post-script-editor-label">Post-request Script</label>
+                          <div id="post-script-editor"
                                      class="code-editor script-editor is-empty"
-                                     data-placeholder="// pm.test(\"Status code is 200\", () => { pm.expect(pm.response.code).to.eql(200); });"
+                              data-placeholder="// pm.test(\"Status code is 200\", () => { pm.expect(pm.response.code).to.eql(200); });"
                                      role="textbox"
-                                     aria-labelledby="tests-script-editor-label"
+                              aria-labelledby="post-script-editor-label"
                                      aria-multiline="true"></div>
                             </div>
-                            <div class="script-output" id="tests-script-output" role="status" aria-live="polite">No tests script run yet.</div>
+                       <div class="script-output" id="post-script-output" role="status" aria-live="polite">No post-request script run yet.</div>
                         </div>
                     </div>
                 </div>
@@ -410,6 +410,10 @@
                         <div class="script-console" aria-live="polite">
                             <div class="script-console__header">Pre-request Console</div>
                             <div class="script-console__body" id="pre-script-console-response" role="log" aria-live="polite" aria-label="Pre-request script console output">Console idle. Send a request to view logs.</div>
+                        </div>
+                        <div class="script-console" aria-live="polite">
+                            <div class="script-console__header">Post-request Console</div>
+                            <div class="script-console__body" id="post-script-console-response" role="log" aria-live="polite" aria-label="Post-request script console output">Console idle. Send a request to view logs.</div>
                         </div>
                     </div>
                 </div>

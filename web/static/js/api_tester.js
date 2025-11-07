@@ -1454,7 +1454,7 @@
         responseBodyManualView: false,
         scriptOutputs: {
             pre: { logs: [], error: null, timestamp: null },
-            tests: { logs: [], error: null, tests: [], timestamp: null },
+            post: { logs: [], error: null, tests: [], timestamp: null },
         },
         scriptContexts: {
             pre: null,
@@ -1500,10 +1500,11 @@
             scriptTabButtons: Array.from(root.querySelectorAll('[data-script-tab]')),
             scriptPanels: Array.from(root.querySelectorAll('[data-script-panel]')),
             preScriptEditor: document.getElementById('pre-script-editor'),
-            testsScriptEditor: document.getElementById('tests-script-editor'),
+            postScriptEditor: document.getElementById('post-script-editor'),
             preScriptOutput: document.getElementById('pre-script-output'),
             preScriptConsoleResponse: document.getElementById('pre-script-console-response'),
-            testsScriptOutput: document.getElementById('tests-script-output'),
+            postScriptOutput: document.getElementById('post-script-output'),
+            postScriptConsoleResponse: document.getElementById('post-script-console-response'),
             paramsBody: document.getElementById('params-rows'),
             addParamRow: document.getElementById('add-param-row'),
             headersBody: document.getElementById('headers-rows'),
@@ -1654,20 +1655,20 @@
         let monacoLoaderPromise = null;
         let hasConfiguredJsonDiagnostics = false;
         let isRequestInFlight = false;
-        const SCRIPT_STATE_KEY = { pre: 'pre', tests: 'post' };
+        const SCRIPT_STATE_KEY = { pre: 'pre', post: 'post', tests: 'post' };
         const scriptEditorMeta = {
             pre: {
                 container: elements.preScriptEditor,
                 placeholder: '// Access pm.environment, pm.variables, pm.request',
             },
-            tests: {
-                container: elements.testsScriptEditor,
+            post: {
+                container: elements.postScriptEditor,
                 placeholder: '// pm.test("Status code is 200", () => { pm.expect(pm.response.code).to.eql(200); });',
             },
         };
         const scriptEditors = {
             pre: { editor: null, fallback: null, resizeObserver: null, suppress: false },
-            tests: { editor: null, fallback: null, resizeObserver: null, suppress: false },
+            post: { editor: null, fallback: null, resizeObserver: null, suppress: false },
         };
 
         const setStatus = (message, variant = 'neutral') => {
@@ -2140,7 +2141,7 @@
             if (!scriptTabButtons.length || !scriptPanels.length) {
                 return;
             }
-            const normalized = target === 'tests' ? 'tests' : 'pre';
+            const normalized = target === 'post' || target === 'tests' ? 'post' : 'pre';
             state.activeScriptTab = normalized;
             scriptTabButtons.forEach((button, index) => {
                 const tabName = button.dataset.scriptTab;
@@ -2268,16 +2269,22 @@
             });
         };
 
-        const renderTestsScriptOutput = () => {
-            const outputEl = elements.testsScriptOutput;
+        const renderPostScriptOutput = () => {
+            const outputEl = elements.postScriptOutput;
+            const consoleEl = elements.postScriptConsoleResponse;
             if (!outputEl) {
                 return;
             }
-            const record = state.scriptOutputs.tests;
+
+            const record = state.scriptOutputs.post;
             if (!record || !record.timestamp) {
-                outputEl.innerHTML = '<span class="script-output__empty">No tests script run yet.</span>';
+                outputEl.innerHTML = '<span class="script-output__empty">No post-request script run yet.</span>';
+                if (consoleEl) {
+                    consoleEl.innerHTML = '<div class="script-console__empty">Console idle. Send a request to view logs.</div>';
+                }
                 return;
             }
+
             const parts = [];
             const timestampLabel = formatTimestamp(record.timestamp);
             if (timestampLabel) {
@@ -2301,11 +2308,12 @@
             }
 
             if (record.error) {
-                parts.push(`<div class="script-test fail"><span class="script-test__name">Tests script error</span><span class="script-test__error">${escapeHtml(record.error)}</span></div>`);
+                parts.push(`<div class="script-test fail"><span class="script-test__name">Post-request script error</span><span class="script-test__error">${escapeHtml(record.error)}</span></div>`);
             }
 
-            if (Array.isArray(record.logs) && record.logs.length) {
-                const logMarkup = record.logs
+            const logEntries = Array.isArray(record.logs) ? record.logs : [];
+            if (logEntries.length) {
+                const logMarkup = logEntries
                     .map((entry) => {
                         const level = normalizeLogLevel(entry?.level);
                         const label = (entry?.level || level || 'LOG').toString().toUpperCase();
@@ -2314,6 +2322,15 @@
                     })
                     .join('');
                 parts.push(logMarkup);
+                if (consoleEl) {
+                    consoleEl.innerHTML = logMarkup;
+                    consoleEl.scrollTop = consoleEl.scrollHeight;
+                }
+            } else if (consoleEl) {
+                const emptyLabel = record.error
+                    ? 'No console output captured before the error.'
+                    : 'No console output.';
+                consoleEl.innerHTML = `<div class="script-console__empty">${escapeHtml(emptyLabel)}</div>`;
             }
 
             outputEl.innerHTML = parts.join('');
@@ -2321,7 +2338,7 @@
 
         const renderScriptOutputs = () => {
             renderPreScriptOutput();
-            renderTestsScriptOutput();
+            renderPostScriptOutput();
         };
 
         const activateTab = (tabName) => {
@@ -6268,7 +6285,7 @@
                 elements.responseHeaders.textContent = '{}';
                 resetResponseBodyState();
                 elements.responseAssertions.innerHTML = '<p class="muted">No assertions evaluated.</p>';
-                renderTestsScriptOutput();
+                renderPostScriptOutput();
                 return;
             }
 
@@ -6325,7 +6342,7 @@
                 elements.responseAssertions.innerHTML = '<p class="muted">No assertions evaluated for this request.</p>';
             }
 
-            renderTestsScriptOutput();
+            renderPostScriptOutput();
         };
 
         const cacheActiveResponse = (payload, cacheKey = state.activeResponseKey) => {
@@ -7702,7 +7719,7 @@
                 return;
             }
 
-            state.scriptOutputs.tests = {
+            state.scriptOutputs.post = {
                 logs: [],
                 error: null,
                 tests: [],
@@ -7793,27 +7810,27 @@
             } finally {
                 isRequestInFlight = false;
                 updateRunButtonState();
-                const testsScript = state.builder.scripts.post || '';
-                if ((testsScript && testsScript.trim()) || scriptResponseSnapshot) {
+                const postScript = state.builder.scripts.post || '';
+                if ((postScript && postScript.trim()) || scriptResponseSnapshot) {
                     const timestamp = Date.now();
                     const environmentIdForTests = state.scriptContexts.environmentId
                         ?? normalizeEnvironmentId(elements.environmentSelect?.value ?? null);
-                    if (testsScript && testsScript.trim()) {
+                    if (postScript && postScript.trim()) {
                         try {
-                            const result = await runTestsScript(testsScript, {
+                            const result = await runTestsScript(postScript, {
                                 environmentId: environmentIdForTests,
                                 requestSnapshot: state.scriptContexts.requestSnapshot,
                                 responseSnapshot: scriptResponseSnapshot,
                                 preContext: state.scriptContexts.pre,
                             });
-                            state.scriptOutputs.tests = {
+                            state.scriptOutputs.post = {
                                 logs: result?.logs || [],
                                 error: null,
                                 tests: Array.isArray(result?.tests) ? result.tests : [],
                                 timestamp,
                             };
                         } catch (error) {
-                            state.scriptOutputs.tests = {
+                            state.scriptOutputs.post = {
                                 logs: [],
                                 error: error instanceof Error ? error.message : String(error),
                                 tests: [],
@@ -7821,7 +7838,7 @@
                             };
                         }
                     } else {
-                        state.scriptOutputs.tests = {
+                        state.scriptOutputs.post = {
                             logs: [],
                             error: null,
                             tests: [],
@@ -7846,7 +7863,7 @@
             const headersPayload = rowsToObject(state.builder.headers);
             const paramsPayload = rowsToObject(state.builder.params);
             const preRequestScript = typeof state.builder.scripts.pre === 'string' ? state.builder.scripts.pre : '';
-            const testsScript = typeof state.builder.scripts.post === 'string' ? state.builder.scripts.post : '';
+            const postScript = typeof state.builder.scripts.post === 'string' ? state.builder.scripts.post : '';
 
             const definition = {
                 collection: collectionId,
@@ -7867,7 +7884,7 @@
                 auth_basic: {},
                 auth_bearer: '',
                 pre_request_script: preRequestScript,
-                tests_script: testsScript,
+                tests_script: postScript,
                 body_transforms: {
                     overrides: [],
                     signatures: [],
