@@ -508,6 +508,17 @@ body.auth-layout { background:#f5f7fb; min-height:100dvh; display:flex; justify-
 .api-tester__form .btn-secondary {background:#1f2937;box-shadow:0 4px 10px -4px rgba(31,41,55,.55);} 
 .api-tester__form .btn-secondary:hover:not(:disabled) {background:#111827;}
 .api-tester__form .btn:disabled {opacity:.45;cursor:not-allowed;}
+.api-tester__form .btn__spinner{display:none;position:absolute;top:50%;left:50%;width:1.15rem;height:1.15rem;margin:-.575rem 0 0 -.575rem;border-radius:50%;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;animation:api-tester-btn-spin .75s linear infinite;}
+.api-tester__form .btn__label{display:inline-flex;align-items:center;justify-content:center;}
+.api-tester__form .btn.is-loading{position:relative;pointer-events:none;}
+.api-tester__form .btn.is-loading .btn__spinner{display:block;}
+.api-tester__form .btn.is-loading .btn__label{opacity:0;}
+@keyframes api-tester-btn-spin{to{transform:rotate(360deg);}}
+.api-tester__loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(17,24,39,.55);backdrop-filter:blur(1px);z-index:30;opacity:0;pointer-events:none;transition:opacity .2s ease;}
+.api-tester__loading.is-visible{opacity:1;pointer-events:auto;}
+.api-tester__loading-dialog{display:flex;flex-direction:column;align-items:center;gap:.75rem;padding:1.8rem 2.4rem;border-radius:12px;background:rgba(17,24,39,.85);color:#fff;text-align:center;box-shadow:0 12px 28px -12px rgba(0,0,0,.7);}
+.api-tester__loading-spinner{width:2.5rem;height:2.5rem;border-radius:50%;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;animation:api-tester-btn-spin .75s linear infinite;}
+.api-tester__loading-text{font-weight:600;letter-spacing:.04em;text-transform:uppercase;font-size:.85rem;}
 .api-tester__form .form-grid {display:grid;gap:.85rem;margin-bottom:1rem;}
 .api-tester__form .form-grid--request {grid-template-columns:minmax(80px,110px) 1fr auto;align-items:end;}
 .api-tester__form .form-grid--meta {grid-template-columns:repeat(auto-fit,minmax(180px,240px));}

@@ -1505,6 +1505,7 @@
             preScriptConsoleResponse: document.getElementById('pre-script-console-response'),
             postScriptOutput: document.getElementById('post-script-output'),
             postScriptConsoleResponse: document.getElementById('post-script-console-response'),
+            loadingOverlay: document.getElementById('api-tester-loading'),
             paramsBody: document.getElementById('params-rows'),
             addParamRow: document.getElementById('add-param-row'),
             headersBody: document.getElementById('headers-rows'),
@@ -1689,11 +1690,32 @@
         const hasRunnableUrl = () => Boolean(getTrimmedUrlValue());
 
         const updateRunButtonState = () => {
-            if (!elements.runButton) {
+            const overlay = elements.loadingOverlay || null;
+            if (!elements.runButton && !overlay) {
                 return;
             }
-            const shouldDisable = isRequestInFlight || !hasRunnableUrl();
-            elements.runButton.disabled = shouldDisable;
+            const isLoading = isRequestInFlight;
+            const shouldDisable = isLoading || !hasRunnableUrl();
+            if (elements.runButton) {
+                elements.runButton.disabled = shouldDisable;
+                elements.runButton.classList.toggle('is-loading', isLoading);
+                if (isLoading) {
+                    elements.runButton.setAttribute('aria-busy', 'true');
+                } else {
+                    elements.runButton.removeAttribute('aria-busy');
+                }
+            }
+            if (overlay) {
+                if (isLoading) {
+                    overlay.hidden = false;
+                    overlay.classList.add('is-visible');
+                    overlay.setAttribute('aria-hidden', 'false');
+                } else {
+                    overlay.classList.remove('is-visible');
+                    overlay.setAttribute('aria-hidden', 'true');
+                    overlay.hidden = true;
+                }
+            }
         };
 
         const getRawEditorValue = () => {
