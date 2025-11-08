@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
+import os
 import re
 import time
 from copy import deepcopy
@@ -171,7 +173,20 @@ def _apply_body_transforms(
     overrides: Dict[str, str] = {}
     config = transforms or {}
 
+    # First, separate external overrides from simple overrides so we can
+    # build external objects, allow signatures to reference them, and
+    # finally encrypt them and place the encrypted string into the
+    # configured payload path.
+    external_overrides: List[dict] = []
+    simple_overrides: List[dict] = []
     for override in config.get("overrides", []) or []:
+        if isinstance(override, dict) and (str(override.get("type") or "").lower() == "external" or override.get("external_json") is not None):
+            external_overrides.append(override)
+        else:
+            simple_overrides.append(override)
+
+    # Apply simple overrides (existing behavior)
+    for override in simple_overrides:
         path = str(override.get("path", "")).strip()
         if not path:
             continue
@@ -219,6 +234,34 @@ def _apply_body_transforms(
 
         _set_nested_value(json_payload, path, resolved_value)
 
+    # Build a map of external objects: support named external objects via 'name' or anonymous list
+    external_map: Dict[str, dict] = {}
+    anonymous_externals: List[dict] = []
+    for override in external_overrides:
+        # expected shape: { path, name?, external_json }
+        name = (override.get("name") or override.get("externalName") or "")
+        raw = override.get("external_json") if "external_json" in override else override.get("externalJson")
+        if raw is None:
+            # allow external_json to be provided as a serialized string in 'value'
+            candidate = override.get("value")
+            if candidate is not None:
+                try:
+                    parsed = json.loads(str(candidate))
+                except Exception:
+                    parsed = None
+            else:
+                parsed = None
+        else:
+            parsed = raw if isinstance(raw, dict) else (json.loads(str(raw)) if isinstance(raw, str) and str(raw).strip() else None)
+
+        if parsed is None:
+            parsed = {}
+
+        if name:
+            external_map[str(name)] = parsed
+        else:
+            anonymous_externals.append(parsed)
+
     for signature in config.get("signatures", []) or []:
         target_path = (
             signature.get("target_path")
@@ -239,20 +282,113 @@ def _apply_body_transforms(
                 literal_raw = component.get("value", "")
                 parts.append(_resolve_variables(str(literal_raw), variables))
             else:
-                value = _get_nested_value(json_payload, component.get("value", ""))
-                parts.append("" if value is None else str(value))
+                comp_path = str(component.get("value", "") or "").strip()
+                # support external.<name>.<path> or external.<path> references
+                if comp_path.startswith("external."):
+                    ext_ref = comp_path[len("external."):]
+                    segs = _split_path(ext_ref)
+                    value = None
+                    if segs and segs[0] in external_map:
+                        name = segs[0]
+                        inner_path = ".".join(segs[1:])
+                        value = _get_nested_value(external_map.get(name, {}), inner_path)
+                    else:
+                        # try anonymous or first external
+                        inner_path = ext_ref
+                        if anonymous_externals:
+                            value = _get_nested_value(anonymous_externals[0], inner_path)
+                        elif external_map:
+                            # pick first external
+                            first = next(iter(external_map.values()))
+                            value = _get_nested_value(first, inner_path)
+                    parts.append("" if value is None else str(value))
+                else:
+                    value = _get_nested_value(json_payload, component.get("value", ""))
+                    parts.append("" if value is None else str(value))
         try:
             signature_value = _compute_hash_hex(algorithm, "".join(parts))
         except ValueError as error:  # pragma: no cover - configuration error path
             raise ValueError(f"Unable to compute signature for '{target_path}': {error}") from error
-        _set_nested_value(json_payload, target_path, signature_value)
+        # If target_path refers to external, set inside that external object
+        if target_path.startswith("external."):
+            ext_ref = target_path[len("external."):]
+            segs = _split_path(ext_ref)
+            if segs and segs[0] in external_map:
+                name = segs[0]
+                inner_path = ".".join(segs[1:])
+                if inner_path:
+                    _set_nested_value(external_map[name], inner_path, signature_value)
+                else:
+                    # set root
+                    external_map[name] = signature_value
+            else:
+                inner_path = ext_ref
+                if anonymous_externals:
+                    if inner_path:
+                        _set_nested_value(anonymous_externals[0], inner_path, signature_value)
+                    else:
+                        anonymous_externals[0] = signature_value
+                elif external_map:
+                    first_name = next(iter(external_map.keys()))
+                    if inner_path:
+                        _set_nested_value(external_map[first_name], inner_path, signature_value)
+                    else:
+                        external_map[first_name] = signature_value
+        else:
+            _set_nested_value(json_payload, target_path, signature_value)
         store_name = signature.get("store_as") or signature.get("storeAs")
         if store_name:
             normalized = str(store_name).strip()
             if normalized:
                 overrides[normalized] = signature_value
                 variables[normalized] = signature_value
+    # After signatures are computed and possibly placed into external objects,
+    # encrypt external objects and set the encrypted string into the payload
+    # at the configured override paths.
+    for override in external_overrides:
+        try:
+            path = str(override.get("path", "") or "").strip()
+            if not path:
+                continue
+            name = (override.get("name") or override.get("externalName") or "")
+            if name:
+                obj = external_map.get(str(name), {})
+            else:
+                obj = anonymous_externals.pop(0) if anonymous_externals else {}
+            key = override.get("encryption_key") or override.get("encryptionKey") or override.get("encryption_key")
+            encrypted = _encrypt_external_obj(obj, key if key else None)
+            _set_nested_value(json_payload, path, encrypted)
+        except Exception:
+            # ignore encryption errors per-override and continue
+            continue
+
     return overrides
+
+
+def _encrypt_external_obj(obj: Any, key: str | None = None) -> str:
+    """Encrypt an external object. If PyCryptodome is available and a key
+    is provided, use AES-CBC with a SHA-256-derived key and random IV. If
+    encryption is not available or key not provided, fallback to base64 of
+    the JSON string."""
+    text = json.dumps(obj, separators=(None, None)) if not isinstance(obj, str) else str(obj)
+    try:
+        if key:
+            # try PyCryptodome
+            from Crypto.Cipher import AES  # type: ignore
+            from Crypto.Util.Padding import pad  # type: ignore
+            # derive 32-byte key
+            derived = hashlib.sha256(key.encode("utf-8")).digest()
+            iv = os.urandom(16)
+            cipher = AES.new(derived, AES.MODE_CBC, iv)
+            ct = cipher.encrypt(pad(text.encode("utf-8"), AES.block_size))
+            return base64.b64encode(iv + ct).decode("ascii")
+    except Exception:
+        # fall through to base64
+        pass
+    try:
+        return base64.b64encode(text.encode("utf-8")).decode("ascii")
+    except Exception:
+        return text
 
 
 def _apply_xml_body_transforms(

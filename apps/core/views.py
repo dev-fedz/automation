@@ -184,8 +184,6 @@ class ApiRequestViewSet(viewsets.ModelViewSet):
                 models.ApiRequest.objects.filter(pk=request_id).update(order=index)
 
         return Response({"status": "ok"}, status=status.HTTP_200_OK)
-
-
 class ApiCollectionDirectoryViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.ApiCollectionDirectorySerializer
     permission_classes = [IsAuthenticated]
@@ -1223,6 +1221,19 @@ class ApiAdhocRequestView(APIView):
 
         start = time.perf_counter()
         try:
+            if resolved_json is not None:
+                try:
+                    logger.info(
+                        "API tester outbound JSON: %s",
+                        json.dumps(resolved_json, ensure_ascii=False)[:2000],
+                    )
+                except Exception:
+                    logger.info("API tester outbound JSON (unserializable)")
+            elif resolved_body not in (None, ""):
+                body_preview = resolved_body
+                if isinstance(body_preview, str) and len(body_preview) > 2000:
+                    body_preview = f"{body_preview[:2000]}…"
+                logger.info("API tester outbound body: %s", body_preview)
             response = requests.request(
                 method=method,
                 url=resolved_url,
