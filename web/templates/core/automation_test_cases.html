@@ -110,9 +110,10 @@
 Verify response status"></textarea>
                             </div>
                             <div>
-                                <label for="case-expected">Expected results (one per line)</label>
-                                <textarea id="case-expected" name="expected" rows="4" placeholder="Status=200
-payload.plan=premium"></textarea>
+                                <label for="case-expected">Expected results (key: value per line)</label>
+                                <textarea id="case-expected" name="expected" rows="4" placeholder="response.status_code: 200
+response.json.plan: premium
+# Optional note"></textarea>
                             </div>
                         </div>
                         <div class="form-row">
@@ -128,17 +129,9 @@ payload.plan=premium"></textarea>
                             <textarea id="case-dynamic" name="dynamic" rows="3" placeholder='{"expected_status": 200, "expected_plan": "premium"}'></textarea>
                             <p class="form-hint">Provide key-value pairs used during API validation. Must be valid JSON.</p>
                         </div>
-                        <div class="form-row inline">
-                            <div>
-                                <label for="case-priority">Priority</label>
-                                <input type="text" id="case-priority" name="priority" placeholder="P1">
-                            </div>
-                            <div>
-                                <label for="case-owner">Owner</label>
-                                <select id="case-owner" name="owner">
-                                    <option value="">(assignment by server)</option>
-                                </select>
-                            </div>
+                        <div class="form-row">
+                            <label for="case-priority">Priority</label>
+                            <input type="text" id="case-priority" name="priority" placeholder="P1">
                         </div>
                         <!-- Related API request removed: field retained in DB but not exposed in create/edit UI -->
                         <input type="hidden" id="case-related-api-request-id" name="related_api_request" value="">
@@ -226,8 +219,10 @@ payload.plan=premium"></textarea>
                         <textarea id="module-add-case-steps" name="steps" rows="4" placeholder="Step 1\nStep 2"></textarea>
                     </div>
                     <div class="form-row">
-                        <label for="module-add-case-expected">Expected results (one per line)</label>
-                        <textarea id="module-add-case-expected" name="expected" rows="4"></textarea>
+                        <label for="module-add-case-expected">Expected results (key: value per line)</label>
+                        <textarea id="module-add-case-expected" name="expected" rows="4" placeholder="response.status_code: 200
+response.json.plan: premium
+# Optional note"></textarea>
                     </div>
                     <div class="form-row">
                         <label for="module-add-case-precondition">Preconditions</label>
@@ -237,17 +232,27 @@ payload.plan=premium"></textarea>
                         <label for="module-add-case-requirements">Requirements</label>
                         <textarea id="module-add-case-requirements" name="requirements" rows="2" placeholder="Linked requirement IDs or description."></textarea>
                     </div>
-                    <div class="form-row inline">
-                        <div>
-                            <label for="module-add-case-priority">Priority</label>
-                            <input type="text" id="module-add-case-priority" name="priority" placeholder="P1">
-                        </div>
-                        <div>
-                            <label for="module-add-case-owner">Owner</label>
-                            <select id="module-add-case-owner" name="owner">
-                                <option value="">(assignment by server)</option>
-                            </select>
-                        </div>
+                    <div class="form-row">
+                        <label for="module-add-case-priority">Priority</label>
+                        <input type="text" id="module-add-case-priority" name="priority" placeholder="P1">
+                    </div>
+                    <div class="form-row dependency-toggle">
+                        <label class="dependency-toggle__label" for="module-add-case-requires-dependency">
+                            <input type="checkbox" id="module-add-case-requires-dependency" name="requires_dependency">
+                            <span>Require dependency test case before running</span>
+                        </label>
+                    </div>
+                    <div class="form-row dependency-settings" data-role="dependency-fields" hidden>
+                        <label for="module-add-case-dependency-id">Dependency test case</label>
+                        <select id="module-add-case-dependency-id" name="test_case_dependency" disabled>
+                            <option value="">(no dependency)</option>
+                        </select>
+                        <small class="form-hint">Only cases within the selected scenario are available.</small>
+                    </div>
+                    <div class="form-row dependency-settings" data-role="dependency-fields" hidden>
+                        <label for="module-add-case-dependency-key">Required dependency response key</label>
+                        <input type="text" id="module-add-case-dependency-key" name="dependency_response_key" placeholder="response.data.token" disabled>
+                        <small class="form-hint">Specify the JSON key that must exist in the dependency response.</small>
                     </div>
                     <input type="hidden" id="module-add-case-related-api-request-id" name="related_api_request" value="">
                     <div class="form-row">
@@ -518,6 +523,7 @@ payload.plan=premium"></textarea>
             } catch (e) { /* ignore */ }
         })();
     </script>
+    <script src="{% static 'js/api_tester.js' %}"></script>
     <script src="{% static 'js/automation.js' %}"></script>
     <script src="{% static 'js/testcase-runner.js' %}"></script>
     <script src="{% static 'js/testcase-multiple-runner.js' %}"></script>

@@ -119,15 +119,15 @@
                         <div>
                             <label for="module-add-scenario-postconditions">Postconditions</label>
                             <textarea id="module-add-scenario-postconditions" name="postconditions" rows="2"></textarea>
+                        <div class="form-row dependency-toggle">
+                            <label class="dependency-toggle__label" for="module-add-case-requires-dependency">
+                                <input type="checkbox" id="module-add-case-requires-dependency" name="requires_dependency">
+                                <span>Require dependency test case before running</span>
+                            </label>
                         </div>
-                    </div>
-                    <div class="form-row">
-                        <label for="module-add-scenario-tags">Tags</label>
-                        <input type="text" id="module-add-scenario-tags" name="tags" placeholder="comma,separated">
-                    </div>
                 </fieldset>
                 <div class="form-actions">
-                    <button type="submit" class="btn-primary">Save Scenario</button>
+                            <select id="module-add-case-dependency-id" name="test_case_dependency" disabled>
                     <button type="button" class="btn-secondary" data-action="close-module-add-scenario-modal">Cancel</button>
                 </div>
             </form>
@@ -159,18 +159,32 @@
                         <textarea id="module-add-case-steps" name="steps" rows="4" placeholder="Step 1\nStep 2"></textarea>
                     </div>
                     <div class="form-row">
-                        <label for="module-add-case-expected">Expected results (one per line)</label>
-                        <textarea id="module-add-case-expected" name="expected" rows="4"></textarea>
+                        <label for="module-add-case-expected">Expected results (key: value per line)</label>
+                        <textarea id="module-add-case-expected" name="expected" rows="4" placeholder="response.status_code: 200
+response.json.plan: premium
+# Optional note"></textarea>
                     </div>
-                    <div class="form-row inline">
-                        <div>
+                        <div class="form-row">
                             <label for="module-add-case-priority">Priority</label>
                             <input type="text" id="module-add-case-priority" name="priority" placeholder="P1">
                         </div>
-                        <div>
-                            <label for="module-add-case-owner">Owner</label>
-                            <input type="text" id="module-add-case-owner" name="owner" placeholder="owner@example.com">
-                        </div>
+                    <div class="form-row">
+                        <label class="checkbox" for="module-add-case-requires-dependency">
+                            <input type="checkbox" id="module-add-case-requires-dependency" name="requires_dependency">
+                            Require dependency test case before running
+                        </label>
+                    </div>
+                    <div class="form-row dependency-settings" data-role="dependency-fields" hidden>
+                        <label for="module-add-case-dependency-id">Dependency test case</label>
+                        <select id="module-add-case-dependency-id" name="test_case_dependency">
+                            <option value="">(no dependency)</option>
+                        </select>
+                        <small class="form-hint">Only cases from the same scenario can be selected.</small>
+                    </div>
+                    <div class="form-row dependency-settings" data-role="dependency-fields" hidden>
+                        <label for="module-add-case-dependency-key">Required dependency response key</label>
+                        <input type="text" id="module-add-case-dependency-key" name="dependency_response_key" placeholder="response.data.token" disabled>
+                        <small class="form-hint">The JSON key that must exist in the dependency response.</small>
                     </div>
                                 <!-- Related API Request input removed: use explorer to choose a request -->
                                 <input type="hidden" id="module-add-case-related-api-request-id" name="related_api_request" value="">

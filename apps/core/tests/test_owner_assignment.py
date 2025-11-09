@@ -6,33 +6,43 @@ from apps.core.models import TestCase as TestCaseModel
 
 
 class OwnerAssignmentTest(TestCase):
-    def test_owner_set_when_payload_owner_blank(self):
+    def setUp(self):
         User = get_user_model()
-        user = User.objects.create_user(username='owner_user', password='pass')
+        self.user = User.objects.create_user(username='owner_user', password='pass')
+        self.client = APIClient()
+        # Authenticate the client as the created user so the API can infer ownership.
+        self.client.force_authenticate(user=self.user)
 
-        client = APIClient()
-        # Authenticate the client as the created user
-        client.force_authenticate(user=user)
-
-        # Create a minimal TestPlan and TestScenario required by TestCase
+        # Create the minimal plan/scenario hierarchy required by TestCase creates.
         from apps.core.models import TestPlan, TestScenario
-        plan = TestPlan.objects.create(name='Plan 1')
-        scenario = TestScenario.objects.create(plan=plan, title='Scenario 1')
+        self.plan = TestPlan.objects.create(name='Plan 1')
+        self.scenario = TestScenario.objects.create(plan=self.plan, title='Scenario 1')
 
-        payload = {
-            'scenario': scenario.pk,
+    def _base_payload(self) -> dict:
+        return {
+            'scenario': self.scenario.pk,
             'title': 'Owner test',
             'summary': 'testing owner assignment',
             'precondition': 'pre',
-            'owner': '',
         }
 
-        resp = client.post('/api/core/test-cases/', payload, format='json')
+    def _assert_owner_assigned(self, resp):
         self.assertEqual(resp.status_code, 201, msg=f'Unexpected response: {resp.data}')
-
         created_id = resp.data.get('id')
         self.assertIsNotNone(created_id)
-
         inst = TestCaseModel.objects.get(pk=created_id)
         self.assertIsNotNone(inst.owner)
-        self.assertEqual(inst.owner.pk, user.pk)
+        self.assertEqual(inst.owner.pk, self.user.pk)
+
+    def test_owner_set_when_payload_owner_blank(self):
+        payload = self._base_payload()
+        payload['owner'] = ''
+
+        resp = self.client.post('/api/core/test-cases/', payload, format='json')
+        self._assert_owner_assigned(resp)
+
+    def test_owner_set_when_owner_field_missing(self):
+        payload = self._base_payload()
+
+        resp = self.client.post('/api/core/test-cases/', payload, format='json')
+        self._assert_owner_assigned(resp)

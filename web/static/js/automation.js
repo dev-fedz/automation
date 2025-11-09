@@ -90,9 +90,238 @@
         }
     };
 
-    const formatStructuredValue = (value) => {
-        if (!value) {
+    const coerceExpectedResultValue = (raw) => {
+        if (raw === null || raw === undefined) {
             return '';
+        }
+        if (typeof raw !== 'string') {
+            return raw;
+        }
+        const trimmed = raw.trim();
+        if (!trimmed) {
+            return '';
+        }
+        if (/^(true|false)$/i.test(trimmed)) {
+            return trimmed.toLowerCase() === 'true';
+        }
+        if (/^null$/i.test(trimmed)) {
+            return null;
+        }
+        if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+            const num = Number(trimmed);
+            if (!Number.isNaN(num)) {
+                return num;
+            }
+        }
+        if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('"') && trimmed.endsWith('"'))) {
+            try {
+                return JSON.parse(trimmed);
+            } catch (error) {
+                // fall through to return raw string
+            }
+        }
+        return trimmed;
+    };
+
+    const stringifyExpectedResultValue = (value) => {
+        if (value === null) {
+            return 'null';
+        }
+        if (value === undefined) {
+            return '';
+        }
+        if (typeof value === 'string') {
+            return value;
+        }
+        if (typeof value === 'number' || typeof value === 'boolean') {
+            return String(value);
+        }
+        if (typeof value === 'object') {
+            try {
+                return JSON.stringify(value);
+            } catch (error) {
+                return String(value);
+            }
+        }
+        return String(value);
+    };
+
+    const normalizeExpectedResultsEntries = (value) => {
+        if (!value && value !== 0) {
+            return [];
+        }
+        let rawEntries = value;
+        if (typeof value === 'string') {
+            try {
+                rawEntries = JSON.parse(value);
+            } catch (error) {
+                return [];
+            }
+        }
+        if (!Array.isArray(rawEntries)) {
+            return [];
+        }
+        const entries = [];
+        rawEntries.forEach((entry) => {
+            if (!entry && entry !== 0) {
+                return;
+            }
+            if (typeof entry === 'string') {
+                const trimmed = entry.trim();
+                if (!trimmed) {
+                    return;
+                }
+                let separatorIndex = trimmed.indexOf(':');
+                if (separatorIndex === -1) {
+                    separatorIndex = trimmed.indexOf('=');
+                }
+                if (separatorIndex > 0) {
+                    const key = trimmed.slice(0, separatorIndex).trim();
+                    if (!key) {
+                        return;
+                    }
+                    const valuePart = trimmed.slice(separatorIndex + 1).trim();
+                    entries.push({ [key]: coerceExpectedResultValue(valuePart) });
+                } else {
+                    entries.push({ note: trimmed });
+                }
+                return;
+            }
+            if (Array.isArray(entry)) {
+                entry.forEach((nested) => {
+                    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+                        Object.keys(nested).forEach((key) => {
+                            if (key === 'note') {
+                                entries.push({ note: nested[key] });
+                            } else {
+                                entries.push({ [key]: nested[key] });
+                            }
+                        });
+                    }
+                });
+                return;
+            }
+            if (entry && typeof entry === 'object') {
+                const keys = Object.keys(entry);
+                if (!keys.length) {
+                    return;
+                }
+                keys.forEach((key) => {
+                    if (key === 'note') {
+                        entries.push({ note: entry[key] });
+                    } else {
+                        entries.push({ [key]: entry[key] });
+                    }
+                });
+                return;
+            }
+        });
+        return entries;
+    };
+
+    const parseExpectedResultsTextarea = (raw) => {
+        if (!raw || !raw.trim()) {
+            return [];
+        }
+        const lines = raw.split(/\n/);
+        const entries = [];
+        lines.forEach((line, idx) => {
+            const trimmed = line.trim();
+            if (!trimmed) {
+                return;
+            }
+            if (trimmed.startsWith('#')) {
+                const note = trimmed.slice(1).trim();
+                if (note) {
+                    entries.push({ note });
+                }
+                return;
+            }
+            let separatorIndex = trimmed.indexOf(':');
+            if (separatorIndex === -1) {
+                separatorIndex = trimmed.indexOf('=');
+            }
+            if (separatorIndex === -1) {
+                throw new Error(`Expected result line ${idx + 1} must use "key: value" or "key=value" format.`);
+            }
+            const key = trimmed.slice(0, separatorIndex).trim();
+            if (!key) {
+                throw new Error(`Expected result line ${idx + 1} must include a key before the separator.`);
+            }
+            const valuePart = trimmed.slice(separatorIndex + 1).trim();
+            entries.push({ [key]: coerceExpectedResultValue(valuePart) });
+        });
+        return entries;
+    };
+
+    const formatExpectedResultsTextarea = (entries) => {
+        if (!Array.isArray(entries) || !entries.length) {
+            return '';
+        }
+        const lines = [];
+        entries.forEach((entry) => {
+            if (!entry && entry !== 0) {
+                return;
+            }
+            if (typeof entry === 'string') {
+                if (entry.trim()) {
+                    lines.push(entry.trim());
+                }
+                return;
+            }
+            if (entry && typeof entry === 'object') {
+                const keys = Object.keys(entry);
+                if (!keys.length) {
+                    return;
+                }
+                if (keys.length === 1) {
+                    const key = keys[0];
+                    if (key === 'note') {
+                        const noteVal = stringifyExpectedResultValue(entry[key]);
+                        if (noteVal) {
+                            lines.push(`# ${noteVal}`);
+                        }
+                    } else {
+                        lines.push(`${key}: ${stringifyExpectedResultValue(entry[key])}`);
+                    }
+                    return;
+                }
+                keys.forEach((key) => {
+                    if (key === 'note') {
+                        const noteVal = stringifyExpectedResultValue(entry[key]);
+                        if (noteVal) {
+                            lines.push(`# ${noteVal}`);
+                        }
+                    } else {
+                        lines.push(`${key}: ${stringifyExpectedResultValue(entry[key])}`);
+                    }
+                });
+            }
+        });
+        return lines.join('\n');
+    };
+
+    window.__automationHelpers = Object.assign({}, window.__automationHelpers || {}, {
+        parseExpectedResultsTextarea,
+        formatExpectedResultsTextarea,
+        normalizeExpectedResultsEntries,
+        coerceExpectedResultValue,
+        stringifyExpectedResultValue,
+    });
+
+    const formatStructuredValue = (value) => {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        if (typeof value === 'object' && !Array.isArray(value)) {
+            const keys = Object.keys(value);
+            if (keys.length === 1) {
+                const key = keys[0];
+                if (key === 'note') {
+                    return formatStructuredValue(value[key]);
+                }
+                return `${key}: ${formatStructuredValue(value[key])}`;
+            }
         }
         if (typeof value === 'string') {
             return value;
@@ -191,6 +420,159 @@
         const planModalCloseButtons = Array.from(root.querySelectorAll('[data-action="close-plan-modal"]'));
         const body = document.body;
 
+        const dependencyControls = {
+            checkbox: document.getElementById('module-add-case-requires-dependency'),
+            fields: Array.from(document.querySelectorAll('[data-role="dependency-fields"]')),
+            select: document.getElementById('module-add-case-dependency-id'),
+            key: document.getElementById('module-add-case-dependency-key'),
+        };
+        const dependencyOptionsCache = new Map();
+
+        const ensureTrailingSlash = (value) => {
+            if (!value) {
+                return '';
+            }
+            return value.endsWith('/') ? value : `${value}/`;
+        };
+
+        const buildUrl = (base, params) => {
+            if (!params) {
+                return base;
+            }
+            const searchParams = new URLSearchParams();
+            Object.entries(params).forEach(([key, raw]) => {
+                if (raw === undefined || raw === null) {
+                    return;
+                }
+                const value = String(raw);
+                if (!value.trim()) {
+                    return;
+                }
+                searchParams.append(key, value);
+            });
+            const suffix = searchParams.toString();
+            if (!suffix) {
+                return base;
+            }
+            return `${base}?${suffix}`;
+        };
+
+        const getCasesEndpoint = () => ensureTrailingSlash(apiEndpoints.cases || '/api/core/test-cases/');
+
+        const toggleDependencyFields = (force, options = {}) => {
+            const settings = { preserveValues: false, ...options };
+            const show = typeof force === 'boolean'
+                ? force
+                : !!(dependencyControls.checkbox && dependencyControls.checkbox.checked);
+            dependencyControls.fields.forEach((node) => {
+                if (!node) {
+                    return;
+                }
+                node.hidden = !show;
+            });
+            if (dependencyControls.select) {
+                dependencyControls.select.disabled = !show;
+                if (!show && !settings.preserveValues) {
+                    dependencyControls.select.value = '';
+                }
+            }
+            if (dependencyControls.key) {
+                dependencyControls.key.disabled = !show;
+                if (!show && !settings.preserveValues) {
+                    dependencyControls.key.value = '';
+                }
+            }
+        };
+
+        const extractCases = (payload) => {
+            if (!payload) {
+                return [];
+            }
+            if (Array.isArray(payload)) {
+                return payload;
+            }
+            if (payload && Array.isArray(payload.results)) {
+                return payload.results;
+            }
+            return [];
+        };
+
+        const loadDependencyOptions = async (scenarioId, excludeId = null) => {
+            if (!dependencyControls.select) {
+                return;
+            }
+            const select = dependencyControls.select;
+            select.innerHTML = '<option value="">(no dependency)</option>';
+            if (!scenarioId) {
+                select.disabled = true;
+                return;
+            }
+            const allowSelection = !!(dependencyControls.checkbox && dependencyControls.checkbox.checked);
+            select.disabled = !allowSelection;
+            const cacheKey = Number.isFinite(Number(scenarioId)) ? Number(scenarioId) : String(scenarioId);
+            let cached = dependencyOptionsCache.get(cacheKey);
+            if (!cached) {
+                try {
+                    const url = buildUrl(getCasesEndpoint(), { scenario: scenarioId });
+                    const resp = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                    if (!resp.ok) {
+                        throw new Error(`Failed to load dependency options (${resp.status})`);
+                    }
+                    const data = await resp.json().catch(() => null);
+                    cached = extractCases(data);
+                } catch (error) {
+                    cached = [];
+                    try {
+                        // eslint-disable-next-line no-console
+                        console.warn('[automation] Unable to load dependency options:', error);
+                    } catch (err) {
+                        /* ignore */
+                    }
+                }
+                dependencyOptionsCache.set(cacheKey, cached || []);
+            }
+            (cached || []).forEach((testCase) => {
+                if (!testCase || testCase.id === undefined || testCase.id === null) {
+                    return;
+                }
+                if (excludeId && Number(testCase.id) === Number(excludeId)) {
+                    return;
+                }
+                const option = document.createElement('option');
+                option.value = testCase.id;
+                const parts = [];
+                if (testCase.testcase_id) {
+                    parts.push(testCase.testcase_id);
+                }
+                if (testCase.title) {
+                    parts.push(testCase.title);
+                }
+                if (!parts.length) {
+                    parts.push(`Case #${testCase.id}`);
+                }
+                option.textContent = parts.join(' — ');
+                select.appendChild(option);
+            });
+        };
+
+        if (dependencyControls.checkbox) {
+            dependencyControls.checkbox.addEventListener('change', () => {
+                const checked = !!dependencyControls.checkbox.checked;
+                toggleDependencyFields(checked, { preserveValues: true });
+                if (checked) {
+                    const scenarioInput = document.getElementById('module-add-case-scenario-id');
+                    const hiddenId = document.getElementById('module-add-case-testcase-id');
+                    const scenarioId = scenarioInput && scenarioInput.value ? scenarioInput.value : null;
+                    if (scenarioId) {
+                        const exclude = hiddenId && hiddenId.value ? hiddenId.value : null;
+                        loadDependencyOptions(scenarioId, exclude);
+                    }
+                }
+            });
+        }
+
+        toggleDependencyFields(false, { preserveValues: true });
+
         const inputs = {
             plan: {
                 name: document.getElementById('plan-name'),
@@ -198,7 +580,6 @@
                 description: document.getElementById('plan-description'),
                 scopeIn: document.getElementById('plan-scope-in'),
                 scopeOut: document.getElementById('plan-scope-out'),
-                modules: document.getElementById('plan-modules'),
                 tools: document.getElementById('plan-tools'),
                 functional: document.getElementById('plan-functional'),
                 nonFunctional: document.getElementById('plan-non-functional'),
@@ -223,7 +604,6 @@
                 requirements: document.getElementById('case-requirements'),
                 dynamic: document.getElementById('case-dynamic'),
                 priority: document.getElementById('case-priority'),
-                owner: document.getElementById('case-owner'),
             },
             maintenance: {
                 version: document.getElementById('maintenance-version'),
@@ -865,6 +1245,8 @@
                                                     // ensure modal title reflects creation
                                                     const modalTitle = document.getElementById('module-add-case-modal-title');
                                                     if (modalTitle) modalTitle.textContent = 'Add Test Case';
+                                                    if (typeof toggleDependencyFields === 'function') toggleDependencyFields(false);
+                                                    if (sid && typeof loadDependencyOptions === 'function') loadDependencyOptions(sid);
                                                     caseModal.hidden = false; body.classList.add('automation-modal-open');
                                                     const titleInput = document.getElementById('module-add-case-title'); if (titleInput) titleInput.focus();
                                                 } else {
@@ -2589,8 +2971,12 @@
                     const desc = escapeHtml(testCase.description || '');
                     const created = escapeHtml(formatDateTime(testCase.created_at || null));
                     const updated = escapeHtml(formatDateTime(testCase.updated_at || null));
+                    const requiresDependencyAttr = testCase.requires_dependency ? '1' : '0';
+                    const dependencyIdAttr = testCase.test_case_dependency || testCase.test_case_dependency_id || '';
+                    const dependencyKeyAttr = escapeHtml(testCase.dependency_response_key || '');
+                    const expectedAttr = escapeHtml(JSON.stringify(testCase.expected_results || []));
                     return `
-                        <tr data-case-id="${testCase.id || ''}">
+                        <tr data-case-id="${testCase.id || ''}" data-scenario-id="${testCase.scenario || testCase.scenario_id || ''}" data-requires-dependency="${requiresDependencyAttr}" data-dependency-id="${dependencyIdAttr}" data-dependency-key="${dependencyKeyAttr}" data-expected-results="${expectedAttr}">
                             <td>
                                 <label class="case-checkbox-label">
                                     <input type="checkbox" class="case-checkbox" data-case-id="${testCase.id || ''}" aria-label="Select test case ${idLabel}" />
@@ -2606,7 +2992,7 @@
                                 <div class="table-action-group">
                                     <button type="button" class="action-button" data-action="view-case" data-case-id="${testCase.id || ''}" data-related-api-request-name="${escapeHtml(testCase.related_api_request_name || '')}">View</button>
                                     <button type="button" class="action-button" data-action="edit-case" data-case-id="${testCase.id || ''}" data-related-api-request-name="${escapeHtml(testCase.related_api_request_name || '')}">Edit</button>
-                                    ${testCase.related_api_request ? `<button type="button" class="action-button" data-action="run-case" data-case-id="${testCase.id || ''}" data-request-id="${testCase.related_api_request || ''}" title="Run related API request">Run</button>` : ''}
+                                    ${testCase.related_api_request ? `<button type="button" class="action-button" data-action="run-case" data-case-id="${testCase.id || ''}" data-request-id="${testCase.related_api_request || ''}" data-expected-results="${expectedAttr}" title="Run related API request">Run</button>` : ''}
                                     <button type="button" class="action-button" data-action="delete-case" data-case-id="${testCase.id || ''}" data-variant="danger">Delete</button>
                                 </div>
                             </td>
@@ -2629,7 +3015,7 @@
                 const card = document.createElement('article');
                 card.className = 'automation-case-card';
                 const steps = Array.isArray(testCase.steps) ? testCase.steps : [];
-                const expected = Array.isArray(testCase.expected_results) ? testCase.expected_results : [];
+                const expected = normalizeExpectedResultsEntries(Array.isArray(testCase.expected_results) ? testCase.expected_results : []);
                 const dynamic = testCase.dynamic_variables || {};
                 card.innerHTML = `
                     <header>
@@ -2931,7 +3317,9 @@
                         const stepsInput = document.getElementById('module-add-case-steps');
                         const expectedInput = document.getElementById('module-add-case-expected');
                         const priorityInput = document.getElementById('module-add-case-priority');
-                        const ownerInput = document.getElementById('module-add-case-owner');
+                        const requiresDependencyInput = document.getElementById('module-add-case-requires-dependency');
+                        const dependencySelect = document.getElementById('module-add-case-dependency-id');
+                        const dependencyKeyInput = document.getElementById('module-add-case-dependency-key');
                         // collection/request UI removed from modal
                         const testcaseIdInput = document.getElementById('module-add-case-testcase-id');
                         const sid = scenarioInput && scenarioInput.value ? Number(scenarioInput.value) : null;
@@ -2939,17 +3327,44 @@
                             setStatus('Scenario id missing for test case.', 'error');
                             return;
                         }
+                        let expectedEntries = [];
+                        try {
+                            expectedEntries = parseExpectedResultsTextarea(expectedInput && expectedInput.value ? expectedInput.value : '');
+                        } catch (parseError) {
+                            const message = parseError instanceof Error ? parseError.message : 'Unable to parse expected results.';
+                            setStatus(message, 'error');
+                            return;
+                        }
                         const payload = {
                             scenario: sid,
                             title: (titleInput && titleInput.value || '').trim(),
                             description: descInput && descInput.value || '',
                             steps: stepsInput && stepsInput.value ? stepsInput.value.split(/\n/).map((s) => s.trim()).filter(Boolean) : [],
-                            expected_results: expectedInput && expectedInput.value ? expectedInput.value.split(/\n/).map((s) => ({ note: s.trim() })).filter(Boolean) : [],
+                            expected_results: expectedEntries,
                             priority: priorityInput && priorityInput.value ? priorityInput.value : '',
-                            owner: ownerInput && ownerInput.value ? ownerInput.value : '',
                             precondition: (document.getElementById('module-add-case-precondition') && document.getElementById('module-add-case-precondition').value) || '',
                             requirements: (document.getElementById('module-add-case-requirements') && document.getElementById('module-add-case-requirements').value) || '',
                         };
+                        const requiresDependency = !!(requiresDependencyInput && requiresDependencyInput.checked);
+                        payload.requires_dependency = requiresDependency;
+                        if (requiresDependency) {
+                            const depValueRaw = dependencySelect && dependencySelect.value ? dependencySelect.value : '';
+                            const depValue = depValueRaw ? Number(depValueRaw) : NaN;
+                            if (!depValueRaw || Number.isNaN(depValue) || depValue <= 0) {
+                                setStatus('Select a dependency test case before saving.', 'error');
+                                return;
+                            }
+                            payload.test_case_dependency = depValue;
+                            const depKey = dependencyKeyInput && dependencyKeyInput.value ? dependencyKeyInput.value.trim() : '';
+                            if (!depKey) {
+                                setStatus('Enter the dependency response key before saving.', 'error');
+                                return;
+                            }
+                            payload.dependency_response_key = depKey;
+                        } else {
+                            payload.test_case_dependency = null;
+                            payload.dependency_response_key = '';
+                        }
                         // If the API Explorer selection exists, force-sync label -> hidden
                         // and include related_api_request in the payload.
                         try {
@@ -2993,6 +3408,8 @@
                         // clear edit marker if present
                         if (testcaseIdInput) testcaseIdInput.value = '';
                         moduleAddCaseForm.reset();
+                        if (typeof toggleDependencyFields === 'function') toggleDependencyFields(false);
+                        dependencyOptionsCache.delete(Number.isFinite(sid) ? Number(sid) : String(sid));
                         setStatus('Test case saved.', 'success');
                         // Refresh plans/scenarios so the case updates appear in the table
                         try {
@@ -3078,20 +3495,30 @@
                         hid.value = data && (data.id || data.pk) ? (data.id || data.pk) : '';
                         // populate fields
                         const scenarioInput = document.getElementById('module-add-case-scenario-id'); if (scenarioInput) scenarioInput.value = data && (data.scenario || data.scenario_id) ? (data.scenario || data.scenario_id) : '';
+                        if (scenarioInput && typeof loadDependencyOptions === 'function') await loadDependencyOptions(Number(scenarioInput.value || data.scenario || data.scenario_id || 0), data && data.id);
                         const titleInput = document.getElementById('module-add-case-title'); if (titleInput) titleInput.value = data && data.title ? data.title : '';
                         const descInput = document.getElementById('module-add-case-description'); if (descInput) descInput.value = data && data.description ? data.description : '';
                         const stepsInput = document.getElementById('module-add-case-steps'); if (stepsInput) stepsInput.value = Array.isArray(data && data.steps ? data.steps : []) ? (data.steps || []).join('\n') : (data.steps || '');
                         const expectedInput = document.getElementById('module-add-case-expected'); if (expectedInput) {
-                            if (Array.isArray(data && data.expected_results ? data.expected_results : [])) {
-                                expectedInput.value = (data.expected_results || []).map((r) => (r && (r.note || r) ? (r.note || r) : '')).filter(Boolean).join('\n');
-                            } else {
-                                expectedInput.value = data.expected_results || '';
-                            }
+                            const normalizedExpected = Array.isArray(data && data.expected_results ? data.expected_results : [])
+                                ? data.expected_results
+                                : normalizeExpectedResultsEntries(data && data.expected_results ? data.expected_results : []);
+                            expectedInput.value = formatExpectedResultsTextarea(normalizedExpected);
                         }
                         const priorityInput = document.getElementById('module-add-case-priority'); if (priorityInput) priorityInput.value = data && data.priority ? data.priority : '';
-                        const ownerInput = document.getElementById('module-add-case-owner'); if (ownerInput) ownerInput.value = data && data.owner ? data.owner : '';
                         const preconditionsInput = document.getElementById('module-add-case-precondition'); if (preconditionsInput) preconditionsInput.value = data && data.precondition ? data.precondition : '';
                         const requirementsInput = document.getElementById('module-add-case-requirements'); if (requirementsInput) requirementsInput.value = data && data.requirements ? data.requirements : '';
+                        const dependencyCheckbox = document.getElementById('module-add-case-requires-dependency');
+                        const dependencySelect = document.getElementById('module-add-case-dependency-id');
+                        const dependencyKeyInput = document.getElementById('module-add-case-dependency-key');
+                        if (dependencyCheckbox) dependencyCheckbox.checked = Boolean(data && data.requires_dependency);
+                        if (typeof toggleDependencyFields === 'function') toggleDependencyFields(Boolean(data && data.requires_dependency), { preserveValues: true });
+                        if (dependencySelect) {
+                            await loadDependencyOptions(data && (data.scenario || data.scenario_id), data && data.id);
+                            const depId = data && data.test_case_dependency ? data.test_case_dependency : data && data.test_case_dependency_id ? data.test_case_dependency_id : null;
+                            dependencySelect.value = depId ? String(depId) : '';
+                        }
+                        if (dependencyKeyInput) dependencyKeyInput.value = data && data.dependency_response_key ? data.dependency_response_key : '';
                         // Populate related_api_request hidden input and visible label
                         try {
                             const relatedId = (data && (data.related_api_request || data.related_api_request_id)) ? (data.related_api_request || data.related_api_request_id) : null;
@@ -3133,7 +3560,9 @@
                                 if (openApiBtn) openApiBtn.hidden = false;
                             }
                         } catch (e) { /* ignore */ }
-                        [titleInput, descInput, stepsInput, expectedInput, priorityInput, ownerInput, requestInput].forEach((n) => { if (n) { n.readOnly = isView; n.disabled = isView; } });
+                        const editableFields = [titleInput, descInput, stepsInput, expectedInput, priorityInput, requestInput, preconditionsInput, requirementsInput, dependencySelect, dependencyKeyInput];
+                        editableFields.forEach((n) => { if (n) { if (n.tagName === 'SELECT') { n.disabled = isView; } else { n.readOnly = isView; n.disabled = isView; } } });
+                        if (dependencyCheckbox) dependencyCheckbox.disabled = isView;
                         const submit = form.querySelector('button[type="submit"]'); if (submit) submit.hidden = isView;
                     } catch (err) {
                         setStatus(err instanceof Error ? err.message : 'Unable to open test case.', 'error');
@@ -3659,7 +4088,12 @@
             }
             try {
                 const steps = splitList(inputs.case.steps.value).map((value, index) => ({ order: index + 1, action: value }));
-                const expected = splitList(inputs.case.expected.value).map((value) => ({ note: value }));
+                let expected = [];
+                try {
+                    expected = parseExpectedResultsTextarea(inputs.case.expected.value);
+                } catch (parseError) {
+                    throw parseError;
+                }
                 const dynamic = parseJsonTextarea(inputs.case.dynamic.value, 'Dynamic variables');
                 const payload = {
                     scenario: scenario.id,
@@ -3669,7 +4103,6 @@
                     expected_results: expected,
                     dynamic_variables: dynamic,
                     priority: inputs.case.priority.value || '',
-                    owner: inputs.case.owner.value || '',
                     precondition: (document.getElementById('case-precondition') && document.getElementById('case-precondition').value) || '',
                     requirements: (document.getElementById('case-requirements') && document.getElementById('case-requirements').value) || '',
                 };

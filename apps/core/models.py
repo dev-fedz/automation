@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 
@@ -515,6 +516,10 @@ class TestCase(TimeStampedModel):
         blank=True,
         related_name="dependents",
     )
+    # Flag indicating this case requires a dependency run to provide data before execution.
+    requires_dependency = models.BooleanField(default=False)
+    # Dot-notation path to extract from the dependency response payload.
+    dependency_response_key = models.CharField(max_length=255, blank=True)
 
     class Meta:
         ordering = ["scenario", "testcase_id", "id"]
@@ -595,7 +600,22 @@ class TestCase(TimeStampedModel):
         full graph algorithm would be required; this basic check is adequate
         for common accidental mistakes.
         """
-        from django.core.exceptions import ValidationError
+        super().clean()
+
+        # Normalize boolean based on provided relationships
+        dependency_requested = bool(
+            self.requires_dependency
+            or self.test_case_dependency_id
+            or (self.dependency_response_key and str(self.dependency_response_key).strip())
+        )
+        if dependency_requested and not self.test_case_dependency_id:
+            raise ValidationError({
+                "test_case_dependency": "Select a dependency test case when dependency data is required.",
+            })
+        if dependency_requested and not (self.dependency_response_key and str(self.dependency_response_key).strip()):
+            raise ValidationError({
+                "dependency_response_key": "Enter the response key that must exist in the dependency output.",
+            })
 
         # Prevent direct self-dependency
         if self.test_case_dependency and self.test_case_dependency_id == self.id:
@@ -607,3 +627,22 @@ class TestCase(TimeStampedModel):
                 raise ValidationError({
                     "test_case_dependency": "Circular dependency detected (A -> B -> A).",
                 })
+
+        # Ensure dependency belongs to the same scenario to avoid cross-plan coupling
+        if (
+            dependency_requested
+            and self.scenario_id
+            and self.test_case_dependency
+            and self.test_case_dependency.scenario_id != self.scenario_id
+        ):
+            raise ValidationError({
+                "test_case_dependency": "Dependency must belong to the same scenario.",
+            })
+
+        # Ensure model flags stay in sync when dependency not required
+        if not dependency_requested:
+            self.requires_dependency = False
+            self.dependency_response_key = ""
+        else:
+            self.requires_dependency = True
+            self.dependency_response_key = str(self.dependency_response_key).strip()

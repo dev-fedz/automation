@@ -80,6 +80,221 @@
         return date.toLocaleString();
     };
 
+    const fallbackCoerceExpectedResultValue = (raw) => {
+        if (raw === null || raw === undefined) {
+            return "";
+        }
+        if (typeof raw !== "string") {
+            return raw;
+        }
+        const trimmed = raw.trim();
+        if (!trimmed) {
+            return "";
+        }
+        if (/^(true|false)$/i.test(trimmed)) {
+            return trimmed.toLowerCase() === "true";
+        }
+        if (/^null$/i.test(trimmed)) {
+            return null;
+        }
+        if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+            const num = Number(trimmed);
+            if (!Number.isNaN(num)) {
+                return num;
+            }
+        }
+        if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]")) || (trimmed.startsWith('"') && trimmed.endsWith('"'))) {
+            try {
+                return JSON.parse(trimmed);
+            } catch (error) {
+                // ignore parse failure; return raw string below
+            }
+        }
+        return trimmed;
+    };
+
+    const fallbackStringifyExpectedResultValue = (value) => {
+        if (value === null) {
+            return "null";
+        }
+        if (value === undefined) {
+            return "";
+        }
+        if (typeof value === "string") {
+            return value;
+        }
+        if (typeof value === "number" || typeof value === "boolean") {
+            return String(value);
+        }
+        if (typeof value === "object") {
+            try {
+                return JSON.stringify(value);
+            } catch (error) {
+                return String(value);
+            }
+        }
+        return String(value);
+    };
+
+    const fallbackNormalizeExpectedResultsEntries = (value) => {
+        if (!value && value !== 0) {
+            return [];
+        }
+        let rawEntries = value;
+        if (typeof value === 'string') {
+            try {
+                rawEntries = JSON.parse(value);
+            } catch (error) {
+                return [];
+            }
+        }
+        if (!Array.isArray(rawEntries)) {
+            return [];
+        }
+        const entries = [];
+        rawEntries.forEach((entry) => {
+            if (!entry && entry !== 0) {
+                return;
+            }
+            if (typeof entry === 'string') {
+                const trimmed = entry.trim();
+                if (!trimmed) {
+                    return;
+                }
+                let separatorIndex = trimmed.indexOf(':');
+                if (separatorIndex === -1) {
+                    separatorIndex = trimmed.indexOf('=');
+                }
+                if (separatorIndex > 0) {
+                    const key = trimmed.slice(0, separatorIndex).trim();
+                    if (!key) {
+                        return;
+                    }
+                    const valuePart = trimmed.slice(separatorIndex + 1).trim();
+                    entries.push({ [key]: fallbackCoerceExpectedResultValue(valuePart) });
+                } else {
+                    entries.push({ note: trimmed });
+                }
+                return;
+            }
+            if (Array.isArray(entry)) {
+                entry.forEach((nested) => {
+                    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+                        Object.keys(nested).forEach((key) => {
+                            if (key === 'note') {
+                                entries.push({ note: nested[key] });
+                            } else {
+                                entries.push({ [key]: nested[key] });
+                            }
+                        });
+                    }
+                });
+                return;
+            }
+            if (entry && typeof entry === 'object') {
+                const keys = Object.keys(entry);
+                if (!keys.length) {
+                    return;
+                }
+                keys.forEach((key) => {
+                    if (key === 'note') {
+                        entries.push({ note: entry[key] });
+                    } else {
+                        entries.push({ [key]: entry[key] });
+                    }
+                });
+            }
+        });
+        return entries;
+    };
+
+    const fallbackParseExpectedResultsTextarea = (raw) => {
+        if (!raw || !raw.trim()) {
+            return [];
+        }
+        const lines = raw.split(/\n/);
+        const entries = [];
+        lines.forEach((line, idx) => {
+            const trimmed = line.trim();
+            if (!trimmed) {
+                return;
+            }
+            if (trimmed.startsWith('#')) {
+                const note = trimmed.slice(1).trim();
+                if (note) {
+                    entries.push({ note });
+                }
+                return;
+            }
+            let separatorIndex = trimmed.indexOf(':');
+            if (separatorIndex === -1) {
+                separatorIndex = trimmed.indexOf('=');
+            }
+            if (separatorIndex === -1) {
+                throw new Error(`Expected result line ${idx + 1} must use "key: value" or "key=value" format.`);
+            }
+            const key = trimmed.slice(0, separatorIndex).trim();
+            if (!key) {
+                throw new Error(`Expected result line ${idx + 1} must include a key before the separator.`);
+            }
+            const valuePart = trimmed.slice(separatorIndex + 1).trim();
+            entries.push({ [key]: fallbackCoerceExpectedResultValue(valuePart) });
+        });
+        return entries;
+    };
+
+    const fallbackFormatExpectedResultsTextarea = (entries) => {
+        if (!Array.isArray(entries) || !entries.length) {
+            return '';
+        }
+        const lines = [];
+        entries.forEach((entry) => {
+            if (!entry && entry !== 0) {
+                return;
+            }
+            if (typeof entry === 'string') {
+                if (entry.trim()) {
+                    lines.push(entry.trim());
+                }
+                return;
+            }
+            if (entry && typeof entry === 'object') {
+                const keys = Object.keys(entry);
+                if (!keys.length) {
+                    return;
+                }
+                if (keys.length === 1) {
+                    const key = keys[0];
+                    if (key === 'note') {
+                        const noteVal = fallbackStringifyExpectedResultValue(entry[key]);
+                        if (noteVal) {
+                            lines.push(`# ${noteVal}`);
+                        }
+                    } else {
+                        lines.push(`${key}: ${fallbackStringifyExpectedResultValue(entry[key])}`);
+                    }
+                    return;
+                }
+                keys.forEach((key) => {
+                    if (key === 'note') {
+                        const noteVal = fallbackStringifyExpectedResultValue(entry[key]);
+                        if (noteVal) {
+                            lines.push(`# ${noteVal}`);
+                        }
+                    } else {
+                        lines.push(`${key}: ${fallbackStringifyExpectedResultValue(entry[key])}`);
+                    }
+                });
+            }
+        });
+        return lines.join('\n');
+    };
+
+    const automationHelpers = window.__automationHelpers || {};
+    const normalizeExpectedResultsEntries = automationHelpers.normalizeExpectedResultsEntries || fallbackNormalizeExpectedResultsEntries;
+    const parseExpectedResultsTextarea = automationHelpers.parseExpectedResultsTextarea || fallbackParseExpectedResultsTextarea;
+    const formatExpectedResultsTextarea = automationHelpers.formatExpectedResultsTextarea || fallbackFormatExpectedResultsTextarea;
+
     // Normalize scenario objects from the API so `module` and `plan` are ids
     // (some API responses may return nested objects for these fields).
     const normalizeScenario = (s) => {
@@ -227,6 +442,7 @@
             mappings: ensureTrailingSlash(apiEndpoints.risk_mitigations || ""),
             testTools: ensureTrailingSlash(apiEndpoints.test_tools || ""),
             testModules: ensureTrailingSlash(apiEndpoints.test_modules || ""),
+            cases: ensureTrailingSlash(apiEndpoints.cases || ""),
         };
 
         if (!endpoints.environments || !endpoints.risks || !endpoints.mitigations || !endpoints.mappings) {
@@ -1919,6 +2135,8 @@
                     const modal = document.querySelector('[data-role="module-add-case-modal"]');
                     const input = document.getElementById('module-add-case-scenario-id');
                     if (input) input.value = sid;
+                    toggleDependencyFields(false);
+                    if (sid) loadDependencyOptions(sid);
                     if (modal) {
                         // ensure modal title reflects creation
                         const modalTitle = document.getElementById('module-add-case-modal-title');
@@ -1938,6 +2156,7 @@
                         body.classList.remove('automation-modal-open');
                         const form = document.getElementById('module-add-case-form');
                         if (form) form.reset();
+                        toggleDependencyFields(false);
                     }
                     break;
                 }
@@ -2466,6 +2685,124 @@
         }
 
         // module add case form wiring
+        const dependencyControls = {
+            checkbox: document.getElementById('module-add-case-requires-dependency'),
+            fields: Array.from(document.querySelectorAll('[data-role="dependency-fields"]')),
+            select: document.getElementById('module-add-case-dependency-id'),
+            key: document.getElementById('module-add-case-dependency-key'),
+        };
+        const dependencyOptionsCache = new Map();
+
+        const toggleDependencyFields = (force, options = {}) => {
+            const settings = { preserveValues: false, ...options };
+            const show = typeof force === 'boolean'
+                ? force
+                : !!(dependencyControls.checkbox && dependencyControls.checkbox.checked);
+            dependencyControls.fields.forEach((node) => {
+                if (!node) {
+                    return;
+                }
+                node.hidden = !show;
+            });
+            if (dependencyControls.select) {
+                dependencyControls.select.disabled = !show;
+                if (!show && !settings.preserveValues) {
+                    dependencyControls.select.value = '';
+                }
+            }
+            if (dependencyControls.key) {
+                dependencyControls.key.disabled = !show;
+                if (!show && !settings.preserveValues) {
+                    dependencyControls.key.value = '';
+                }
+            }
+        };
+
+        const getCasesEndpoint = () => {
+            if (endpoints.cases) {
+                return endpoints.cases;
+            }
+            if (apiEndpoints.cases) {
+                return ensureTrailingSlash(apiEndpoints.cases);
+            }
+            return '/api/core/test-cases/';
+        };
+
+        const extractCases = (payload) => {
+            if (!payload) {
+                return [];
+            }
+            if (Array.isArray(payload)) {
+                return payload;
+            }
+            if (payload && Array.isArray(payload.results)) {
+                return payload.results;
+            }
+            return [];
+        };
+
+        const loadDependencyOptions = async (scenarioId, excludeId = null) => {
+            if (!dependencyControls.select) {
+                return;
+            }
+            const select = dependencyControls.select;
+            select.innerHTML = '<option value="">(no dependency)</option>';
+            if (!scenarioId) {
+                select.disabled = true;
+                return;
+            }
+            const allowSelection = !!(dependencyControls.checkbox && dependencyControls.checkbox.checked);
+            select.disabled = !allowSelection;
+            const cacheKey = Number.isFinite(Number(scenarioId)) ? Number(scenarioId) : String(scenarioId);
+            let cached = dependencyOptionsCache.get(cacheKey);
+            if (!cached) {
+                try {
+                    const url = buildUrl(getCasesEndpoint(), { scenario: scenarioId });
+                    const raw = await request(url);
+                    cached = extractCases(raw);
+                } catch (error) {
+                    cached = [];
+                    try {
+                        // eslint-disable-next-line no-console
+                        console.warn('[data-management] Failed to load dependency options', error);
+                    } catch (err) {
+                        /* ignore */
+                    }
+                }
+                dependencyOptionsCache.set(cacheKey, cached);
+            }
+            (cached || []).forEach((tc) => {
+                if (!tc || tc.id === undefined || tc.id === null) {
+                    return;
+                }
+                if (excludeId && Number(tc.id) === Number(excludeId)) {
+                    return;
+                }
+                const opt = document.createElement('option');
+                opt.value = tc.id;
+                const parts = [];
+                if (tc.testcase_id) {
+                    parts.push(tc.testcase_id);
+                }
+                if (tc.title) {
+                    parts.push(tc.title);
+                }
+                if (!parts.length) {
+                    parts.push(`Case #${tc.id}`);
+                }
+                opt.textContent = parts.join(' — ');
+                select.appendChild(opt);
+            });
+        };
+
+        if (dependencyControls.checkbox) {
+            dependencyControls.checkbox.addEventListener('change', () => {
+                toggleDependencyFields(dependencyControls.checkbox.checked);
+            });
+        }
+
+        toggleDependencyFields(false, { preserveValues: true });
+
         const moduleAddCaseForm = document.getElementById('module-add-case-form');
         if (moduleAddCaseForm) {
             moduleAddCaseForm.addEventListener('submit', async (event) => {
@@ -2476,11 +2813,20 @@
                 const stepsInput = document.getElementById('module-add-case-steps');
                 const expectedInput = document.getElementById('module-add-case-expected');
                 const priorityInput = document.getElementById('module-add-case-priority');
-                const ownerInput = document.getElementById('module-add-case-owner');
-                // request input removed from module add case form
+                const requiresDependencyInput = document.getElementById('module-add-case-requires-dependency');
+                const dependencySelect = document.getElementById('module-add-case-dependency-id');
+                const dependencyKeyInput = document.getElementById('module-add-case-dependency-key');
                 const sid = scenarioInput && scenarioInput.value ? Number(scenarioInput.value) : null;
                 if (!sid) {
                     setStatus('Scenario id missing for test case.', 'error');
+                    return;
+                }
+                let expectedEntries = [];
+                try {
+                    expectedEntries = parseExpectedResultsTextarea(expectedInput && expectedInput.value ? expectedInput.value : '');
+                } catch (parseError) {
+                    const message = parseError instanceof Error ? parseError.message : 'Unable to parse expected results.';
+                    setStatus(message, 'error');
                     return;
                 }
                 const payload = {
@@ -2488,14 +2834,32 @@
                     title: (titleInput && titleInput.value || '').trim(),
                     description: descInput && descInput.value || '',
                     steps: stepsInput && stepsInput.value ? stepsInput.value.split(/\n/).map((s) => s.trim()).filter(Boolean) : [],
-                    expected_results: expectedInput && expectedInput.value ? expectedInput.value.split(/\n/).map((s) => ({ note: s.trim() })).filter(Boolean) : [],
+                    expected_results: expectedEntries,
                     priority: priorityInput && priorityInput.value ? priorityInput.value : '',
-                    owner: ownerInput && ownerInput.value ? ownerInput.value : '',
                 };
-                // If an API request was selected via the explorer, include it.
-                // Force-sync visible label.dataset.requestId into hidden input
-                // to ensure the value is present at serialization time.
+                const requiresDependency = !!(requiresDependencyInput && requiresDependencyInput.checked);
+                payload.requires_dependency = requiresDependency;
+                if (requiresDependency) {
+                    const dependencyRaw = dependencySelect && dependencySelect.value ? dependencySelect.value : '';
+                    const dependencyValue = dependencyRaw ? Number(dependencyRaw) : NaN;
+                    if (!dependencyRaw || Number.isNaN(dependencyValue) || dependencyValue <= 0) {
+                        setStatus('Select a dependency test case before saving.', 'error');
+                        return;
+                    }
+                    payload.test_case_dependency = dependencyValue;
+                    const dependencyKey = dependencyKeyInput && dependencyKeyInput.value ? dependencyKeyInput.value.trim() : '';
+                    if (!dependencyKey) {
+                        setStatus('Enter the dependency response key before saving.', 'error');
+                        return;
+                    }
+                    payload.dependency_response_key = dependencyKey;
+                } else {
+                    payload.test_case_dependency = null;
+                    payload.dependency_response_key = '';
+                }
+                // If an API request was selected via the explorer, include it
                 try {
+                    // Force-sync label -> hidden input to ensure value is present
                     const hidden = document.getElementById('module-add-case-related-api-request-id');
                     const label = document.getElementById('module-related-api-request-label');
                     if (label && label.dataset && label.dataset.requestId) {
@@ -2505,7 +2869,13 @@
                         const parsed = Number(hidden.value);
                         if (!Number.isNaN(parsed) && parsed > 0) payload.related_api_request = parsed;
                     }
-                    try { console.debug('[staticfiles][data-management] payload.related_api_request=', payload.related_api_request); } catch (e) { }
+                    try { console.debug('[data-management] creating module-case payload.related_api_request=', payload.related_api_request); } catch (e) { /* ignore */ }
+                    // Debug: print hidden and label values for troubleshooting
+                    try {
+                        console.log('[moduleAddCase] hidden related input value=', document.getElementById('module-add-case-related-api-request-id') && document.getElementById('module-add-case-related-api-request-id').value);
+                        const moduleLabel = document.getElementById('module-related-api-request-label');
+                        console.log('[moduleAddCase] label dataset.requestId=', moduleLabel && moduleLabel.dataset && moduleLabel.dataset.requestId, 'label text=', moduleLabel && moduleLabel.textContent);
+                    } catch (err) { /* ignore */ }
                 } catch (e) { /* ignore */ }
                 if (!payload.title) {
                     setStatus('Test case title is required.', 'error');
@@ -2514,6 +2884,8 @@
                 try {
                     setStatus('Saving test case…', 'info');
                     const urlBase = endpoints.cases || (apiEndpoints.cases ? ensureTrailingSlash(apiEndpoints.cases) : '/api/core/test-cases/');
+                    // DEBUG ALERT: show exact payload being sent (temporary)
+                    try { alert('[DEBUG] Sending payload to ' + urlBase + ' :\n' + JSON.stringify(payload, null, 2)); } catch (e) { /* ignore */ }
                     const created = await request(urlBase, { method: 'POST', body: JSON.stringify(payload) });
                     // close modal and reset
                     const modal = document.querySelector('[data-role="module-add-case-modal"]');
@@ -2522,6 +2894,8 @@
                         body.classList.remove('automation-modal-open');
                     }
                     moduleAddCaseForm.reset();
+                    toggleDependencyFields(false);
+                    dependencyOptionsCache.delete(Number.isFinite(Number(sid)) ? Number(sid) : String(sid));
                     setStatus('Test case saved.', 'success');
                     // optional: refresh modules or plans to show newly created case in related views
                     // if plans API is available, refresh plans so scenario/case counts update
