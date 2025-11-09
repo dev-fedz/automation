@@ -77,7 +77,11 @@ def test_scenario_list() -> QuerySet[models.TestScenario]:
 
 
 def test_case_list() -> QuerySet[models.TestCase]:
-    return models.TestCase.objects.select_related("scenario", "scenario__plan").order_by("scenario", "testcase_id", "id")
+    return (
+        models.TestCase.objects
+        .select_related("scenario", "scenario__plan", "test_case_dependency", "related_api_request")
+        .order_by("scenario", "testcase_id", "id")
+    )
 
 
 def test_plan_maintenance_list() -> QuerySet[models.TestPlanMaintenance]:

@@ -131,6 +131,1334 @@
         });
     }
 
+    function splitPath(path) {
+        if (!path) return [];
+        const segments = [];
+        String(path)
+            .split('.')
+            .map((segment) => segment.trim())
+            .filter(Boolean)
+            .forEach((segment) => {
+                const bracketParts = segment.split(/\[|\]/).map((part) => part.trim()).filter(Boolean);
+                if (bracketParts.length) {
+                    bracketParts.forEach((part) => segments.push(part));
+                } else {
+                    segments.push(segment);
+                }
+            });
+        return segments;
+    }
+
+    function getNestedValue(data, path) {
+        const segments = splitPath(path);
+        if (!segments.length) return undefined;
+        let current = data;
+        for (let i = 0; i < segments.length; i += 1) {
+            if (current === null || current === undefined) return undefined;
+            const segment = segments[i];
+            if (Array.isArray(current)) {
+                const index = Number(segment);
+                if (Number.isNaN(index) || index < 0 || index >= current.length) {
+                    return undefined;
+                }
+                current = current[index];
+                continue;
+            }
+            if (typeof current === 'object' && Object.prototype.hasOwnProperty.call(current, segment)) {
+                current = current[segment];
+            } else {
+                return undefined;
+            }
+        }
+        return current;
+    }
+
+    function sanitizeOverrideKey(path) {
+        const segments = splitPath(path);
+        if (!segments.length) return 'dependency_value';
+        let candidate = segments[segments.length - 1].replace(/[^a-zA-Z0-9_]/g, '_').replace(/^_+|_+$/g, '');
+        if (!candidate || /^\d+$/.test(candidate)) {
+            candidate = segments
+                .map((segment) => segment.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^_+|_+$/g, ''))
+                .filter(Boolean)
+                .join('_');
+        }
+        return candidate || 'dependency_value';
+    }
+
+    function normalizeCaseId(value) {
+        if (value === null || value === undefined) return null;
+        const str = String(value).trim();
+        if (!str) return null;
+        const lower = str.toLowerCase();
+        if (lower === 'none' || lower === 'null' || lower === 'undefined') return null;
+        return str;
+    }
+
+    const fallbackCoerceExpectedResultValue = (raw) => {
+        if (raw === null || raw === undefined) {
+            return '';
+        }
+        if (typeof raw !== 'string') {
+            return raw;
+        }
+        const trimmed = raw.trim();
+        if (!trimmed) {
+            return '';
+        }
+        if (/^(true|false)$/i.test(trimmed)) {
+            return trimmed.toLowerCase() === 'true';
+        }
+        if (/^null$/i.test(trimmed)) {
+            return null;
+        }
+        if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+            const num = Number(trimmed);
+            if (!Number.isNaN(num)) {
+                return num;
+            }
+        }
+        if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('"') && trimmed.endsWith('"'))) {
+            try {
+                return JSON.parse(trimmed);
+            } catch (error) {
+                // ignore parse failure; fall through to return string
+            }
+        }
+        return trimmed;
+    };
+
+    const fallbackStringifyExpectedResultValue = (value) => {
+        if (value === null) {
+            return 'null';
+        }
+        if (value === undefined) {
+            return '';
+        }
+        if (typeof value === 'string') {
+            return value;
+        }
+        if (typeof value === 'number' || typeof value === 'boolean') {
+            return String(value);
+        }
+        if (typeof value === 'object') {
+            try {
+                return JSON.stringify(value);
+            } catch (error) {
+                return String(value);
+            }
+        }
+        return String(value);
+    };
+
+    const fallbackNormalizeExpectedResultsEntries = (value) => {
+        if (!value && value !== 0) {
+            return [];
+        }
+        let rawEntries = value;
+        if (typeof value === 'string') {
+            try {
+                rawEntries = JSON.parse(value);
+            } catch (error) {
+                return [];
+            }
+        }
+        if (!Array.isArray(rawEntries)) {
+            return [];
+        }
+        const entries = [];
+        rawEntries.forEach((entry) => {
+            if (!entry && entry !== 0) {
+                return;
+            }
+            if (typeof entry === 'string') {
+                const trimmed = entry.trim();
+                if (!trimmed) {
+                    return;
+                }
+                let separatorIndex = trimmed.indexOf(':');
+                if (separatorIndex === -1) {
+                    separatorIndex = trimmed.indexOf('=');
+                }
+                if (separatorIndex > 0) {
+                    const key = trimmed.slice(0, separatorIndex).trim();
+                    if (!key) {
+                        return;
+                    }
+                    const valuePart = trimmed.slice(separatorIndex + 1).trim();
+                    entries.push({ [key]: fallbackCoerceExpectedResultValue(valuePart) });
+                } else {
+                    entries.push({ note: trimmed });
+                }
+                return;
+            }
+            if (Array.isArray(entry)) {
+                entry.forEach((nested) => {
+                    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+                        Object.keys(nested).forEach((key) => {
+                            if (key === 'note') {
+                                entries.push({ note: nested[key] });
+                            } else {
+                                entries.push({ [key]: nested[key] });
+                            }
+                        });
+                    }
+                });
+                return;
+            }
+            if (entry && typeof entry === 'object') {
+                const keys = Object.keys(entry);
+                if (!keys.length) {
+                    return;
+                }
+                keys.forEach((key) => {
+                    if (key === 'note') {
+                        entries.push({ note: entry[key] });
+                    } else {
+                        entries.push({ [key]: entry[key] });
+                    }
+                });
+            }
+        });
+        return entries;
+    };
+
+    const automationHelpers = window.__automationHelpers || {};
+
+    if (typeof window !== 'undefined' && (window.__automationMultiDiagnostics === undefined || window.__automationMultiDiagnostics === null)) {
+        window.__automationMultiDiagnostics = {};
+    }
+    if (typeof window !== 'undefined' && !Array.isArray(window.__automationMultiDiagnosticsLog)) {
+        window.__automationMultiDiagnosticsLog = [];
+    }
+    const normalizeExpectedResultsEntries = automationHelpers.normalizeExpectedResultsEntries || fallbackNormalizeExpectedResultsEntries;
+    const coerceExpectedResultValue = automationHelpers.coerceExpectedResultValue || fallbackCoerceExpectedResultValue;
+    const stringifyExpectedResultValue = automationHelpers.stringifyExpectedResultValue || fallbackStringifyExpectedResultValue;
+
+    const getScriptHelpers = () => {
+        const helpers = window.__automationHelpers || {};
+        if (!helpers || typeof helpers !== 'object') {
+            return null;
+        }
+        return helpers.scriptRunner || null;
+    };
+
+    let scriptRunnerReadyPromise = null;
+
+    const resolveScriptRunnerSource = () => {
+        const hostWindow = typeof window !== 'undefined' ? window : null;
+        if (hostWindow && typeof hostWindow.__automationScriptRunnerSrc === 'string') {
+            const candidate = hostWindow.__automationScriptRunnerSrc.trim();
+            if (candidate) {
+                return candidate;
+            }
+        }
+        const doc = typeof document !== 'undefined' ? document : null;
+        if (doc) {
+            const preload = doc.querySelector('script[data-automation-script-runner-src]');
+            if (preload) {
+                const attr = preload.getAttribute('data-src') || preload.getAttribute('src');
+                if (attr && attr.trim()) {
+                    return attr.trim();
+                }
+            }
+        }
+        return '/static/js/api_tester.js';
+    };
+
+    const ensureScriptRunnerReady = () => {
+        const existing = getScriptHelpers();
+        if (existing) {
+            return Promise.resolve(existing);
+        }
+        if (scriptRunnerReadyPromise) {
+            return scriptRunnerReadyPromise.then((helpers) => helpers || getScriptHelpers());
+        }
+
+        scriptRunnerReadyPromise = new Promise((resolve) => {
+            const hostWindow = typeof window !== 'undefined' ? window : null;
+            const doc = typeof document !== 'undefined' ? document : null;
+            let resolved = false;
+            let pollTimer = null;
+
+            const log = (level, message, extra) => {
+                try {
+                    if (level === 'error' && console && console.error) {
+                        console.error('[automation][testcase-multi-runner] ' + message, extra);
+                    } else if (level === 'warn' && console && console.warn) {
+                        console.warn('[automation][testcase-multi-runner] ' + message, extra);
+                    } else if (level === 'info' && console && console.info) {
+                        console.info('[automation][testcase-multi-runner] ' + message, extra);
+                    }
+                } catch (_loggingError) { /* ignore */ }
+            };
+
+            const clearPoll = () => {
+                if (hostWindow && pollTimer !== null) {
+                    hostWindow.clearInterval(pollTimer);
+                    pollTimer = null;
+                }
+            };
+
+            const finalize = () => {
+                if (resolved) {
+                    return;
+                }
+                resolved = true;
+                clearPoll();
+                log('info', 'Script runner helpers detected.');
+                resolve(getScriptHelpers());
+            };
+
+            const fail = (reason) => {
+                if (resolved) {
+                    return;
+                }
+                resolved = true;
+                clearPoll();
+                log('warn', 'Script runner helpers unavailable' + (reason ? ` (${reason})` : '') + '.');
+                resolve(null);
+            };
+
+            if (getScriptHelpers()) {
+                finalize();
+                return;
+            }
+
+            const src = resolveScriptRunnerSource();
+            if (!src || !doc) {
+                fail();
+                return;
+            }
+
+            let scriptEl = doc.querySelector('script[data-automation-script-runner]');
+            if (!scriptEl) {
+                scriptEl = doc.createElement('script');
+                scriptEl.src = src;
+                scriptEl.async = false;
+                scriptEl.setAttribute('data-automation-script-runner', 'true');
+                scriptEl.addEventListener('load', () => {
+                    if (getScriptHelpers()) {
+                        finalize();
+                    } else {
+                        log('warn', 'Script runner script loaded but helpers not registered yet.');
+                    }
+                }, { once: true });
+                scriptEl.addEventListener('error', () => {
+                    fail('load-error');
+                }, { once: true });
+                const target = doc.head || doc.body || doc.documentElement;
+                if (target) {
+                    target.appendChild(scriptEl);
+                } else {
+                    fail('no-target');
+                    return;
+                }
+            } else {
+                scriptEl.addEventListener('load', () => {
+                    if (getScriptHelpers()) {
+                        finalize();
+                    } else {
+                        log('warn', 'Script runner script loaded but helpers not registered yet.');
+                    }
+                }, { once: true });
+                scriptEl.addEventListener('error', () => fail('load-error'), { once: true });
+            }
+
+            if (hostWindow) {
+                const checkInterval = 50;
+                const maxWait = 5000;
+                let elapsed = 0;
+                pollTimer = hostWindow.setInterval(() => {
+                    if (getScriptHelpers()) {
+                        finalize();
+                        return;
+                    }
+                    elapsed += checkInterval;
+                    if (elapsed >= maxWait) {
+                        fail('timeout');
+                    }
+                }, checkInterval);
+            }
+        }).then((helpers) => {
+            if (!helpers) {
+                scriptRunnerReadyPromise = null;
+            }
+            return helpers || getScriptHelpers();
+        });
+
+        return scriptRunnerReadyPromise;
+    };
+
+    ensureScriptRunnerReady().catch(() => { /* ignore preload errors */ });
+
+    const clonePlainObject = (value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            return {};
+        }
+        return { ...value };
+    };
+
+    const cloneJsonSafe = (value) => {
+        if (value === null || value === undefined) {
+            return value;
+        }
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (_error) {
+            return value;
+        }
+    };
+
+    const safeCloneForDiagnostics = (value) => {
+        if (value === undefined) {
+            return undefined;
+        }
+        if (value === null) {
+            return null;
+        }
+        try {
+            if (typeof structuredClone === 'function') {
+                return structuredClone(value);
+            }
+        } catch (_error) { /* ignore structuredClone issues */ }
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (_jsonError) {
+            const seen = typeof WeakSet === 'function' ? new WeakSet() : null;
+            const cloneValue = (input, depth) => {
+                if (input === undefined) {
+                    return undefined;
+                }
+                if (input === null) {
+                    return null;
+                }
+                const type = typeof input;
+                if (type === 'string' || type === 'number' || type === 'boolean') {
+                    return input;
+                }
+                if (type === 'bigint') {
+                    return input.toString();
+                }
+                if (type === 'function' || type === 'symbol') {
+                    try {
+                        return input.toString();
+                    } catch (_stringifyError) {
+                        return null;
+                    }
+                }
+                if (input instanceof Date) {
+                    return new Date(input.getTime());
+                }
+                if (input instanceof RegExp) {
+                    return input.toString();
+                }
+                if (!input || type !== 'object') {
+                    return input;
+                }
+                if (seen) {
+                    if (seen.has(input)) {
+                        return '[Circular]';
+                    }
+                    seen.add(input);
+                }
+                if (depth > 20) {
+                    return '[MaxDepth]';
+                }
+                if (Array.isArray(input)) {
+                    return input.map((item) => cloneValue(item, depth + 1));
+                }
+                if (typeof Map !== 'undefined' && input instanceof Map) {
+                    const mapClone = {};
+                    input.forEach((mapValue, mapKey) => {
+                        const keyString = typeof mapKey === 'string' ? mapKey : cloneValue(mapKey, depth + 1);
+                        mapClone[String(keyString)] = cloneValue(mapValue, depth + 1);
+                    });
+                    return mapClone;
+                }
+                if (typeof Set !== 'undefined' && input instanceof Set) {
+                    const setClone = [];
+                    input.forEach((item) => {
+                        setClone.push(cloneValue(item, depth + 1));
+                    });
+                    return setClone;
+                }
+                if (typeof ArrayBuffer !== 'undefined') {
+                    if (input instanceof ArrayBuffer) {
+                        return input.slice(0);
+                    }
+                    if (typeof ArrayBuffer.isView === 'function' && ArrayBuffer.isView(input)) {
+                        try {
+                            return Array.from(new Uint8Array(input.buffer.slice(0)));
+                        } catch (_typedArrayError) {
+                            return Array.from(input);
+                        }
+                    }
+                }
+                const entries = Object.keys(input);
+                const output = {};
+                entries.forEach((key) => {
+                    output[key] = cloneValue(input[key], depth + 1);
+                });
+                return output;
+            };
+            try {
+                return cloneValue(value, 0);
+            } catch (_fallbackError) {
+                return null;
+            }
+        }
+    };
+
+    const snapshotForDiagnostics = (value) => {
+        if (value === undefined) {
+            return undefined;
+        }
+        if (value === null) {
+            return null;
+        }
+        const cloned = safeCloneForDiagnostics(value);
+        if (cloned !== undefined && cloned !== null) {
+            return cloned;
+        }
+        try {
+            return cloneJsonSafe(value);
+        } catch (_cloneError) {
+            return value;
+        }
+    };
+
+    const normalizeDiagnosticsValue = (value) => {
+        const snapshot = snapshotForDiagnostics(value);
+        return snapshot === undefined ? null : snapshot;
+    };
+
+    const publishMultiRunDiagnostics = ({
+        container,
+        requestId,
+        payload,
+        requestSnapshot,
+        scriptContext,
+        scriptStores,
+        overrides,
+        stage,
+    }) => {
+        try {
+            let diagKey = null;
+            if (container && container.dataset) {
+                if (container.dataset.caseId) diagKey = container.dataset.caseId;
+                else if (container.dataset.caseKey) diagKey = container.dataset.caseKey;
+                else if (container.dataset.requestId) diagKey = container.dataset.requestId;
+            }
+            if (!diagKey && requestId !== undefined && requestId !== null) {
+                diagKey = String(requestId);
+            }
+            if (!diagKey && container && container.id) {
+                diagKey = container.id;
+            }
+            if (!diagKey) {
+                diagKey = `multi-${Date.now()}`;
+            }
+
+            const preScriptSnapshot = scriptContext ? normalizeDiagnosticsValue(scriptContext) : null;
+            const requestSnapshotClone = requestSnapshot ? normalizeDiagnosticsValue(requestSnapshot) : null;
+            const payloadClone = normalizeDiagnosticsValue(payload);
+            const storeClone = scriptStores ? normalizeDiagnosticsValue(scriptStores) : null;
+            const overridesClone = overrides ? normalizeDiagnosticsValue(overrides) : null;
+
+            const existingDiagnostics = window.__automationMultiDiagnostics;
+            const globalDiagnostics = (existingDiagnostics && typeof existingDiagnostics === 'object') ? existingDiagnostics : {};
+            globalDiagnostics[diagKey] = {
+                preScript: preScriptSnapshot,
+                request: requestSnapshotClone,
+                payload: payloadClone,
+                scriptStores: storeClone,
+                overrides: overridesClone,
+                stage: stage || 'unknown',
+                timestamp: Date.now(),
+            };
+            globalDiagnostics.__last = Object.assign({ key: diagKey }, globalDiagnostics[diagKey]);
+            window.__automationMultiDiagnostics = globalDiagnostics;
+
+            try {
+                const log = window.__automationMultiDiagnosticsLog;
+                if (Array.isArray(log)) {
+                    log.push({
+                        key: diagKey,
+                        stage: stage || 'unknown',
+                        timestamp: Date.now(),
+                        payload: payloadClone,
+                        request: requestSnapshotClone,
+                        stores: storeClone,
+                        overrides: overridesClone,
+                    });
+                    while (log.length > 100) {
+                        log.shift();
+                    }
+                }
+            } catch (_logError) { /* ignore */ }
+        } catch (_error) {
+            // ignore diagnostics publication errors
+        }
+    };
+
+    const PLACEHOLDER_PATTERN = /\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}/g;
+
+    const escapeTemplatePattern = (key) => {
+        if (typeof key !== 'string') {
+            return '';
+        }
+        return key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    };
+
+    const getLookupValueFromStores = (stores, key) => {
+        if (!key || !Array.isArray(stores)) {
+            return undefined;
+        }
+        for (let i = 0; i < stores.length; i += 1) {
+            const store = stores[i];
+            if (store && Object.prototype.hasOwnProperty.call(store, key)) {
+                return store[key];
+            }
+        }
+        return undefined;
+    };
+
+    const replaceStringPlaceholders = (value, stores) => {
+        if (typeof value !== 'string' || !value) {
+            return value;
+        }
+        if (!Array.isArray(stores) || !stores.length) {
+            return value;
+        }
+        return value.replace(PLACEHOLDER_PATTERN, (match, key) => {
+            const lookupValue = getLookupValueFromStores(stores, key);
+            if (lookupValue === undefined) {
+                return match;
+            }
+            if (lookupValue === null) {
+                return '';
+            }
+            if (typeof lookupValue === 'string') {
+                return lookupValue;
+            }
+            try {
+                return JSON.stringify(lookupValue);
+            } catch (_error) {
+                return String(lookupValue);
+            }
+        });
+    };
+
+    const replacePlaceholdersDeep = (value, stores) => {
+        if (!Array.isArray(stores) || !stores.length) {
+            return value;
+        }
+        if (typeof value === 'string') {
+            return replaceStringPlaceholders(value, stores);
+        }
+        if (Array.isArray(value)) {
+            return value.map((item) => replacePlaceholdersDeep(item, stores));
+        }
+        if (value && typeof value === 'object') {
+            const next = Array.isArray(value) ? [] : {};
+            Object.keys(value).forEach((key) => {
+                next[key] = replacePlaceholdersDeep(value[key], stores);
+            });
+            return next;
+        }
+        return value;
+    };
+
+    const ensureRawPayloadPlaceholdersResolved = (target, stores, scriptHelpers) => {
+        if (!target || typeof target !== 'object') {
+            return;
+        }
+        if (!Array.isArray(stores) || !stores.length) {
+            return;
+        }
+        Object.keys(target).forEach((key) => {
+            target[key] = replacePlaceholdersDeep(target[key], stores);
+        });
+        if (!scriptHelpers || typeof scriptHelpers.collectJsonTemplatePlaceholders !== 'function' || typeof scriptHelpers.setValueAtObjectPath !== 'function') {
+            return;
+        }
+        try {
+            const references = scriptHelpers.collectJsonTemplatePlaceholders(target) || [];
+            if (!Array.isArray(references) || !references.length) {
+                return;
+            }
+            references.forEach((ref) => {
+                if (!ref || !ref.key) {
+                    return;
+                }
+                const lookupValue = getLookupValueFromStores(stores, ref.key);
+                if (lookupValue === undefined) {
+                    return;
+                }
+                try {
+                    scriptHelpers.setValueAtObjectPath(target, ref.path || ref.key, lookupValue);
+                } catch (_setError) {
+                    // ignore
+                }
+            });
+        } catch (_error) {
+            // ignore collection issues
+        }
+    };
+
+    const enforceRawStringPlaceholders = (raw, stores, scriptHelpers) => {
+        if (typeof raw !== 'string' || !raw) {
+            return raw;
+        }
+        if (!Array.isArray(stores) || !stores.length) {
+            return raw;
+        }
+
+        let result = replaceStringPlaceholders(raw, stores);
+        if (scriptHelpers && typeof scriptHelpers.resolveTemplateWithLookups === 'function') {
+            try {
+                result = scriptHelpers.resolveTemplateWithLookups(result, stores);
+            } catch (_error) {
+                // best effort
+            }
+        }
+
+        const placeholderKeys = new Set();
+        stores.forEach((store) => {
+            if (!store || typeof store !== 'object') {
+                return;
+            }
+            Object.keys(store).forEach((key) => {
+                if (key) {
+                    placeholderKeys.add(key);
+                }
+            });
+        });
+
+        placeholderKeys.forEach((key) => {
+            const value = getLookupValueFromStores(stores, key);
+            if (value === undefined) {
+                return;
+            }
+            const pattern = new RegExp(`\\{\\{\\s*${escapeTemplatePattern(key)}\\s*\\}}`, 'g');
+            try {
+                if (value === null) {
+                    result = result.replace(pattern, '');
+                } else if (typeof value === 'string') {
+                    result = result.replace(pattern, value);
+                } else {
+                    result = result.replace(pattern, String(value));
+                }
+            } catch (_replaceError) {
+                // ignore replacement failure
+            }
+        });
+
+        return result;
+    };
+
+    const applyScriptContextToPayload = (payload, scriptContext, scriptHelpers) => {
+        if (!payload || !scriptContext || !scriptHelpers) {
+            return null;
+        }
+
+        const overrides = scriptContext.overrides && typeof scriptContext.overrides === 'object'
+            ? { ...scriptContext.overrides }
+            : {};
+        const localStore = clonePlainObject(scriptContext.localVariables);
+        const environmentStore = clonePlainObject(scriptContext.environmentVariables);
+        const lookupStores = [localStore, environmentStore, overrides].filter((store) => store && Object.keys(store).length);
+
+        if (!lookupStores.length) {
+            return { overrides, stores: lookupStores };
+        }
+
+        const getLookupValue = (key) => {
+            if (!key) {
+                return undefined;
+            }
+            for (let i = 0; i < lookupStores.length; i += 1) {
+                const store = lookupStores[i];
+                if (store && Object.prototype.hasOwnProperty.call(store, key)) {
+                    return store[key];
+                }
+            }
+            return undefined;
+        };
+
+        const escapeRegex = (value) => {
+            if (typeof value !== 'string') {
+                return '';
+            }
+            return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        };
+
+        const resolveStringTemplate = (value) => {
+            if (typeof value !== 'string') {
+                return value;
+            }
+            if (typeof scriptHelpers.resolveTemplateWithLookups === 'function') {
+                try {
+                    return scriptHelpers.resolveTemplateWithLookups(value, lookupStores);
+                } catch (_error) {
+                    return value;
+                }
+            }
+            return value;
+        };
+
+        const resolveStructureTemplates = (value) => {
+            if (!value || typeof value !== 'object') {
+                return value;
+            }
+            if (typeof scriptHelpers.resolveTemplatesDeep === 'function') {
+                try {
+                    return scriptHelpers.resolveTemplatesDeep(value, lookupStores);
+                } catch (_error) {
+                    return value;
+                }
+            }
+            return value;
+        };
+
+        const enforceCollectedPlaceholders = (container) => {
+            if (!container || typeof container !== 'object') {
+                return;
+            }
+            if (typeof scriptHelpers.collectJsonTemplatePlaceholders !== 'function' || typeof scriptHelpers.setValueAtObjectPath !== 'function') {
+                return;
+            }
+            try {
+                const references = scriptHelpers.collectJsonTemplatePlaceholders(container) || [];
+                references.forEach((ref) => {
+                    if (!ref || !ref.key) {
+                        return;
+                    }
+                    const lookupValue = getLookupValue(ref.key);
+                    if (lookupValue === undefined) {
+                        return;
+                    }
+                    try {
+                        scriptHelpers.setValueAtObjectPath(container, ref.path || ref.key, lookupValue);
+                    } catch (_setError) {
+                        // ignore per-path failures
+                    }
+                });
+            } catch (_error) {
+                // ignore collection failures
+            }
+        };
+
+        if (typeof payload.url === 'string') {
+            payload.url = resolveStringTemplate(payload.url);
+        }
+
+        if (payload.headers && typeof payload.headers === 'object' && !Array.isArray(payload.headers)) {
+            const nextHeaders = {};
+            Object.entries(payload.headers).forEach(([key, value]) => {
+                if (typeof value === 'string') {
+                    nextHeaders[key] = resolveStringTemplate(value);
+                } else if (value === undefined || value === null) {
+                    nextHeaders[key] = value;
+                } else {
+                    nextHeaders[key] = resolveStringTemplate(String(value));
+                }
+            });
+            payload.headers = nextHeaders;
+        }
+
+        if (payload.params && typeof payload.params === 'object' && !Array.isArray(payload.params)) {
+            const nextParams = {};
+            Object.entries(payload.params).forEach(([key, value]) => {
+                if (typeof value === 'string') {
+                    nextParams[key] = resolveStringTemplate(value);
+                } else if (value === undefined || value === null) {
+                    nextParams[key] = value;
+                } else {
+                    nextParams[key] = resolveStringTemplate(String(value));
+                }
+            });
+            payload.params = nextParams;
+        }
+
+        if (Array.isArray(payload.form_data)) {
+            payload.form_data = payload.form_data.map((entry) => {
+                if (!entry || typeof entry !== 'object') {
+                    return entry;
+                }
+                if (entry.type === 'file') {
+                    return entry;
+                }
+                const nextEntry = { ...entry };
+                const rawValue = entry.value === undefined || entry.value === null ? '' : entry.value;
+                nextEntry.value = resolveStringTemplate(typeof rawValue === 'string' ? rawValue : String(rawValue));
+                return nextEntry;
+            });
+        }
+
+        if (payload.json && typeof payload.json === 'object') {
+            const clonedJson = cloneJsonSafe(payload.json);
+            payload.json = resolveStructureTemplates(clonedJson);
+            enforceCollectedPlaceholders(payload.json);
+        }
+
+        if (payload.body && typeof payload.body === 'object' && !Array.isArray(payload.body)) {
+            const clonedBody = cloneJsonSafe(payload.body);
+            payload.body = resolveStructureTemplates(clonedBody);
+            enforceCollectedPlaceholders(payload.body);
+        } else if (typeof payload.body === 'string') {
+            payload.body = resolveStringTemplate(payload.body);
+            if (payload.body && typeof scriptHelpers.resolveTemplateWithLookups === 'function') {
+                const refs = typeof scriptHelpers.collectJsonTemplatePlaceholders === 'function'
+                    ? scriptHelpers.collectJsonTemplatePlaceholders({ __body: payload.body })
+                    : [];
+                if (Array.isArray(refs) && refs.length) {
+                    refs.forEach((ref) => {
+                        if (!ref || !ref.key) {
+                            return;
+                        }
+                        const value = getLookupValue(ref.key);
+                        if (value === undefined) {
+                            return;
+                        }
+                        const patternSource = String.raw`\{\{\s*${escapeRegex(ref.key)}\s*\}\}`;
+                        const pattern = new RegExp(patternSource, 'g');
+                        try {
+                            payload.body = payload.body.replace(pattern, typeof value === 'string' ? value : String(value));
+                        } catch (_replaceError) {
+                            // ignore string replacement issues
+                        }
+                    });
+                }
+            }
+        }
+
+        return { overrides, stores: lookupStores };
+    };
+
+    const buildScriptRequestSnapshot = (requestObj, scriptHelpers) => {
+        const snapshot = {
+            method: requestObj && requestObj.method ? requestObj.method : 'GET',
+            url: requestObj && requestObj.url ? requestObj.url : '',
+            headers: requestObj && requestObj.headers && typeof requestObj.headers === 'object'
+                ? { ...requestObj.headers }
+                : {},
+            body: {
+                mode: 'none',
+                raw: '',
+                rawType: 'text',
+                json: null,
+                formData: [],
+                urlencoded: {},
+            },
+        };
+
+        const bodyType = requestObj && requestObj.body_type ? String(requestObj.body_type).toLowerCase() : 'none';
+        if (bodyType === 'json') {
+            snapshot.body.mode = 'raw';
+            snapshot.body.rawType = 'json';
+            const jsonPayload = requestObj && requestObj.body_json && typeof requestObj.body_json === 'object'
+                ? requestObj.body_json
+                : {};
+            snapshot.body.json = jsonPayload;
+            try {
+                snapshot.body.raw = JSON.stringify(jsonPayload);
+            } catch (error) {
+                snapshot.body.raw = '';
+            }
+        } else if (bodyType === 'form') {
+            snapshot.body.mode = 'form-data';
+            const formEntries = [];
+            if (requestObj && requestObj.body_form && typeof requestObj.body_form === 'object') {
+                Object.entries(requestObj.body_form).forEach(([key, value]) => {
+                    formEntries.push({ key, type: 'text', value });
+                });
+            }
+            snapshot.body.formData = formEntries;
+        } else if (bodyType === 'raw') {
+            snapshot.body.mode = 'raw';
+            snapshot.body.rawType = requestObj && requestObj.body_raw_type ? requestObj.body_raw_type : 'text';
+            snapshot.body.raw = requestObj && requestObj.body_raw ? requestObj.body_raw : '';
+            if (snapshot.body.rawType === 'json' && snapshot.body.raw) {
+                try {
+                    snapshot.body.json = JSON.parse(snapshot.body.raw);
+                } catch (error) {
+                    snapshot.body.json = null;
+                }
+            }
+        }
+
+        if (scriptHelpers && typeof scriptHelpers.createCoercibleRequestBody === 'function') {
+            snapshot.body = scriptHelpers.createCoercibleRequestBody(snapshot.body);
+        }
+
+        return snapshot;
+    };
+
+    const buildFallbackScriptResponseSnapshot = (payload, response, rawBody = '') => {
+        const resultPayload = payload && typeof payload === 'object' ? payload : {};
+        let headers = {};
+        if (resultPayload && typeof resultPayload.headers === 'object' && resultPayload.headers !== null) {
+            headers = { ...resultPayload.headers };
+        } else if (resultPayload && typeof resultPayload.response_headers === 'object' && resultPayload.response_headers !== null) {
+            headers = { ...resultPayload.response_headers };
+        } else if (response && response.headers && typeof response.headers.forEach === 'function') {
+            const collected = {};
+            try {
+                response.headers.forEach((value, key) => {
+                    collected[key] = value;
+                });
+            } catch (error) {
+                // ignore header collection issues
+            }
+            headers = collected;
+        }
+
+        let bodyText = '';
+        if (typeof resultPayload.body === 'string') {
+            bodyText = resultPayload.body;
+        } else if (typeof rawBody === 'string' && rawBody) {
+            bodyText = rawBody;
+        }
+
+        let jsonData = null;
+        if (resultPayload && Object.prototype.hasOwnProperty.call(resultPayload, 'json')) {
+            jsonData = resultPayload.json;
+        } else if (bodyText) {
+            const trimmed = bodyText.trim();
+            if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+                try {
+                    jsonData = JSON.parse(bodyText);
+                } catch (error) {
+                    jsonData = null;
+                }
+            }
+        }
+
+        return {
+            status: resultPayload.status_code
+                ?? resultPayload.status
+                ?? (response ? response.status : null),
+            statusText: response ? response.statusText : '',
+            headers,
+            body: bodyText,
+            json: jsonData,
+            elapsed: resultPayload.elapsed_ms ?? resultPayload.response_time_ms ?? null,
+            environment: resultPayload.environment ?? null,
+            resolvedUrl: resultPayload.resolved_url ?? null,
+            request: resultPayload.request ?? null,
+            error: resultPayload.error ?? null,
+        };
+    };
+
+    function describeAssertionValue(value) {
+        if (value === undefined) {
+            return 'undefined';
+        }
+        if (value === null) {
+            return 'null';
+        }
+        if (typeof value === 'string') {
+            return `${value} (string)`;
+        }
+        if (typeof value === 'number' || typeof value === 'boolean') {
+            return `${value} (${typeof value})`;
+        }
+        try {
+            const serialized = JSON.stringify(value);
+            const typeLabel = Array.isArray(value) ? 'array' : 'object';
+            return `${serialized} (${typeLabel})`;
+        } catch (error) {
+            return String(value);
+        }
+    }
+
+    function extractExpectedAssertions(entries) {
+        const normalized = normalizeExpectedResultsEntries(entries);
+        const assertions = [];
+        normalized.forEach((entry) => {
+            if (!entry || typeof entry !== 'object') {
+                return;
+            }
+            Object.keys(entry).forEach((key) => {
+                if (key === 'note') {
+                    return;
+                }
+                const rawExpected = entry[key];
+                const expectedValue = typeof rawExpected === 'string' ? coerceExpectedResultValue(rawExpected) : rawExpected;
+                assertions.push({ path: key, expected: expectedValue });
+            });
+        });
+        return assertions;
+    }
+
+    function deepEqual(left, right) {
+        if (left === right) {
+            return true;
+        }
+        if (left === null || right === null || left === undefined || right === undefined) {
+            return left === right;
+        }
+        if (Number.isNaN(left) && Number.isNaN(right)) {
+            return true;
+        }
+        if (typeof left !== typeof right) {
+            return false;
+        }
+        if (Array.isArray(left) && Array.isArray(right)) {
+            if (left.length !== right.length) {
+                return false;
+            }
+            for (let i = 0; i < left.length; i += 1) {
+                if (!deepEqual(left[i], right[i])) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if (typeof left === 'object' && typeof right === 'object') {
+            const leftKeys = Object.keys(left);
+            const rightKeys = Object.keys(right);
+            if (leftKeys.length !== rightKeys.length) {
+                return false;
+            }
+            for (let i = 0; i < leftKeys.length; i += 1) {
+                const key = leftKeys[i];
+                if (!Object.prototype.hasOwnProperty.call(right, key)) {
+                    return false;
+                }
+                if (!deepEqual(left[key], right[key])) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return false;
+    }
+
+    function valuesEqual(actual, expected) {
+        if (actual === expected) {
+            return true;
+        }
+        if ((actual === null || actual === undefined) || (expected === null || expected === undefined)) {
+            return actual === expected;
+        }
+        const actualType = typeof actual;
+        const expectedType = typeof expected;
+        if (actualType !== expectedType) {
+            if ((actualType === 'number' || actualType === 'boolean') && expectedType === 'string') {
+                return String(actual) === expected;
+            }
+            if (actualType === 'string' && (expectedType === 'number' || expectedType === 'boolean')) {
+                return actual === String(expected);
+            }
+            const actualNumber = Number(actual);
+            const expectedNumber = Number(expected);
+            if (!Number.isNaN(actualNumber) && !Number.isNaN(expectedNumber)) {
+                return actualNumber === expectedNumber;
+            }
+            return false;
+        }
+        if (Array.isArray(actual) && Array.isArray(expected)) {
+            return deepEqual(actual, expected);
+        }
+        if (actualType === 'object') {
+            return deepEqual(actual, expected);
+        }
+        if (actualType === 'number') {
+            if (Number.isNaN(actual) && Number.isNaN(expected)) {
+                return true;
+            }
+        }
+        return actual === expected;
+    }
+
+    function buildEvaluationContext(runResult) {
+        const result = runResult && runResult.result ? runResult.result : {};
+        const responseText = runResult && typeof runResult.responseText === 'string' ? runResult.responseText : '';
+        const responseData = (runResult && runResult.responseData !== undefined) ? runResult.responseData : (result && (result.json !== undefined ? result.json : null));
+        const headers = result && (result.headers || result.response_headers) ? (result.headers || result.response_headers) : {};
+        const context = {
+            status_code: runResult ? runResult.statusCode : undefined,
+            status: runResult ? runResult.statusCode : undefined,
+            elapsed_ms: runResult ? runResult.elapsed : undefined,
+            response: {
+                status_code: runResult ? runResult.statusCode : undefined,
+                status: runResult ? runResult.statusCode : undefined,
+                elapsed_ms: runResult ? runResult.elapsed : undefined,
+                headers,
+                body: responseText,
+                text: responseText,
+                json: responseData,
+                data: responseData,
+            },
+            headers,
+            body: responseText,
+            text: responseText,
+            json: responseData,
+            data: responseData,
+            result,
+        };
+        if (runResult && runResult.overridesApplied) {
+            context.overrides = runResult.overridesApplied;
+        }
+        return context;
+    }
+
+    function evaluateExpectedResults(entries, runResult) {
+        const assertions = extractExpectedAssertions(entries);
+        if (!assertions.length) {
+            return { evaluated: false, passed: true, assertions: [] };
+        }
+        const context = buildEvaluationContext(runResult);
+        const details = assertions.map((assertion) => {
+            const actual = getNestedValue(context, assertion.path);
+            const expected = assertion.expected;
+            const match = valuesEqual(actual, expected);
+            return {
+                path: assertion.path,
+                expected,
+                actual,
+                passed: match,
+                message: match ? 'Assertion passed.' : `Expected ${describeAssertionValue(expected)} but received ${describeAssertionValue(actual)}.`,
+            };
+        });
+        const failures = details.filter((detail) => !detail.passed);
+        const reason = failures.length ? (failures[0].message || `Expected results mismatch for "${failures[0].path}".`) : '';
+        return {
+            evaluated: true,
+            passed: failures.length === 0,
+            assertions: details,
+            reason,
+        };
+    }
+
+    function renderExpectedAssertions(container, evaluation) {
+        if (!container) {
+            return;
+        }
+        const assertionsEl = container.querySelector('.assertions-list');
+        if (!assertionsEl) {
+            return;
+        }
+        const existing = assertionsEl.querySelector('[data-origin="expected-results"]');
+        if (existing) {
+            existing.remove();
+        }
+        if (!evaluation || !evaluation.evaluated || !evaluation.assertions.length) {
+            return;
+        }
+        const group = document.createElement('div');
+        group.className = 'assertions-group assertions-group--expected';
+        group.setAttribute('data-origin', 'expected-results');
+        const heading = document.createElement('div');
+        heading.className = 'assertions-group__title';
+        heading.textContent = 'Expected Results';
+        group.appendChild(heading);
+        evaluation.assertions.forEach((assertion) => {
+            const item = document.createElement('div');
+            item.className = `assertion-item ${assertion.passed ? 'pass' : 'fail'}`;
+            const meta = document.createElement('div');
+            meta.className = 'assertion-meta';
+            const keyLabel = document.createElement('strong');
+            keyLabel.textContent = assertion.path;
+            const expectedSpan = document.createElement('span');
+            expectedSpan.textContent = `Expected: ${describeAssertionValue(assertion.expected)}`;
+            const actualSpan = document.createElement('span');
+            actualSpan.textContent = `Actual: ${describeAssertionValue(assertion.actual)}`;
+            meta.appendChild(keyLabel);
+            meta.appendChild(expectedSpan);
+            meta.appendChild(actualSpan);
+            item.appendChild(meta);
+            group.appendChild(item);
+        });
+        assertionsEl.appendChild(group);
+    }
+
+    function applyEvaluationOutcome(container, evaluation) {
+        if (!container) {
+            return;
+        }
+        const statusEl = container.querySelector('.multi-item-status');
+        const summaryEl = container.querySelector('.response-summary');
+        if (summaryEl && !summaryEl.dataset.baseSummary) {
+            summaryEl.dataset.baseSummary = summaryEl.textContent ? summaryEl.textContent.trim() : '';
+        }
+        renderExpectedAssertions(container, evaluation);
+        if (evaluation && evaluation.evaluated) {
+            const failedCount = evaluation.assertions.filter((detail) => !detail.passed).length;
+            const total = evaluation.assertions.length;
+            const suffix = failedCount ? `Assertions failed (${failedCount}/${total}).` : 'Assertions passed.';
+            if (summaryEl) {
+                const baseSummary = summaryEl.dataset.baseSummary || '';
+                summaryEl.textContent = baseSummary ? `${baseSummary} · ${suffix}` : suffix;
+            }
+            if (statusEl) {
+                statusEl.textContent = failedCount ? 'Failed' : 'Passed';
+            }
+            container.dataset.status = failedCount ? 'failed' : 'passed';
+        } else {
+            if (statusEl) {
+                statusEl.textContent = 'Passed';
+            }
+            if (summaryEl) {
+                const baseSummary = summaryEl.dataset.baseSummary || summaryEl.textContent.trim();
+                summaryEl.textContent = baseSummary ? `${baseSummary} · Completed.` : 'Completed.';
+            }
+            container.dataset.status = 'passed';
+        }
+    }
+
+    function markCaseStatus(container, statusText, summaryText) {
+        if (!container) return;
+        const statusEl = container.querySelector('.multi-item-status');
+        if (statusEl && statusText !== undefined) statusEl.textContent = statusText;
+        const loadingEl = container.querySelector('.response-loading');
+        if (loadingEl) loadingEl.hidden = true;
+        const contentEl = container.querySelector('.response-content');
+        if (contentEl) contentEl.hidden = false;
+        const summaryEl = container.querySelector('.response-summary');
+        if (summaryEl && summaryText !== undefined) summaryEl.textContent = summaryText;
+        const assertionsEl = container.querySelector('.assertions-list');
+        if (assertionsEl) assertionsEl.innerHTML = '';
+        const preview = container.querySelector('.response-preview');
+        if (preview) preview.hidden = true;
+    }
+
+    function markCaseFailed(container, reason, bodyText) {
+        const summary = reason ? `Failed — ${reason}` : 'Failed';
+        markCaseStatus(container, 'Failed', summary);
+        const headersEl = container.querySelector('.response-headers');
+        if (headersEl) headersEl.textContent = '{}';
+        const bodyEl = container.querySelector('.response-body');
+        if (bodyEl) bodyEl.textContent = bodyText !== undefined ? bodyText : (reason || '');
+        container.dataset.status = 'failed';
+        container._lastResponse = { text: '', json: null };
+    }
+
+    function markCaseBlocked(container, reason) {
+        const summary = reason ? `Blocked — ${reason}` : 'Blocked';
+        markCaseStatus(container, 'Blocked', summary);
+        const headersEl = container.querySelector('.response-headers');
+        if (headersEl) headersEl.textContent = '{}';
+        const bodyEl = container.querySelector('.response-body');
+        if (bodyEl) bodyEl.textContent = reason ? `Execution not attempted: ${reason}` : 'Execution not attempted.';
+        container.dataset.status = 'blocked';
+        container._lastResponse = { text: '', json: null };
+    }
+
+    function markCaseSkipped(container, reason) {
+        const summary = reason ? `Skipped — ${reason}` : 'Skipped';
+        markCaseStatus(container, 'Skipped', summary);
+        const headersEl = container.querySelector('.response-headers');
+        if (headersEl) headersEl.textContent = '{}';
+        const bodyEl = container.querySelector('.response-body');
+        if (bodyEl) bodyEl.textContent = reason || '';
+        container.dataset.status = 'skipped';
+        container._lastResponse = { text: '', json: null };
+    }
+
     // Render response body for a specific panel (container)
     function renderPanel(container, view, mode) {
         if (!container) return;
@@ -198,27 +1526,25 @@
         }
     }
 
-    async function executeForPanel(requestId, envId, container) {
+    async function executeForPanel(requestId, envId, container, options = {}) {
         const statusEl = container.querySelector('.multi-item-status');
         const loadingEl = container.querySelector('.response-loading');
         const contentEl = container.querySelector('.response-content');
         const summaryEl = container.querySelector('.response-summary');
         const headersEl = container.querySelector('.response-headers');
         const bodyEl = container.querySelector('.response-body');
-        const preview = container.querySelector('.response-preview');
         const assertionsEl = container.querySelector('.assertions-list');
+        const dependencyOverrides = (options && (options.overrides || options.dependencyOverrides)) || null;
 
         if (!requestId) {
-            statusEl.textContent = 'No related API request';
-            loadingEl.hidden = true;
-            contentEl.hidden = false;
-            summaryEl.textContent = 'No request configured for this test case.';
-            return;
+            markCaseSkipped(container, 'No related API request configured.');
+            return { success: false, errorSummary: 'No related API request', blockChain: false };
         }
 
-        statusEl.textContent = 'Loading request details…';
+        if (statusEl) statusEl.textContent = 'Loading request details…';
+        if (loadingEl) loadingEl.hidden = false;
+        if (contentEl) contentEl.hidden = true;
 
-        // load request object
         let requestObj = null;
         try {
             const requestsBase = endpoints.requests || '/api/core/requests/';
@@ -227,17 +1553,30 @@
             if (!reqResp.ok) throw new Error('Unable to load request');
             requestObj = await reqResp.json();
         } catch (err) {
-            statusEl.textContent = 'Error loading request';
-            loadingEl.hidden = true;
-            contentEl.hidden = false;
-            summaryEl.textContent = String(err || 'Failed to load request details');
-            return;
+            const message = String(err || 'Failed to load request details');
+            markCaseFailed(container, 'Unable to load request details.', message);
+            return { success: false, errorSummary: message, blockChain: true };
         }
 
-        statusEl.textContent = 'Running…';
+        if (statusEl) statusEl.textContent = 'Running…';
 
-        // build payload (reuse logic from single-runner)
         const payload = { request_id: requestId };
+        if (envId !== undefined && envId !== null && String(envId).trim() !== '') {
+            const trimmedEnv = String(envId).trim();
+            const numericEnv = Number(trimmedEnv);
+            if (!Number.isNaN(numericEnv) && trimmedEnv === String(numericEnv)) {
+                payload.environment = numericEnv;
+            } else {
+                payload.environment = trimmedEnv;
+            }
+        }
+
+        let overridesApplied = null;
+        const scriptHelpers = await ensureScriptRunnerReady();
+        let scriptContext = null;
+        let requestSnapshot = null;
+        let selectedEnvironment = null;
+        let templatingResult = null;
         try {
             payload.method = requestObj.method || 'GET';
             payload.url = requestObj.url || '';
@@ -255,11 +1594,15 @@
             if (requestObj.collection_id) payload.collection_id = requestObj.collection_id;
 
             try {
-                // attempt to read environment id from a run-case button in the main table (fallback)
-                const btn = document.querySelector(`button[data-action="run-case"][data-request-id="${requestId}"]`);
-                const btnEnvId = btn ? btn.getAttribute('data-environment-id') : null;
-                if (btnEnvId) payload.environment = Number.isFinite(Number(btnEnvId)) ? Number(btnEnvId) : btnEnvId;
-            } catch (e) { }
+                if (payload.environment === undefined || payload.environment === null || payload.environment === '') {
+                    const btn = document.querySelector(`button[data-action="run-case"][data-request-id="${requestId}"]`);
+                    const btnEnvId = btn ? btn.getAttribute('data-environment-id') : null;
+                    if (btnEnvId) {
+                        const parsedEnv = Number(btnEnvId);
+                        payload.environment = Number.isFinite(parsedEnv) && btnEnvId === String(parsedEnv) ? parsedEnv : btnEnvId;
+                    }
+                }
+            } catch (e) { /* ignore */ }
 
             const resolveTemplate = (v, vars) => {
                 if (!v || typeof v !== 'string') return v;
@@ -288,15 +1631,18 @@
                                     const parsed = envs.find(e => String(e.id) === String(btnEnvId));
                                     if (parsed) chosenEnv = parsed;
                                 }
-                            } catch (e) { }
+                            } catch (e) { /* ignore */ }
                             if (!chosenEnv) chosenEnv = envs.find(e => e && e.variables && Object.prototype.hasOwnProperty.call(e.variables, 'non_realtime_mid') && Object.prototype.hasOwnProperty.call(e.variables, 'non_realtime_mkey')) || null;
                             if (!chosenEnv) chosenEnv = envs.find(e => e && e.variables && Object.prototype.hasOwnProperty.call(e.variables, 'non_realtime_mid')) || null;
                             if (!chosenEnv) chosenEnv = envs[0];
+                            selectedEnvironment = chosenEnv;
                             collectionVars = chosenEnv ? (chosenEnv.variables || {}) : {};
-                            if ((!payload.environment || payload.environment === null || payload.environment === undefined) && chosenEnv && chosenEnv.id) payload.environment = chosenEnv.id;
+                            if ((payload.environment === undefined || payload.environment === null || payload.environment === '') && chosenEnv && chosenEnv.id !== undefined && chosenEnv.id !== null) {
+                                payload.environment = chosenEnv.id;
+                            }
                         }
                     }
-                } catch (e) { }
+                } catch (e) { /* ignore */ }
             }
 
             if (requestObj.auth_type === 'basic' && requestObj.auth_basic) {
@@ -308,7 +1654,7 @@
                         const token = btoa(`${resolvedUsername}:${resolvedPassword}`);
                         payload.headers = payload.headers || {};
                         payload.headers['Authorization'] = `Basic ${token}`;
-                    } catch (e) { }
+                    } catch (e) { /* ignore */ }
                 }
             }
 
@@ -344,13 +1690,13 @@
                                     delete ov.isRandom;
                                     delete ov.charLimit;
                                 }
-                            } catch (e) { }
+                            } catch (e) { /* ignore */ }
                             return ov;
                         });
                     }
                     payload.body_transforms = cloned;
                 }
-            } catch (e) { }
+            } catch (e) { /* ignore */ }
 
             if (requestObj.auth_type === 'bearer' && requestObj.auth_bearer) {
                 const resolved = resolveTemplate(requestObj.auth_bearer, collectionVars);
@@ -363,7 +1709,114 @@
             // ignore building errors and continue
         }
 
-        // CSRF
+        publishMultiRunDiagnostics({
+            container,
+            requestId,
+            payload,
+            requestSnapshot,
+            scriptContext: null,
+            scriptStores: null,
+            overrides: overridesApplied,
+            stage: 'payload-built',
+        });
+
+        const preScriptText = requestObj && typeof requestObj.pre_request_script === 'string'
+            ? requestObj.pre_request_script
+            : '';
+        if (preScriptText && preScriptText.trim() && (!scriptHelpers || typeof scriptHelpers.runPreRequestScript !== 'function')) {
+            markCaseFailed(container, 'Pre-request script unavailable.', 'Unable to execute the pre-request script because the script runner helpers failed to load. Refresh the page and try again.');
+            return { success: false, errorSummary: 'Pre-request script unavailable.', blockChain: true };
+        }
+        if (preScriptText && preScriptText.trim() && scriptHelpers && typeof scriptHelpers.runPreRequestScript === 'function') {
+            if (!requestSnapshot) {
+                requestSnapshot = buildScriptRequestSnapshot(requestObj, scriptHelpers);
+            }
+            try {
+                scriptContext = await scriptHelpers.runPreRequestScript(preScriptText, {
+                    environmentId: payload.environment ?? null,
+                    environmentSnapshot: selectedEnvironment,
+                    requestSnapshot,
+                });
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                markCaseFailed(container, `Pre-request script error.`, message);
+                return { success: false, errorSummary: message, blockChain: true };
+            }
+        } else if (!requestSnapshot) {
+            requestSnapshot = buildScriptRequestSnapshot(requestObj, scriptHelpers);
+        }
+
+        if (scriptContext) {
+            templatingResult = applyScriptContextToPayload(payload, scriptContext, scriptHelpers);
+            if (templatingResult && templatingResult.overrides && Object.keys(templatingResult.overrides).length) {
+                payload.overrides = { ...(payload.overrides || {}), ...templatingResult.overrides };
+                overridesApplied = { ...(overridesApplied || {}), ...templatingResult.overrides };
+            }
+            try {
+                container.__scriptStores = templatingResult ? templatingResult.stores : null;
+            } catch (_error) { /* ignore */ }
+
+            publishMultiRunDiagnostics({
+                container,
+                requestId,
+                payload,
+                requestSnapshot,
+                scriptContext,
+                scriptStores: templatingResult ? templatingResult.stores : null,
+                overrides: overridesApplied,
+                stage: 'templating-applied',
+            });
+        }
+
+        if (scriptContext && scriptHelpers && templatingResult) {
+            try {
+                if (payload.json && typeof payload.json === 'object') {
+                    payload.json = replacePlaceholdersDeep(payload.json, templatingResult.stores);
+                    ensureRawPayloadPlaceholdersResolved(payload.json, templatingResult.stores, scriptHelpers);
+                }
+                if (payload.body && typeof payload.body === 'object') {
+                    payload.body = replacePlaceholdersDeep(payload.body, templatingResult.stores);
+                    ensureRawPayloadPlaceholdersResolved(payload.body, templatingResult.stores, scriptHelpers);
+                } else if (typeof payload.body === 'string') {
+                    payload.body = enforceRawStringPlaceholders(payload.body, templatingResult.stores, scriptHelpers);
+                }
+            } catch (_error) { /* ignore */ }
+        }
+
+        if (scriptContext && Array.isArray(scriptContext.logs) && scriptContext.logs.length) {
+            try {
+                console.info('[automation][multi-runner] pre-request script logs', scriptContext.logs);
+            } catch (error) { /* ignore logging issues */ }
+        }
+
+        try {
+            const lastPreScript = scriptContext ? normalizeDiagnosticsValue(scriptContext) : null;
+            const lastRequestSnapshot = requestSnapshot ? normalizeDiagnosticsValue(requestSnapshot) : null;
+            const lastPayload = normalizeDiagnosticsValue(payload);
+            const lastStores = templatingResult ? normalizeDiagnosticsValue(templatingResult.stores) : null;
+            const lastOverrides = overridesApplied ? normalizeDiagnosticsValue(overridesApplied) : null;
+
+            container.__lastPreScript = lastPreScript;
+            container.__lastRequestSnapshot = lastRequestSnapshot;
+            container.__lastPayload = lastPayload;
+
+            publishMultiRunDiagnostics({
+                container,
+                requestId,
+                payload,
+                requestSnapshot,
+                scriptContext,
+                scriptStores: templatingResult ? templatingResult.stores : null,
+                overrides: overridesApplied,
+                stage: 'pre-fetch',
+            });
+        } catch (_error) { /* ignore */ }
+
+        if (dependencyOverrides && typeof dependencyOverrides === 'object' && Object.keys(dependencyOverrides).length) {
+            payload.overrides = { ...(payload.overrides || {}), ...dependencyOverrides };
+            overridesApplied = { ...(overridesApplied || {}), ...dependencyOverrides };
+        }
+
         let csrftoken = null;
         try {
             const name = 'csrftoken';
@@ -380,57 +1833,140 @@
             });
 
             const text = await resp.text();
-            let data = null; try { data = JSON.parse(text); } catch (e) { data = null; }
-
-            if (!resp.ok) {
-                statusEl.textContent = 'Request failed: ' + resp.status;
-                loadingEl.hidden = true;
-                contentEl.hidden = false;
-                headersEl.textContent = JSON.stringify(data && data.request_headers ? data.request_headers : {}, null, 2);
-                bodyEl.textContent = data && data.error ? data.error : (text || '');
-                return;
-            }
+            let data = null;
+            try { data = JSON.parse(text); } catch (e) { data = null; }
 
             const result = data || {};
+            if (scriptContext && Array.isArray(scriptContext.logs) && scriptContext.logs.length) {
+                result.pre_request_logs = scriptContext.logs;
+            }
+
+            let scriptResponseSnapshot = null;
+            if (scriptHelpers && typeof scriptHelpers.buildScriptResponseSnapshot === 'function') {
+                try {
+                    scriptResponseSnapshot = scriptHelpers.buildScriptResponseSnapshot({
+                        payload: result,
+                        response: resp,
+                        rawBody: text,
+                    });
+                } catch (error) {
+                    scriptResponseSnapshot = null;
+                }
+            }
+            if (!scriptResponseSnapshot) {
+                scriptResponseSnapshot = buildFallbackScriptResponseSnapshot(result, resp, text);
+            }
+
+            const postScriptText = requestObj && typeof requestObj.tests_script === 'string' ? requestObj.tests_script : '';
+            if (postScriptText && postScriptText.trim() && scriptHelpers && typeof scriptHelpers.runTestsScript === 'function') {
+                try {
+                    const testsResult = await scriptHelpers.runTestsScript(postScriptText, {
+                        environmentId: payload.environment ?? null,
+                        environmentSnapshot: selectedEnvironment,
+                        requestSnapshot,
+                        responseSnapshot: scriptResponseSnapshot,
+                        preContext: scriptContext,
+                    });
+                    if (testsResult && typeof testsResult === 'object') {
+                        result.tests_script = {
+                            tests: Array.isArray(testsResult.tests) ? testsResult.tests : [],
+                            logs: Array.isArray(testsResult.logs) ? testsResult.logs : [],
+                        };
+                    }
+                } catch (error) {
+                    result.tests_script = {
+                        tests: [],
+                        logs: [],
+                        error: error instanceof Error ? error.message : String(error),
+                    };
+                }
+            }
+
+            if (!resp.ok) {
+                const errorMessage = result && result.error ? String(result.error) : `HTTP ${resp.status}`;
+                const bodyMessage = result && result.error ? String(result.error) : (text || '');
+                markCaseFailed(container, errorMessage, bodyMessage);
+                if (headersEl) headersEl.textContent = JSON.stringify(result && result.request_headers ? result.request_headers : {}, null, 2);
+                if (bodyEl && !bodyEl.textContent) bodyEl.textContent = bodyMessage;
+                return {
+                    success: false,
+                    statusCode: resp.status,
+                    errorSummary: errorMessage,
+                    responseText: text,
+                    responseData: result && result.json ? result.json : null,
+                    overridesApplied,
+                    blockChain: true,
+                };
+            }
+
             const statusCode = result.status_code || result.status || (result.response_status || null);
             const elapsed = result.elapsed_ms || result.response_time_ms || null;
             const resolvedUrl = result.resolved_url || (result.request && result.request.url) || '';
-            summaryEl.textContent = 'Status: ' + (statusCode || '') + (elapsed ? (' — ' + Math.round(elapsed) + 'ms') : '') + (resolvedUrl ? (' — ' + resolvedUrl) : '');
+            if (summaryEl) summaryEl.textContent = 'Status: ' + (statusCode || '') + (elapsed ? (' — ' + Math.round(elapsed) + 'ms') : '') + (resolvedUrl ? (' — ' + resolvedUrl) : '');
             const headersObj = result.headers || result.response_headers || {};
             const bodyText = result.body || result.response_body || '';
-            // store lastResponse on container for rendering
             container._lastResponse = { text: typeof bodyText === 'string' ? bodyText : (JSON.stringify(bodyText) || ''), json: result.json || null };
-            headersEl.textContent = JSON.stringify(headersObj, null, 2);
-            // render according to current view/mode
+            if (headersEl) headersEl.textContent = JSON.stringify(headersObj, null, 2);
             try { renderPanel(container); } catch (e) { /* ignore */ }
 
-            assertionsEl.innerHTML = '';
-            if (result.assertions_passed && result.assertions_passed.length) {
-                const ul = document.createElement('ul'); result.assertions_passed.forEach(a => { const li = document.createElement('li'); li.textContent = 'PASS: ' + (a || ''); ul.appendChild(li); }); assertionsEl.appendChild(ul);
-            }
-            if (result.assertions_failed && result.assertions_failed.length) {
-                const ul = document.createElement('ul'); result.assertions_failed.forEach(a => { const li = document.createElement('li'); li.textContent = 'FAIL: ' + (a || ''); ul.appendChild(li); }); assertionsEl.appendChild(ul);
+            if (assertionsEl) {
+                assertionsEl.innerHTML = '';
+                if (result.assertions_passed && result.assertions_passed.length) {
+                    const ulPass = document.createElement('ul');
+                    result.assertions_passed.forEach(a => { const li = document.createElement('li'); li.textContent = 'PASS: ' + (a || ''); ulPass.appendChild(li); });
+                    assertionsEl.appendChild(ulPass);
+                }
+                if (result.assertions_failed && result.assertions_failed.length) {
+                    const ulFail = document.createElement('ul');
+                    result.assertions_failed.forEach(a => { const li = document.createElement('li'); li.textContent = 'FAIL: ' + (a || ''); ulFail.appendChild(li); });
+                    assertionsEl.appendChild(ulFail);
+                }
             }
 
-            statusEl.textContent = 'Complete';
-            loadingEl.hidden = true;
-            contentEl.hidden = false;
+            if (statusEl) statusEl.textContent = 'Complete';
+            if (loadingEl) loadingEl.hidden = true;
+            if (contentEl) contentEl.hidden = false;
+            container.dataset.status = 'passed';
 
+            let responseData = null;
+            if (container._lastResponse && typeof container._lastResponse.json === 'object' && container._lastResponse.json !== null) {
+                responseData = container._lastResponse.json;
+            } else if (container._lastResponse && typeof container._lastResponse.text === 'string') {
+                const trimmed = container._lastResponse.text.trim();
+                if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+                    try {
+                        responseData = JSON.parse(trimmed);
+                    } catch (e) {
+                        responseData = null;
+                    }
+                }
+            }
+
+            return {
+                success: true,
+                statusCode,
+                elapsed,
+                responseData,
+                responseText: container._lastResponse ? container._lastResponse.text : '',
+                result,
+                overridesApplied,
+                blockChain: false,
+            };
         } catch (err) {
-            statusEl.textContent = 'Error';
-            loadingEl.hidden = true;
-            contentEl.hidden = false;
-            summaryEl.textContent = String(err || 'Request error');
+            const message = String(err || 'Request error');
+            markCaseFailed(container, 'Request execution error.', message);
+            return { success: false, errorSummary: message, blockChain: true };
         }
     }
 
     function collectSelectedCases() {
         const boxes = Array.from(document.querySelectorAll('input.case-checkbox')).filter(b => b.checked);
         const cases = [];
-        boxes.forEach(b => {
-            const caseId = b.getAttribute('data-case-id') || (b.closest && b.closest('tr') && b.closest('tr').getAttribute('data-case-id')) || null;
-            let title = '';
+        boxes.forEach((b, index) => {
             const tr = b.closest && b.closest('tr');
+            const rawCaseId = b.getAttribute('data-case-id') || (tr && tr.getAttribute('data-case-id')) || null;
+            const caseId = normalizeCaseId(rawCaseId);
+            let title = '';
             if (tr) {
                 // title is in the 3rd td (index 2)
                 const tds = tr.querySelectorAll('td');
@@ -441,11 +1977,183 @@
             let envId = null;
             try {
                 const btn = tr && tr.querySelector && tr.querySelector('button[data-action="run-case"]');
-                if (btn) { requestId = btn.getAttribute('data-request-id'); envId = btn.getAttribute('data-environment-id'); }
+                if (btn) {
+                    requestId = btn.getAttribute('data-request-id');
+                    const envRaw = btn.getAttribute('data-environment-id');
+                    envId = normalizeCaseId(envRaw) || envRaw;
+                }
             } catch (e) { }
-            cases.push({ caseId, title, requestId, envId });
+            const scenarioId = normalizeCaseId(tr && tr.getAttribute && tr.getAttribute('data-scenario-id'));
+            const requiresDependencyAttr = tr && tr.getAttribute ? tr.getAttribute('data-requires-dependency') : null;
+            const requiresDependency = requiresDependencyAttr === '1' || requiresDependencyAttr === 'true';
+            const dependencyCaseId = normalizeCaseId(tr && tr.getAttribute && tr.getAttribute('data-dependency-id'));
+            const dependencyKey = tr && tr.getAttribute ? (tr.getAttribute('data-dependency-key') || '').trim() : '';
+            const expectedRaw = tr && tr.getAttribute ? tr.getAttribute('data-expected-results') : '';
+            const expectedResults = normalizeExpectedResultsEntries(expectedRaw || []);
+            cases.push({
+                caseId,
+                rawCaseId,
+                title,
+                requestId,
+                envId,
+                scenarioId,
+                requiresDependency,
+                dependencyCaseId,
+                dependencyKey,
+                expectedResults,
+                originalIndex: index,
+            });
         });
         return cases;
+    }
+
+    function orderCasesByDependency(cases) {
+        const byId = new Map();
+        cases.forEach((caseInfo) => {
+            caseInfo.caseId = normalizeCaseId(caseInfo.caseId || caseInfo.rawCaseId);
+            caseInfo.caseKey = caseInfo.caseId || `__idx_${caseInfo.originalIndex}`;
+            if (caseInfo.caseId) {
+                byId.set(caseInfo.caseId, caseInfo);
+            }
+        });
+        const ordered = [];
+        const visited = new Set();
+        const visiting = new Set();
+
+        function visit(caseInfo) {
+            if (!caseInfo) return;
+            const key = caseInfo.caseKey;
+            if (visited.has(key)) return;
+            if (visiting.has(key)) return;
+            visiting.add(key);
+            const dependencyId = normalizeCaseId(caseInfo.dependencyCaseId);
+            if (dependencyId && byId.has(dependencyId)) {
+                visit(byId.get(dependencyId));
+            }
+            visiting.delete(key);
+            visited.add(key);
+            ordered.push(caseInfo);
+        }
+
+        cases.forEach(visit);
+        return ordered;
+    }
+
+    function prepareDependencyOverrides(caseInfo, resultsByCaseId, caseInfoById) {
+        if (!caseInfo.requiresDependency) {
+            return { ready: true, overrides: null };
+        }
+        const dependencyId = normalizeCaseId(caseInfo.dependencyCaseId);
+        if (!dependencyId) {
+            return { ready: false, reason: 'Dependency test case not configured.' };
+        }
+        const dependencyResult = resultsByCaseId.get(dependencyId);
+        const dependencyMeta = caseInfoById ? caseInfoById.get(dependencyId) : null;
+        const dependencyLabel = dependencyMeta && dependencyMeta.title ? dependencyMeta.title : `case ${dependencyId}`;
+        if (!dependencyResult || !dependencyResult.success) {
+            return { ready: false, reason: `Dependency ${dependencyLabel} has not completed successfully.` };
+        }
+        const keyPath = (caseInfo.dependencyKey || '').trim();
+        if (!keyPath) {
+            return { ready: false, reason: 'Dependency response key is required for this test case.' };
+        }
+        let source = dependencyResult.responseData;
+        if ((!source || typeof source !== 'object') && dependencyResult.responseText) {
+            try {
+                const trimmed = String(dependencyResult.responseText).trim();
+                if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+                    source = JSON.parse(trimmed);
+                }
+            } catch (e) {
+                source = null;
+            }
+        }
+        const value = getNestedValue(source, keyPath);
+        if (value === undefined) {
+            return { ready: false, reason: `Dependency key "${keyPath}" not found in ${dependencyLabel}.` };
+        }
+        const overrideKey = sanitizeOverrideKey(keyPath);
+        let overrideValue = value;
+        if (overrideValue !== null && typeof overrideValue === 'object') {
+            try {
+                overrideValue = JSON.stringify(overrideValue);
+            } catch (e) {
+                overrideValue = String(overrideValue);
+            }
+        }
+        const overridesMap = { dependency_value: overrideValue };
+        overridesMap[overrideKey] = overrideValue;
+        return {
+            ready: true,
+            overrides: overridesMap,
+            value,
+            overrideKey,
+            dependencyId,
+        };
+    }
+
+    async function runSelectedCasesSequentially(caseList, caseInfoById) {
+        const resultsByCaseId = new Map();
+        let haltReason = null;
+
+        for (const caseInfo of caseList) {
+            const container = caseInfo && caseInfo.container;
+            if (!container) {
+                continue;
+            }
+
+            if (haltReason) {
+                markCaseBlocked(container, haltReason);
+                continue;
+            }
+
+            if (!caseInfo.requestId) {
+                markCaseSkipped(container, 'No related API request configured.');
+                continue;
+            }
+
+            let overridesInfo = null;
+            if (caseInfo.requiresDependency) {
+                overridesInfo = prepareDependencyOverrides(caseInfo, resultsByCaseId, caseInfoById);
+                if (!overridesInfo.ready) {
+                    markCaseFailed(container, overridesInfo.reason, overridesInfo.reason);
+                    haltReason = overridesInfo.reason;
+                    continue;
+                }
+            }
+
+            let runResult;
+            try {
+                const overrideOptions = overridesInfo && overridesInfo.overrides ? { overrides: overridesInfo.overrides } : {};
+                runResult = await executeForPanel(caseInfo.requestId, caseInfo.envId, container, overrideOptions);
+            } catch (error) {
+                const message = String(error || 'Unexpected execution error.');
+                markCaseFailed(container, message, message);
+                haltReason = message;
+                continue;
+            }
+
+            if (!runResult || !runResult.success) {
+                const reason = (runResult && runResult.errorSummary) || 'Execution failed.';
+                if (!runResult || runResult.blockChain !== false) {
+                    haltReason = reason;
+                }
+                continue;
+            }
+
+            const evaluation = evaluateExpectedResults(caseInfo.expectedResults || [], runResult);
+            applyEvaluationOutcome(container, evaluation);
+            if (evaluation && evaluation.evaluated && !evaluation.passed) {
+                const reason = evaluation.reason || 'Expected results mismatch.';
+                haltReason = reason;
+                continue;
+            }
+
+            const caseIdKey = caseInfo.caseId ? String(caseInfo.caseId) : null;
+            if (caseIdKey) {
+                resultsByCaseId.set(caseIdKey, runResult);
+            }
+        }
     }
 
     function init() {
@@ -461,11 +2169,23 @@
 
             const modal = createModal();
             const list = modal.querySelector('#testcase-multi-list');
-            selected.forEach((c) => {
-                const item = makeAccordionItem(c.caseId || ('case-' + Math.random().toString(36).slice(2)), c.title || 'Untitled');
+            const ordered = orderCasesByDependency(selected);
+            const caseInfoById = new Map();
+            ordered.forEach((caseInfo, idx) => {
+                const domId = caseInfo.caseId || caseInfo.caseKey || `case-${caseInfo.originalIndex}-${idx}`;
+                const item = makeAccordionItem(domId, caseInfo.title || 'Untitled');
+                item.dataset.status = 'queued';
+                if (caseInfo.caseId) item.dataset.caseId = String(caseInfo.caseId);
+                if (caseInfo.caseKey) item.dataset.caseKey = String(caseInfo.caseKey);
+                if (caseInfo.requestId) item.dataset.requestId = String(caseInfo.requestId);
+                if (caseInfo.envId !== undefined && caseInfo.envId !== null && caseInfo.envId !== '') {
+                    item.dataset.environmentId = String(caseInfo.envId);
+                }
+                caseInfo.container = item;
                 list.appendChild(item);
-                // kick off execution async (don't await)
-                (async () => { await executeForPanel(c.requestId, c.envId, item); })();
+                if (caseInfo.caseId) {
+                    caseInfoById.set(caseInfo.caseId, caseInfo);
+                }
             });
 
             // close handler
@@ -476,6 +2196,18 @@
             modal.addEventListener('click', (ev2) => { if (ev2.target === modal) { closeModal(modal); setTimeout(() => modal.remove(), 250); } });
 
             openModal(modal);
+
+            runSelectedCasesSequentially(ordered, caseInfoById).catch((err) => {
+                try {
+                    console.error('[automation][multi-runner] failed to execute cases', err);
+                } catch (e) { /* ignore logging errors */ }
+                ordered.forEach((caseInfo) => {
+                    if (!caseInfo || !caseInfo.container) return;
+                    if (!caseInfo.container.dataset.status || caseInfo.container.dataset.status === 'queued') {
+                        markCaseFailed(caseInfo.container, 'Unexpected execution error.', String(err || 'Execution aborted.'));
+                    }
+                });
+            });
         });
 
         // Delegated controls for view/mode/toggle inside the multi modal

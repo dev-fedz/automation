@@ -1463,7 +1463,9 @@
         },
     };
 
-    document.addEventListener('DOMContentLoaded', () => {
+    const initializeApiTester = () => {
+        installScriptRunnerHelpers();
+
         const root = document.getElementById('api-tester-app');
         if (!root) {
             return;
@@ -6495,7 +6497,7 @@
             });
         });
 
-        const createScriptConsoleProxy = () => {
+        function createScriptConsoleProxy() {
             const buffer = [];
             const proxy = {};
             ['log', 'info', 'warn', 'error'].forEach((method) => {
@@ -6509,9 +6511,9 @@
                 };
             });
             return { proxy, buffer };
-        };
+        }
 
-        const deepEqual = (a, b) => {
+        function deepEqual(a, b) {
             if (a === b) {
                 return true;
             }
@@ -6550,9 +6552,9 @@
                 return true;
             }
             return false;
-        };
+        }
 
-        const formatAssertionValue = (value) => {
+        function formatAssertionValue(value) {
             if (typeof value === 'string') {
                 return `"${value}"`;
             }
@@ -6570,9 +6572,9 @@
             } catch (error) {
                 return Object.prototype.toString.call(value);
             }
-        };
+        }
 
-        const createExpectation = (actual, negate = false) => {
+        function createExpectation(actual, negate = false) {
             const expectation = {};
 
             const assertCondition = (condition, message, negatedMessage) => {
@@ -6769,9 +6771,9 @@
             });
 
             return expectation;
-        };
+        }
 
-        const createResponseExpectation = (snapshot) => {
+        function createResponseExpectation(snapshot) {
             const expectation = {};
 
             const applyAssertion = (negate, condition, message, negatedMessage) => {
@@ -6894,9 +6896,9 @@
                 },
             });
             return expectation;
-        };
+        }
 
-        const createPmResponseInterface = (snapshot) => {
+        function createPmResponseInterface(snapshot) {
             const safeSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : {};
             const headers = safeSnapshot.headers && typeof safeSnapshot.headers === 'object' ? { ...safeSnapshot.headers } : {};
 
@@ -6974,9 +6976,9 @@
                 to: expectation.to,
                 not: expectation.not,
             };
-        };
+        }
 
-        const createSandboxRequire = (modules = {}) => {
+        function createSandboxRequire(modules = {}) {
             const registry = new Map();
             const register = (names, value) => {
                 if (!Array.isArray(names)) {
@@ -7020,13 +7022,26 @@
                 }
                 throw new Error(`Module '${rawName}' is not available in the API tester sandbox.`);
             };
-        };
+        }
 
-        const runPreRequestScript = async (scriptText, { environmentId = null, requestSnapshot }) => {
+        async function runPreRequestScript(scriptText, { environmentId = null, requestSnapshot, environmentSnapshot = null } = {}) {
             const trimmed = (scriptText || '').trim();
             const cryptoJs = await ensureCryptoJsReady();
 
-            const environmentInstance = environmentId !== null ? getEnvironmentById(environmentId) : null;
+            const environmentInstance = (() => {
+                if (environmentSnapshot && typeof environmentSnapshot === 'object') {
+                    const normalized = {
+                        id: environmentSnapshot.id ?? null,
+                        name: environmentSnapshot.name || '',
+                        variables: cloneVariableStore(environmentSnapshot.variables),
+                    };
+                    if (environmentSnapshot.default_headers && typeof environmentSnapshot.default_headers === 'object') {
+                        normalized.default_headers = { ...environmentSnapshot.default_headers };
+                    }
+                    return normalized;
+                }
+                return environmentId !== null ? getEnvironmentById(environmentId) : null;
+            })();
             const baseEnvironmentStore = cloneVariableStore(environmentInstance?.variables);
             const workingEnvironmentStore = { ...baseEnvironmentStore };
             const localStore = {};
@@ -7163,16 +7178,29 @@
                 localVariables: { ...localStore },
                 logs: consoleBuffer,
             };
-        };
+        }
 
-        const runTestsScript = async (
+        async function runTestsScript(
             scriptText,
-            { environmentId = null, requestSnapshot, responseSnapshot, preContext },
-        ) => {
+            { environmentId = null, requestSnapshot, responseSnapshot, preContext, environmentSnapshot = null } = {},
+        ) {
             const trimmed = (scriptText || '').trim();
             const cryptoJs = await ensureCryptoJsReady();
 
-            const environmentInstance = environmentId !== null ? getEnvironmentById(environmentId) : null;
+            const environmentInstance = (() => {
+                if (environmentSnapshot && typeof environmentSnapshot === 'object') {
+                    const normalized = {
+                        id: environmentSnapshot.id ?? null,
+                        name: environmentSnapshot.name || '',
+                        variables: cloneVariableStore(environmentSnapshot.variables),
+                    };
+                    if (environmentSnapshot.default_headers && typeof environmentSnapshot.default_headers === 'object') {
+                        normalized.default_headers = { ...environmentSnapshot.default_headers };
+                    }
+                    return normalized;
+                }
+                return environmentId !== null ? getEnvironmentById(environmentId) : null;
+            })();
             const baseEnvironmentStore = cloneVariableStore(environmentInstance?.variables);
             const seededEnvironmentStore = {
                 ...baseEnvironmentStore,
@@ -7375,9 +7403,9 @@
                 tests,
                 logs: consoleBuffer,
             };
-        };
+        }
 
-        const buildScriptResponseSnapshot = ({ payload, response, rawBody = '', error = null }) => {
+        function buildScriptResponseSnapshot({ payload, response, rawBody = '', error = null }) {
             const normalizedPayload = payload && typeof payload === 'object' ? payload : null;
             let headers = {};
             if (normalizedPayload && typeof normalizedPayload.headers === 'object') {
@@ -7411,7 +7439,7 @@
                 error: normalizedPayload?.error
                     ?? (error ? (error instanceof Error ? error.message : String(error)) : null),
             };
-        };
+        }
 
         const buildPayloadFromBuilder = async (collection, request) => {
             const headersPayload = rowsToObject(state.builder.headers);
@@ -7729,6 +7757,30 @@
 
             return payload;
         };
+
+        function installScriptRunnerHelpers() {
+            if (typeof window === 'undefined') {
+                return;
+            }
+            const existingHelpers = window.__automationHelpers || {};
+            const existingRunner = existingHelpers.scriptRunner || {};
+            window.__automationHelpers = Object.assign({}, existingHelpers, {
+                scriptRunner: Object.assign({}, existingRunner, {
+                    createCoercibleRequestBody,
+                    runPreRequestScript,
+                    runTestsScript,
+                    buildScriptResponseSnapshot,
+                    resolveTemplateWithLookups,
+                    resolveTemplatesDeep,
+                    setValueAtObjectPath,
+                    collectJsonTemplatePlaceholders,
+                }),
+                resolveTemplateWithLookups,
+                resolveTemplatesDeep,
+                collectJsonTemplatePlaceholders,
+                setValueAtObjectPath,
+            });
+        }
 
         const submitForm = async (event) => {
             event.preventDefault();
@@ -8734,5 +8786,11 @@
         renderBuilder();
         bootstrap();
         renderResponse(null);
-    });
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initializeApiTester);
+    } else {
+        initializeApiTester();
+    }
 })();

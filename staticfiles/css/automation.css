@@ -533,6 +533,7 @@
 .form-row input,
 .form-row textarea {
     width: 100%;
+    box-sizing: border-box;
     border-radius: 8px;
     border: 1px solid rgba(205, 174, 88, 0.55);
     padding: 0.6rem 0.7rem;
@@ -547,11 +548,47 @@
 
 .form-row select {
     width: 100%;
+    box-sizing: border-box;
     border-radius: 8px;
     border: 1px solid rgba(205, 174, 88, 0.55);
     padding: 0.6rem 0.7rem;
     background: #fffef9;
     font-size: 0.85rem;
+}
+
+
+.form-row.dependency-toggle {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.dependency-toggle__label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0;
+    font-size: 0.85rem;
+    text-transform: none;
+    letter-spacing: normal;
+    font-weight: 600;
+    max-width: 100%;
+    flex-wrap: wrap;
+}
+
+.dependency-toggle__label input[type="checkbox"] {
+    flex: 0 0 auto;
+}
+
+.dependency-toggle__label span {
+    flex: 1 1 auto;
+    word-break: break-word;
+}
+
+.dependency-toggle__label input[type="checkbox"] {
+    width: auto;
+    height: auto;
 }
 
 .scope-grid {

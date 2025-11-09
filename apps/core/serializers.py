@@ -373,6 +373,13 @@ class TestCaseSerializer(serializers.ModelSerializer):
     )
     # Read-only convenience field exposing the related ApiRequest's name
     related_api_request_name = serializers.CharField(source='related_api_request.name', read_only=True)
+    test_case_dependency = serializers.PrimaryKeyRelatedField(
+        queryset=models.TestCase.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    requires_dependency = serializers.BooleanField(required=False)
+    dependency_response_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = models.TestCase
@@ -392,12 +399,16 @@ class TestCaseSerializer(serializers.ModelSerializer):
             "owner_id",
             "related_api_request",
             "related_api_request_name",
+            "test_case_dependency",
+            "requires_dependency",
+            "dependency_response_key",
             "created_at",
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
         extra_kwargs = {
-            "testcase_id": {"required": False, "allow_null": True, "allow_blank": True}
+            "testcase_id": {"required": False, "allow_null": True, "allow_blank": True},
+            "dependency_response_key": {"required": False, "allow_blank": True, "allow_null": True},
         }
         # validators: uniqueness is checked in validate() only when a
         # testcase_id is supplied (so missing/testcase generation flows
@@ -434,6 +445,56 @@ class TestCaseSerializer(serializers.ModelSerializer):
             scenario = attrs.get("scenario")
             if scenario and models.TestCase.objects.filter(scenario=scenario, testcase_id=testcase_id).exists():
                 raise ValidationError({"testcase_id": "Test case ID must be unique per scenario."})
+
+        # Dependency validation
+        requires_dependency = attrs.get("requires_dependency")
+        if requires_dependency is None and self.instance is not None:
+            requires_dependency = self.instance.requires_dependency
+
+        dependency = attrs.get("test_case_dependency")
+        if dependency is None and self.instance is not None:
+            dependency = self.instance.test_case_dependency
+
+        dependency_key = attrs.get("dependency_response_key")
+        if dependency_key is None and self.instance is not None:
+            dependency_key = self.instance.dependency_response_key
+
+        dependency_requested = bool(
+            requires_dependency
+            or dependency
+            or (dependency_key and str(dependency_key).strip())
+        )
+
+        if dependency_requested and dependency is None:
+            raise ValidationError({
+                "test_case_dependency": "Select a dependency test case when dependency data is required.",
+            })
+
+        if dependency_requested:
+            key_str = str(dependency_key or "").strip()
+            if not key_str:
+                raise ValidationError({
+                    "dependency_response_key": "Enter the response key that must exist in the dependency output.",
+                })
+            attrs["dependency_response_key"] = key_str
+            attrs["requires_dependency"] = True
+            scenario_obj = attrs.get("scenario") or (self.instance.scenario if self.instance else None)
+            if scenario_obj and dependency and dependency.scenario_id != scenario_obj.id:
+                raise ValidationError({
+                    "test_case_dependency": "Dependency must belong to the same scenario.",
+                })
+            if dependency and self.instance and dependency.pk == self.instance.pk:
+                raise ValidationError({
+                    "test_case_dependency": "A test case cannot depend on itself.",
+                })
+        else:
+            attrs["requires_dependency"] = False
+            # Avoid persisting stale key data when dependency is not required
+            attrs["dependency_response_key"] = ""
+            # If dependency field not provided explicitly, leave existing value untouched on update
+            if "test_case_dependency" not in attrs and self.instance is not None:
+                pass
+
         return attrs
 
     def update(self, instance: models.TestCase, validated_data: dict[str, Any]) -> models.TestCase:
