@@ -3011,11 +3011,14 @@
                     const desc = escapeHtml(testCase.description || '');
                     const created = escapeHtml(formatDateTime(testCase.created_at || null));
                     const updated = escapeHtml(formatDateTime(testCase.updated_at || null));
-                    const requiresDependencyAttr = testCase.requires_dependency ? '1' : '0';
-                    const dependencyIdAttr = testCase.test_case_dependency || testCase.test_case_dependency_id || '';
+                    const requiresDependency = Boolean(testCase.requires_dependency);
+                    const requiresDependencyAttr = requiresDependency ? 'true' : 'false';
+                    const dependencyIdAttr = escapeHtml(testCase.test_case_dependency || testCase.test_case_dependency_id || '');
                     const dependencyKeyAttr = escapeHtml(testCase.dependency_response_key || '');
                     const expectedAttr = escapeHtml(JSON.stringify(testCase.expected_results || []));
                     const responseEncryptedAttr = testCase.is_response_encrypted ? 'true' : 'false';
+                    const runBlockedTitle = 'Run disabled: this test case requires a dependency to execute individually.';
+                    const runAllowedTitle = 'Run related API request';
                     return `
                         <tr data-case-id="${testCase.id || ''}" data-scenario-id="${testCase.scenario || testCase.scenario_id || ''}" data-requires-dependency="${requiresDependencyAttr}" data-dependency-id="${dependencyIdAttr}" data-dependency-key="${dependencyKeyAttr}" data-expected-results="${expectedAttr}" data-response-encrypted="${responseEncryptedAttr}">
                             <td>
@@ -3033,7 +3036,7 @@
                                 <div class="table-action-group">
                                     <button type="button" class="action-button" data-action="view-case" data-case-id="${testCase.id || ''}" data-related-api-request-name="${escapeHtml(testCase.related_api_request_name || '')}">View</button>
                                     <button type="button" class="action-button" data-action="edit-case" data-case-id="${testCase.id || ''}" data-related-api-request-name="${escapeHtml(testCase.related_api_request_name || '')}">Edit</button>
-                                    ${testCase.related_api_request ? `<button type="button" class="action-button" data-action="run-case" data-case-id="${testCase.id || ''}" data-request-id="${testCase.related_api_request || ''}" data-expected-results="${expectedAttr}" data-response-encrypted="${responseEncryptedAttr}" title="Run related API request" onclick="if (window.__automationTestcaseControls) { window.__automationTestcaseControls.runCaseFromElement(this); }">Run</button>` : ''}
+                                    ${testCase.related_api_request ? `<button type="button" class="action-button" data-action="run-case" data-case-id="${testCase.id || ''}" data-request-id="${testCase.related_api_request || ''}" data-expected-results="${expectedAttr}" data-response-encrypted="${responseEncryptedAttr}" data-requires-dependency="${requiresDependencyAttr}" data-dependency-id="${dependencyIdAttr}" data-dependency-key="${dependencyKeyAttr}" ${requiresDependency ? 'disabled aria-disabled="true" data-dependency-tooltip="Requires dependency" title="' + escapeHtml(runBlockedTitle) + '"' : 'title="' + escapeHtml(runAllowedTitle) + '" onclick="if (window.__automationTestcaseControls) { window.__automationTestcaseControls.runCaseFromElement(this); }"'}>Run</button>` : ''}
                                     <button type="button" class="action-button" data-action="delete-case" data-case-id="${testCase.id || ''}" data-variant="danger">Delete</button>
                                 </div>
                             </td>

@@ -57,7 +57,7 @@
                         </thead>
                         <tbody data-role="case-table-body">
                             {% for test_case in initial_selected_scenario.cases %}
-                                <tr data-case-id="{{ test_case.id }}" data-response-encrypted="{% if test_case.is_response_encrypted %}true{% else %}false{% endif %}">
+                                <tr data-case-id="{{ test_case.id }}" data-response-encrypted="{% if test_case.is_response_encrypted %}true{% else %}false{% endif %}" data-requires-dependency="{% if test_case.requires_dependency %}true{% else %}false{% endif %}" data-dependency-id="{{ test_case.test_case_dependency|default_if_none:'' }}" data-dependency-key="{{ test_case.dependency_response_key|default_if_none:'' }}">
                                     <td>
                                         <label class="case-checkbox-label">
                                             <input type="checkbox" class="case-checkbox" data-case-id="{{ test_case.id }}" aria-label="Select test case {{ test_case.testcase_id|default:test_case.id }}">
@@ -74,7 +74,7 @@
                                             <button type="button" class="action-button" data-action="view-case" data-case-id="{{ test_case.id }}" data-related-api-request-name="{{ test_case.related_api_request_name|default:'' }}">View</button>
                                             <button type="button" class="action-button" data-action="edit-case" data-case-id="{{ test_case.id }}" data-related-api-request-name="{{ test_case.related_api_request_name|default:'' }}">Edit</button>
                                                     {% if test_case.related_api_request %}
-                                                        <button type="button" class="action-button" data-action="run-case" data-case-id="{{ test_case.id }}" data-request-id="{{ test_case.related_api_request }}" data-environment-id="1" data-response-encrypted="{% if test_case.is_response_encrypted %}true{% else %}false{% endif %}" title="Run related API request" onclick="if (window.__automationTestcaseControls) { window.__automationTestcaseControls.runCaseFromElement(this); }">Run</button>
+                                                        <button type="button" class="action-button" data-action="run-case" data-case-id="{{ test_case.id }}" data-request-id="{{ test_case.related_api_request }}" data-environment-id="1" data-response-encrypted="{% if test_case.is_response_encrypted %}true{% else %}false{% endif %}" data-requires-dependency="{% if test_case.requires_dependency %}true{% else %}false{% endif %}" data-dependency-id="{{ test_case.test_case_dependency|default_if_none:'' }}" data-dependency-key="{{ test_case.dependency_response_key|default_if_none:'' }}" {% if test_case.requires_dependency %}disabled aria-disabled="true" data-dependency-tooltip="Requires dependency" title="Run disabled: this test case requires a dependency to execute individually."{% else %}title="Run related API request" onclick="if (window.__automationTestcaseControls) { window.__automationTestcaseControls.runCaseFromElement(this); }"{% endif %}>Run</button>
                                                     {% endif %}
                                             <button type="button" class="action-button" data-action="delete-case" data-case-id="{{ test_case.id }}" data-variant="danger">Delete</button>
                                         </div>

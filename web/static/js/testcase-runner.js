@@ -2280,6 +2280,17 @@
         }
     }
 
+    function parseBooleanAttribute(value) {
+        if (value === null || value === undefined) {
+            return false;
+        }
+        const normalized = String(value).trim().toLowerCase();
+        if (!normalized) {
+            return false;
+        }
+        return normalized === 'true' || normalized === '1' || normalized === 'yes';
+    }
+
     function runCaseFromElement(buttonElement) {
         if (!buttonElement || typeof buttonElement.getAttribute !== 'function') {
             return;
@@ -2288,16 +2299,19 @@
         if (!requestId) {
             return;
         }
+        let row = null;
+        try {
+            row = typeof buttonElement.closest === 'function' ? buttonElement.closest('tr') : null;
+        } catch (_error) {
+            row = null;
+        }
         let expectedRaw = null;
         try {
             const inlineExpected = buttonElement.getAttribute('data-expected-results');
             if (inlineExpected) {
                 expectedRaw = inlineExpected;
-            } else {
-                const row = buttonElement.closest('tr');
-                if (row && typeof row.getAttribute === 'function') {
-                    expectedRaw = row.getAttribute('data-expected-results') || null;
-                }
+            } else if (row && typeof row.getAttribute === 'function') {
+                expectedRaw = row.getAttribute('data-expected-results') || null;
             }
         } catch (_error) {
             expectedRaw = null;
@@ -2306,17 +2320,63 @@
         let responseEncrypted = false;
         try {
             let attr = buttonElement.getAttribute('data-response-encrypted');
-            if (attr === null || attr === undefined) {
-                const row = buttonElement.closest('tr');
-                if (row && typeof row.getAttribute === 'function') {
-                    attr = row.getAttribute('data-response-encrypted');
-                }
+            if ((attr === null || attr === undefined) && row && typeof row.getAttribute === 'function') {
+                attr = row.getAttribute('data-response-encrypted');
             }
             if (attr !== null && attr !== undefined) {
-                responseEncrypted = String(attr).toLowerCase() === 'true';
+                responseEncrypted = parseBooleanAttribute(attr);
             }
         } catch (_error) {
             responseEncrypted = false;
+        }
+
+        let requiresDependency = false;
+        let dependencyId = '';
+        let dependencyKey = '';
+        try {
+            let attr = buttonElement.getAttribute('data-requires-dependency');
+            if ((attr === null || attr === undefined) && row && typeof row.getAttribute === 'function') {
+                attr = row.getAttribute('data-requires-dependency');
+            }
+            requiresDependency = parseBooleanAttribute(attr);
+            let depIdAttr = buttonElement.getAttribute('data-dependency-id');
+            if ((!depIdAttr || depIdAttr === '0') && row && typeof row.getAttribute === 'function') {
+                depIdAttr = row.getAttribute('data-dependency-id');
+            }
+            if (depIdAttr) {
+                dependencyId = depIdAttr;
+            }
+            let depKeyAttr = buttonElement.getAttribute('data-dependency-key');
+            if ((!depKeyAttr || depKeyAttr === '0') && row && typeof row.getAttribute === 'function') {
+                depKeyAttr = row.getAttribute('data-dependency-key');
+            }
+            if (depKeyAttr) {
+                dependencyKey = depKeyAttr;
+            }
+        } catch (_error) {
+            requiresDependency = false;
+            dependencyId = '';
+            dependencyKey = '';
+        }
+
+        if (requiresDependency) {
+            const messageParts = ['Run blocked: this test case requires a dependency and cannot run individually.'];
+            if (dependencyId) {
+                messageParts.push(`Dependency case: ${dependencyId}`);
+            }
+            if (dependencyKey) {
+                messageParts.push(`Required key: ${dependencyKey}`);
+            }
+            const message = messageParts.join(' ');
+            mirrorAutomationLog('warn', '[automation][testcase-runner] ' + message);
+            try {
+                if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+                    window.alert(message);
+                }
+            } catch (_alertError) {
+                /* ignore alert issues */
+            }
+            return;
         }
 
         _currentCaseOptions = { responseEncrypted };
