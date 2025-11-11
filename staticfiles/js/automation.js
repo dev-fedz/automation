@@ -1,4 +1,32 @@
 (function () {
+    const shouldMirrorAutomationLog = (level) => {
+        if (level === 'error') {
+            return true;
+        }
+        try {
+            return Boolean(typeof window !== 'undefined' && window.__automationDebugMode);
+        } catch (_error) {
+            return false;
+        }
+    };
+
+    const automationLog = (level, ...args) => {
+        if (!shouldMirrorAutomationLog(level)) {
+            return;
+        }
+        try {
+            if (typeof console === 'undefined') {
+                return;
+            }
+            const method = typeof console[level] === 'function' ? console[level] : console.log;
+            if (typeof method === 'function') {
+                method.apply(console, args);
+            }
+        } catch (_error) {
+            /* ignore logging issues */
+        }
+    };
+
     const escapeHtml = (value) => {
         if (value === null || value === undefined) {
             return "";
@@ -356,10 +384,23 @@
     };
 
     document.addEventListener('DOMContentLoaded', () => {
-        try { console.info('[automation] automation.js DOMContentLoaded handler running'); } catch (e) { /* ignore */ }
+        automationLog('info', '[automation] automation.js DOMContentLoaded handler running');
         const root = document.getElementById('automation-app');
         if (!root) {
             return;
+        }
+
+        const responseCloseBtn = document.getElementById('testcase-response-close');
+        if (responseCloseBtn) {
+            responseCloseBtn.addEventListener('click', () => {
+                try {
+                    if (window.__automationTestcaseControls && typeof window.__automationTestcaseControls.closeModal === 'function') {
+                        window.__automationTestcaseControls.closeModal();
+                    }
+                } catch (_error) {
+                    /* ignore close errors */
+                }
+            });
         }
 
         const readScriptJson = (id) => {
@@ -764,13 +805,13 @@
 
         const openCaseSelectionModal = () => {
             try {
-                try { console.debug('[automation] openCaseSelectionModal invoked'); } catch (e) { }
+                automationLog('debug', '[automation] openCaseSelectionModal invoked');
                 if (!els.caseSelectionModal) return;
                 // Fetch latest plans from API before populating modal so the
                 // options reflect the current server state. We do this even if
                 // state.plans exists to ensure freshness.
                 (async () => {
-                    try { console.debug('[automation] fetching plans for modal from', apiEndpoints.plans || '/api/core/test-plans/'); } catch (e) { }
+                    automationLog('debug', '[automation] fetching plans for modal from', apiEndpoints.plans || '/api/core/test-plans/');
                     try {
                         setStatus('Loading test plans…', 'info');
                         const resp = await fetch(apiEndpoints.plans || '/api/core/test-plans/', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
@@ -786,7 +827,7 @@
                         setStatus('', 'info');
                     }
                     // populate options freshly (will use state.plans)
-                    try { populateModalCaseSelects(); } catch (e) { console.debug('[automation] populateModalCaseSelects error', e); }
+                    try { populateModalCaseSelects(); } catch (e) { automationLog('debug', '[automation] populateModalCaseSelects error', e); }
                     // If the page has a selected plan, auto-select it in the modal
                     try {
                         const modalPlanElAuto = document.getElementById('modal-case-plan') || els.modalCasePlan;
@@ -796,7 +837,7 @@
                             modalPlanElAuto.dispatchEvent(new Event('change', { bubbles: true }));
                         }
                     } catch (e) { /* ignore */ }
-                    try { console.debug('[automation] modal open - state.plans length', Array.isArray(state.plans) ? state.plans.length : 0, 'initialModules length', Array.isArray(initialModules) ? initialModules.length : 0); } catch (e) { }
+                    automationLog('debug', '[automation] modal open - state.plans length', Array.isArray(state.plans) ? state.plans.length : 0, 'initialModules length', Array.isArray(initialModules) ? initialModules.length : 0);
                     // remember currently focused element so we can restore focus on close
                     _previouslyFocused = document.activeElement;
                     // show modal element (make it focusable)
@@ -905,7 +946,7 @@
             if (modalPlanEl) {
                 modalPlanEl.addEventListener('change', (ev) => {
                     const pid = (ev.currentTarget && ev.currentTarget.value) ? ev.currentTarget.value : (modalPlanEl.value || null);
-                    try { console.debug('[automation] modalPlan change invoked', { pid: pid, statePlansLength: Array.isArray(state.plans) ? state.plans.length : 0 }); } catch (e) { }
+                    automationLog('debug', '[automation] modalPlan change invoked', { pid: pid, statePlansLength: Array.isArray(state.plans) ? state.plans.length : 0 });
                     // update state selected plan similar to main scenarioPlan handler
                     try {
                         if (!pid) {
@@ -919,7 +960,7 @@
                         // re-query elements at handler time to avoid stale references
                         const moduleSelect = document.getElementById('modal-case-module') || modalModuleEl;
                         const modalScenarioElLocal = document.getElementById('modal-case-scenario') || modalScenarioEl;
-                        try { console.debug('[automation] modalPlan handler elements', { moduleSelectPresent: !!moduleSelect, modalScenarioPresent: !!modalScenarioElLocal }); } catch (e) { }
+                        automationLog('debug', '[automation] modalPlan handler elements', { moduleSelectPresent: !!moduleSelect, modalScenarioPresent: !!modalScenarioElLocal });
                         if (!moduleSelect) return;
                         moduleSelect.innerHTML = '';
                         const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = '(select module)'; moduleSelect.appendChild(placeholder);
@@ -937,7 +978,7 @@
                             });
                         }
                         if (!modules.length) modules = Array.isArray(initialModules) ? initialModules.slice() : [];
-                        try { console.debug('[automation] modalPlan computed modules', { modulesCount: modules.length, modulesSample: modules.length ? modules.slice(0, 3) : [] }); } catch (e) { }
+                        automationLog('debug', '[automation] modalPlan computed modules', { modulesCount: modules.length, modulesSample: modules.length ? modules.slice(0, 3) : [] });
                         modules.forEach((m) => {
                             const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.title || `Module ${m.id}`; moduleSelect.appendChild(opt);
                         });
@@ -959,7 +1000,7 @@
                                 if (!resp.ok) throw new Error(`Failed to fetch scenarios: ${resp.status}`);
                                 const data = await resp.json();
                                 const normalized = Array.isArray(data) ? data.map(normalizeScenario) : [];
-                                try { console.debug('[automation] modalPlan fetched scenarios', { url, count: normalized.length, sample: normalized.length ? normalized[0] : null }); } catch (e) { }
+                                automationLog('debug', '[automation] modalPlan fetched scenarios', { url, count: normalized.length, sample: normalized.length ? normalized[0] : null });
                                 // attach to the plan in state; if the plan isn't present
                                 // create a minimal plan entry so downstream code (module
                                 // computation) can use the attached scenarios.
@@ -993,7 +1034,7 @@
                                             if (m) return m;
                                             return { id: mid, title: `Module ${mid}` };
                                         });
-                                        try { console.debug('[automation] modulesFromFetch after fetch', modulesFromFetch.length, modulesFromFetch.slice(0, 3)); } catch (e) { }
+                                        automationLog('debug', '[automation] modulesFromFetch after fetch', modulesFromFetch.length, modulesFromFetch.slice(0, 3));
                                         moduleSelectRef.innerHTML = '';
                                         const placeholder2 = document.createElement('option'); placeholder2.value = ''; placeholder2.textContent = '(select module)'; moduleSelectRef.appendChild(placeholder2);
                                         modulesFromFetch.forEach((m) => {
@@ -1037,13 +1078,13 @@
                                     if (mid) params.append('module', String(mid));
                                     if (pid) params.append('plan', String(pid));
                                     const url = params.toString() ? `${base}?${params.toString()}` : base;
-                                    try { console.debug('[automation] modal module fetch', { pid, mid, url }); } catch (e) { }
+                                    automationLog('debug', '[automation] modal module fetch', { pid, mid, url });
                                     const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
                                     if (!resp.ok) throw new Error(`Failed to fetch scenarios for module: ${resp.status}`);
                                     const data = await resp.json();
                                     const normalized = Array.isArray(data) ? data.map(normalizeScenario) : [];
                                     scenarios = normalized;
-                                    try { console.debug('[automation] modal module fetch result', { count: normalized.length, sample: normalized.length ? normalized[0] : null }); } catch (e) { }
+                                    automationLog('debug', '[automation] modal module fetch result', { count: normalized.length, sample: normalized.length ? normalized[0] : null });
                                     // attach to plan if selected
                                     if (pid) {
                                         const p = state.plans.find((pp) => Number(pp.id) === Number(pid));
@@ -1065,7 +1106,7 @@
                                                 });
                                             }
                                             if (!modulesFromFetch.length) modulesFromFetch = Array.isArray(initialModules) ? initialModules.slice() : [];
-                                            try { console.debug('[automation] modalPlan populate modules after fetch', { modulesCount: modulesFromFetch.length, sample: modulesFromFetch.slice(0, 3) }); } catch (e) { }
+                                            automationLog('debug', '[automation] modalPlan populate modules after fetch', { modulesCount: modulesFromFetch.length, sample: modulesFromFetch.slice(0, 3) });
                                             if (modalModuleElLocal) {
                                                 modalModuleElLocal.innerHTML = '';
                                                 const placeholder2 = document.createElement('option'); placeholder2.value = ''; placeholder2.textContent = '(select module)'; modalModuleElLocal.appendChild(placeholder2);
@@ -1082,7 +1123,7 @@
                                         } catch (err) { /* ignore */ }
                                     }
                                 } catch (err) {
-                                    console.debug('[automation] modal module fetch error', err);
+                                    automationLog('debug', '[automation] modal module fetch error', err);
                                 } finally {
                                     // populate modal scenario select
                                     if (modalScenarioEl) {
@@ -1652,7 +1693,7 @@
         // Debug: expose the initial plans we were given server-side so we can
         // confirm in browser console whether the payload arrived correctly.
         try {
-            console.debug('[automation] initialPlans length:', (state.plans || []).length, 'sample:', (state.plans || []).slice(0, 3));
+            automationLog('debug', '[automation] initialPlans length:', (state.plans || []).length, 'sample:', (state.plans || []).slice(0, 3));
         } catch (e) { /* ignore */ }
 
         const getSelectedPlan = () => state.plans.find((plan) => Number(plan.id) === Number(state.selectedPlanId)) || null;
@@ -1778,7 +1819,7 @@
                     const plan = state.plans.find(p => Number(p.id) === Number(val));
                     state.selectedScenarioId = plan && Array.isArray(plan.scenarios) && plan.scenarios.length ? plan.scenarios[0].id : null;
                 }
-                console.debug('[automation] plan changed', { selectedPlanId: state.selectedPlanId, selectedScenarioId: state.selectedScenarioId });
+                automationLog('debug', '[automation] plan changed', { selectedPlanId: state.selectedPlanId, selectedScenarioId: state.selectedScenarioId });
                 // load scenarios for this plan from the API and attach them to the
                 // selected plan so the table shows up-to-date data for the plan.
                 (async () => {
@@ -1897,7 +1938,7 @@
                     try { renderCaseList(); } catch (e) { /* ignore */ }
                 } catch (err) {
                     setStatus('Case search failed.', 'error');
-                    try { console.error('[automation] delegated case search error', err); } catch (e) { /* ignore */ }
+                    automationLog('error', '[automation] delegated case search error', err);
                 }
             } catch (e) { /* ignore */ }
         }, 300));
@@ -1911,7 +1952,7 @@
                 const moduleFilter = document.getElementById('module-filter');
                 const mid = moduleFilter && moduleFilter.value ? Number(moduleFilter.value) : null;
                 // Debug: log the user click and current selection so it's visible in Console
-                try { console.info('[automation] open-new-scenario clicked', { planIdCandidate: planId, moduleFilterValue: mid }); } catch (e) { /* ignore */ }
+                automationLog('info', '[automation] open-new-scenario clicked', { planIdCandidate: planId, moduleFilterValue: mid });
                 if (!planId) {
                     setStatus('Please select a plan before creating a scenario.', 'error');
                     showToast('Please select a plan before creating a scenario.');
@@ -1926,7 +1967,7 @@
                 try {
                     const ev = new CustomEvent('open-module-scenario', { detail: { mode: 'create', moduleId: mid } });
                     document.dispatchEvent(ev);
-                    try { console.info('[automation] dispatched open-module-scenario', { detail: ev.detail }); } catch (e) { /* ignore */ }
+                    automationLog('info', '[automation] dispatched open-module-scenario', { detail: ev.detail });
                 } catch (e) {
                     // fallback to direct open if event fails
                     try {
@@ -1940,7 +1981,7 @@
                                 const titleInput = document.getElementById('module-add-scenario-title'); if (titleInput) titleInput.focus();
                             }
                         }
-                        try { console.info('[automation] fallback opened modal directly', { moduleId: mid }); } catch (er) { /* ignore */ }
+                        automationLog('info', '[automation] fallback opened modal directly', { moduleId: mid });
                     } catch (err) { /* ignore */ }
                 }
             });
@@ -1966,7 +2007,7 @@
         try {
             document.addEventListener('test-modules-changed', (ev) => {
                 try {
-                    console.info('[automation] test-modules-changed received', ev && ev.detail ? ev.detail : null);
+                    automationLog('info', '[automation] test-modules-changed received', ev && ev.detail ? ev.detail : null);
                     // Re-fetch scenarios for the currently selected plan so the
                     // table reflects the latest server state.
                     const pid = state.selectedPlanId || (els.scenarioPlan && els.scenarioPlan.value ? Number(els.scenarioPlan.value) : null);
@@ -2013,9 +2054,7 @@
 
         const openPlanEdit = async (plan) => {
             // Debug: log when the edit modal is opened and whether details exist
-            try {
-                console.debug('[automation] openPlanEdit called', { id: plan && plan.id, hasDetails: Array.isArray(plan && plan.risk_mitigation_details) && plan.risk_mitigation_details.length });
-            } catch (e) { /* ignore logging errors */ }
+            automationLog('debug', '[automation] openPlanEdit called', { id: plan && plan.id, hasDetails: Array.isArray(plan && plan.risk_mitigation_details) && plan.risk_mitigation_details.length });
             if (!plan) return;
             // Ensure we have the full plan detail (including risk_mitigation_details)
             // The list endpoint may not include nested mapping details, so fetch
@@ -2156,7 +2195,7 @@
                 try { selLen = selNode ? (JSON.parse(selNode.textContent || selNode.innerText || '[]') || []).length : null; } catch (_e) { selLen = 'parse-error'; }
                 try { byPlanLen = byPlanNode ? Object.keys(JSON.parse(byPlanNode.textContent || byPlanNode.innerText || '{}') || {}).reduce((acc, k) => acc + ((JSON.parse(byPlanNode.textContent || byPlanNode.innerText || '{}') || {})[k] || []).length, 0) : null; } catch (_e) { byPlanLen = 'parse-error'; }
                 try { allLen = allNode ? (JSON.parse(allNode.textContent || allNode.innerText || '[]') || []).length : null; } catch (_e) { allLen = 'parse-error'; }
-                console.debug('[automation] renderPlanRiskMatrix called', { id: plan && plan.id, hasDetails, injected: { selectedForPlan: selLen, byPlanTotal: byPlanLen, allMappings: allLen } });
+                automationLog('debug', '[automation] renderPlanRiskMatrix called', { id: plan && plan.id, hasDetails, injected: { selectedForPlan: selLen, byPlanTotal: byPlanLen, allMappings: allLen } });
             } catch (e) { /* ignore logging errors */ }
             if (!els.planRiskMatrix) return;
             // Ensure we have detailed mapping objects for the plan. If the plan
@@ -2172,7 +2211,7 @@
                     try {
                         // Debug: log the exact URL we're about to request so we can
                         // verify the plan query parameter is present.
-                        try { console.debug('[automation] fetching per-plan mappings', { mappingsUrlBase, url, planId: plan.id }); } catch (e) { }
+                        automationLog('debug', '[automation] fetching per-plan mappings', { mappingsUrlBase, url, planId: plan.id });
                         const resp = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
                         if (resp) {
                             if (resp.status === 401) {
@@ -2332,7 +2371,7 @@
             try {
                 const mappingTbody = document.querySelector('[data-role="mapping-list"]');
                 if (mappingTbody) {
-                    try { console.debug('[automation] mapping tbody found on page'); } catch (e) { }
+                    automationLog('debug', '[automation] mapping tbody found on page');
                     // Prefer the detailed objects on the plan, but fall back to
                     // resolving mapping ids against the page-injected initial
                     // risk mitigations if the details are not present. This
@@ -2376,14 +2415,14 @@
                         }
                     }
                     if (!details.length) {
-                        try { console.debug('[automation] mapping details resolved: none'); } catch (e) { }
+                        automationLog('debug', '[automation] mapping details resolved: none');
                         // Additional debug info to help diagnose why mappings are
                         // empty: dump page-injected mappings and plan id.
                         try {
                             const nodeAll = document.getElementById('automation-initial-risk-mitigations');
                             const allText = nodeAll ? (nodeAll.textContent || nodeAll.innerText || '') : '';
-                            console.debug('[automation] fallback allMappings length', allText ? (JSON.parse(allText) || []).length : 0, 'planId', plan && plan.id);
-                        } catch (err) { console.debug('[automation] error parsing fallback mappings', err); }
+                            automationLog('debug', '[automation] fallback allMappings length', allText ? (JSON.parse(allText) || []).length : 0, 'planId', plan && plan.id);
+                        } catch (err) { automationLog('debug', '[automation] error parsing fallback mappings', err); }
                         mappingTbody.innerHTML = '<tr><td colspan="7" class="empty">No risk to mitigation links found for the current filters.</td></tr>';
                         // If mappings were not available yet due to a race, try a
                         // single delayed retry to populate the table.
@@ -2394,7 +2433,7 @@
                                     const allMappings = JSON.parse(node.textContent || node.innerText || '[]');
                                     const forPlan = Array.isArray(allMappings) ? allMappings.filter((m) => m && Number(m.plan) === Number(plan.id)) : [];
                                     if (forPlan.length) {
-                                        console.debug('[automation] retry: found fallback mappings after delay', forPlan.length);
+                                        automationLog('debug', '[automation] retry: found fallback mappings after delay', forPlan.length);
                                         // Dedupe by mapping id in case the details got
                                         // populated elsewhere and to avoid rendering
                                         // duplicate rows when the same mapping appears
@@ -2437,7 +2476,7 @@
                                         if (!existing || existing.length === 0) {
                                             mappingTbody.innerHTML = retryRows;
                                         } else {
-                                            console.debug('[automation] retry: mapping table already populated, skipping overwrite', { existing: existing.length });
+                                            automationLog('debug', '[automation] retry: mapping table already populated, skipping overwrite', { existing: existing.length });
                                         }
                                     }
                                 }
@@ -2446,7 +2485,7 @@
                             }
                         }, 250);
                     } else {
-                        try { console.debug('[automation] mapping details resolved', { count: details.length }); } catch (e) { }
+                        automationLog('debug', '[automation] mapping details resolved', { count: details.length });
                         // Dedupe details by mapping id to avoid rendering
                         // duplicate rows if entries come from multiple
                         // sources (nested details, by-plan map, full list).
@@ -2463,7 +2502,7 @@
 
                         // Log the source and mapping ids for diagnostic purposes
                         try {
-                            console.debug('[automation] mapping rows source', { source: detailsSource || 'unknown', ids: uniqueDetails.map((m) => m && m.id) });
+                            automationLog('debug', '[automation] mapping rows source', { source: detailsSource || 'unknown', ids: uniqueDetails.map((m) => m && m.id) });
                         } catch (err) { /* ignore */ }
 
                         const mapRows = uniqueDetails
@@ -2682,7 +2721,7 @@
                 return;
             }
             const plan = getSelectedPlan();
-            console.debug('[automation] renderScenarioList called', { selectedPlanId: state.selectedPlanId, plan: plan ? { id: plan.id, scenarios: Array.isArray(plan.scenarios) ? plan.scenarios.length : 0 } : null });
+            automationLog('debug', '[automation] renderScenarioList called', { selectedPlanId: state.selectedPlanId, plan: plan ? { id: plan.id, scenarios: Array.isArray(plan.scenarios) ? plan.scenarios.length : 0 } : null });
             if (els.planName) els.planName.textContent = plan ? plan.name : '—';
             // render into table body if present
             const tbody = els.scenarioTableBody;
@@ -2694,20 +2733,20 @@
                 return;
             }
             const scenarios = Array.isArray(plan.scenarios) ? plan.scenarios : [];
-            console.debug('[automation] plan has scenarios count', scenarios.length);
+            automationLog('debug', '[automation] plan has scenarios count', scenarios.length);
             // Detailed per-scenario debug to surface module/plan shapes that
             // can break client-side filters when the API returns nested
             // objects instead of primitive ids.
             try {
                 const details = scenarios.map((s) => ({ id: s && s.id, moduleValue: s && s.module, moduleType: s && s.module === null ? 'null' : typeof (s && s.module) }));
-                console.debug('[automation] scenario module snapshot', details.slice(0, 50));
+                automationLog('debug', '[automation] scenario module snapshot', details.slice(0, 50));
             } catch (err) {
-                console.debug('[automation] error while snapshotting scenario modules', err);
+                automationLog('debug', '[automation] error while snapshotting scenario modules', err);
             }
             // apply scenario search filter (from header)
             const q = state._scenarioSearch || '';
             const moduleFilterVal = (document.getElementById('module-filter') && document.getElementById('module-filter').value) ? String(document.getElementById('module-filter').value) : '';
-            console.debug('[automation] applying filters', { search: q, moduleFilterVal });
+            automationLog('debug', '[automation] applying filters', { search: q, moduleFilterVal });
             const filtered = scenarios.filter((s) => {
                 if (q) {
                     const lower = q;
@@ -2717,7 +2756,7 @@
                 if (moduleFilterVal) {
                     // module filter expects module id match
                     // Log a per-item comparison to help debugging mismatches.
-                    try { console.debug('[automation] module filter compare', { scenarioId: s && s.id, scenarioModule: s && s.module, cmpTo: moduleFilterVal, eq: String(s && s.module || '') === String(moduleFilterVal) }); } catch (e) { }
+                    automationLog('debug', '[automation] module filter compare', { scenarioId: s && s.id, scenarioModule: s && s.module, cmpTo: moduleFilterVal, eq: String(s && s.module || '') === String(moduleFilterVal) });
                     return String(s.module || '') === String(moduleFilterVal);
                 }
                 return true;
@@ -2765,7 +2804,7 @@
             moduleFilterEl.addEventListener('change', (ev) => {
                 const midRaw = moduleFilterEl.value;
                 const mid = midRaw ? Number(midRaw) : null;
-                console.debug('[automation] module filter changed', { value: mid });
+                automationLog('debug', '[automation] module filter changed', { value: mid });
                 (async () => {
                     try {
                         setStatus('Loading scenarios for module…', 'info');
@@ -2781,16 +2820,16 @@
                         const data = await resp.json();
                         // normalize scenarios so module/plan are ids (not nested objects)
                         const normalized = Array.isArray(data) ? data.map(normalizeScenario) : [];
-                        console.debug('[automation] module scenarios fetched', { count: normalized.length, sample: normalized.length ? normalized[0] : null });
+                        automationLog('debug', '[automation] module scenarios fetched', { count: normalized.length, sample: normalized.length ? normalized[0] : null });
                         // Extra diagnostic: log module value/types for each returned scenario
                         try {
                             const moduleSnapshot = normalized.map((s) => ({ id: s && s.id, module: s && s.module, moduleType: s && s.module === null ? 'null' : typeof (s && s.module) }));
-                            console.debug('[automation] module scenarios normalized snapshot', moduleSnapshot.slice(0, 200));
+                            automationLog('debug', '[automation] module scenarios normalized snapshot', moduleSnapshot.slice(0, 200));
                             // show what would be matched for the currently selected module
                             const moduleMatches = normalized.filter((s) => String(s.module || '') === String(mid));
-                            console.debug('[automation] module filter matching preview', { requestedModule: mid, matchedCount: moduleMatches.length, sample: moduleMatches.length ? moduleMatches[0] : null });
+                            automationLog('debug', '[automation] module filter matching preview', { requestedModule: mid, matchedCount: moduleMatches.length, sample: moduleMatches.length ? moduleMatches[0] : null });
                         } catch (err) {
-                            console.debug('[automation] error while producing module snapshots', err);
+                            automationLog('debug', '[automation] error while producing module snapshots', err);
                         }
                         // If there's a selected plan, attach returned scenarios to it.
                         if (state.selectedPlanId) {
@@ -2994,7 +3033,7 @@
                                 <div class="table-action-group">
                                     <button type="button" class="action-button" data-action="view-case" data-case-id="${testCase.id || ''}" data-related-api-request-name="${escapeHtml(testCase.related_api_request_name || '')}">View</button>
                                     <button type="button" class="action-button" data-action="edit-case" data-case-id="${testCase.id || ''}" data-related-api-request-name="${escapeHtml(testCase.related_api_request_name || '')}">Edit</button>
-                                    ${testCase.related_api_request ? `<button type="button" class="action-button" data-action="run-case" data-case-id="${testCase.id || ''}" data-request-id="${testCase.related_api_request || ''}" data-expected-results="${expectedAttr}" data-response-encrypted="${responseEncryptedAttr}" title="Run related API request">Run</button>` : ''}
+                                    ${testCase.related_api_request ? `<button type="button" class="action-button" data-action="run-case" data-case-id="${testCase.id || ''}" data-request-id="${testCase.related_api_request || ''}" data-expected-results="${expectedAttr}" data-response-encrypted="${responseEncryptedAttr}" title="Run related API request" onclick="if (window.__automationTestcaseControls) { window.__automationTestcaseControls.runCaseFromElement(this); }">Run</button>` : ''}
                                     <button type="button" class="action-button" data-action="delete-case" data-case-id="${testCase.id || ''}" data-variant="danger">Delete</button>
                                 </div>
                             </td>
@@ -3291,7 +3330,7 @@
                 const btn = ev.target.closest && ev.target.closest('#open-new-case');
                 if (!btn) return;
                 ev.preventDefault();
-                try { console.debug('[automation] #open-new-case clicked'); } catch (e) { /* ignore */ }
+                automationLog('debug', '[automation] #open-new-case clicked');
                 setStatus('Opening New Test Case…', 'info');
                 const sid = state.selectedScenarioId || null;
                 const caseModal = document.querySelector('[data-role="module-add-case-modal"]');
@@ -3381,7 +3420,7 @@
                                 const parsed = Number(hidden.value);
                                 if (!Number.isNaN(parsed) && parsed > 0) payload.related_api_request = parsed;
                             }
-                            try { console.debug('[automation][module] creating case payload.related_api_request=', payload.related_api_request); } catch (e) { /* ignore */ }
+                            automationLog('debug', '[automation][module] creating case payload.related_api_request=', payload.related_api_request);
                         } catch (e) { /* ignore */ }
                         if (!payload.title) {
                             setStatus('Test case title is required.', 'error');
@@ -3878,15 +3917,15 @@
                         const label = document.getElementById('module-related-api-request-label');
                         if (hidden) hidden.value = rid;
                         if (label) { label.textContent = visibleLabel; label.dataset.requestId = rid; }
-                        console.log('[api-explorer] confirm origin=module rid=', rid, 'hiddenExists=', !!hidden, 'labelExists=', !!label);
-                        if (label && label.dataset) console.log('[api-explorer] module label.dataset.requestId=', label.dataset.requestId);
+                        automationLog('debug', '[api-explorer] confirm origin=module rid=', rid, 'hiddenExists=', !!hidden, 'labelExists=', !!label);
+                        if (label && label.dataset) automationLog('debug', '[api-explorer] module label.dataset.requestId=', label.dataset.requestId);
                     } else {
                         const hidden = document.getElementById('case-related-api-request-id');
                         const label = document.getElementById('case-related-api-request-label');
                         if (hidden) hidden.value = rid;
                         if (label) { label.textContent = visibleLabel; label.dataset.requestId = rid; }
-                        console.log('[api-explorer] confirm origin=case rid=', rid, 'hiddenExists=', !!hidden, 'labelExists=', !!label);
-                        if (label && label.dataset) console.log('[api-explorer] case label.dataset.requestId=', label.dataset.requestId);
+                        automationLog('debug', '[api-explorer] confirm origin=case rid=', rid, 'hiddenExists=', !!hidden, 'labelExists=', !!label);
+                        if (label && label.dataset) automationLog('debug', '[api-explorer] case label.dataset.requestId=', label.dataset.requestId);
                     }
                     modal.hidden = true; body.classList.remove('automation-modal-open');
                     if (typeof opts.success === 'function') opts.success(rid);
@@ -4131,8 +4170,8 @@
                             payload.related_api_request = parsedId;
                         }
                     }
-                    console.log('[handleCaseSubmit] after sync hidden value=', hidden && hidden.value, 'label.dataset.requestId=', label && label.dataset && label.dataset.requestId);
-                    try { console.debug('[automation] creating case payload.related_api_request=', payload.related_api_request); } catch (e) { /* ignore */ }
+                    automationLog('debug', '[handleCaseSubmit] after sync hidden value=', hidden && hidden.value, 'label.dataset.requestId=', label && label.dataset && label.dataset.requestId);
+                    automationLog('debug', '[automation] creating case payload.related_api_request=', payload.related_api_request);
                 } catch (e) { /* ignore */ }
                 if (!payload.title) {
                     throw new Error('Test case title is required.');
@@ -4315,20 +4354,20 @@
             try {
                 const scenariosUrl = apiEndpoints.scenarios || '/api/core/test-scenarios/';
                 // debug log so you can see this attempt in the console
-                console.debug('[automation] attempting to load scenarios from', scenariosUrl);
+                automationLog('debug', '[automation] attempting to load scenarios from', scenariosUrl);
                 setStatus('Loading scenarios…', 'info');
                 const resp = await fetch(scenariosUrl, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
                 if (!resp.ok) throw new Error(`Failed to load scenarios: ${resp.status}`);
                 const scenarios = await resp.json();
                 // normalize fetched scenarios
                 const normalized = Array.isArray(scenarios) ? scenarios.map(normalizeScenario) : [];
-                console.debug('[automation] scenarios fetched', Array.isArray(normalized) ? normalized.length : typeof normalized);
+                automationLog('debug', '[automation] scenarios fetched', Array.isArray(normalized) ? normalized.length : typeof normalized);
                 // If we don't have plans on the client, fetch them first so we
                 // can attach scenarios to real plan objects and set a selected
                 // plan id. This covers cases where `initial_plans` was empty.
                 if (!Array.isArray(state.plans) || !state.plans.length) {
                     try {
-                        console.debug('[automation] no plans present, fetching plans before attaching scenarios');
+                        automationLog('debug', '[automation] no plans present, fetching plans before attaching scenarios');
                         await refreshPlans({ silent: true });
                     } catch (err) {
                         console.warn('[automation] failed to refresh plans before attaching scenarios', err);

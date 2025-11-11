@@ -2,6 +2,38 @@
 (function () {
     'use strict';
 
+    const shouldMirrorAutomationLog = (level) => {
+        if (level === 'error') {
+            return true;
+        }
+        try {
+            const debugEnabled = Boolean(typeof window !== 'undefined' && window.__automationDebugMode);
+            if (debugEnabled) {
+                return true;
+            }
+        } catch (_error) {
+            return false;
+        }
+        return false;
+    };
+
+    const mirrorAutomationLog = (level, ...args) => {
+        if (!shouldMirrorAutomationLog(level)) {
+            return;
+        }
+        try {
+            if (typeof console === 'undefined') {
+                return;
+            }
+            const method = typeof console[level] === 'function' ? console[level] : console.log;
+            if (typeof method === 'function') {
+                method.apply(console, args);
+            }
+        } catch (_error) {
+            /* ignore logging issues */
+        }
+    };
+
     const getJsonScript = (id) => {
         try {
             const el = document.getElementById(id);
@@ -23,6 +55,7 @@
     let _currentCaseOptions = {
         responseEncrypted: false,
     };
+    let _lastFocusedBeforeModal = null;
 
     const fallbackCoerceExpectedResultValue = (raw) => {
         if (raw === null || raw === undefined) {
@@ -220,15 +253,11 @@
             let pollTimer = null;
 
             const log = (level, message, extra) => {
-                try {
-                    if (level === 'error' && console && console.error) {
-                        console.error('[automation][testcase-runner] ' + message, extra);
-                    } else if (level === 'warn' && console && console.warn) {
-                        console.warn('[automation][testcase-runner] ' + message, extra);
-                    } else if (level === 'info' && console && console.info) {
-                        console.info('[automation][testcase-runner] ' + message, extra);
-                    }
-                } catch (_loggingError) { /* ignore */ }
+                if (extra === undefined) {
+                    mirrorAutomationLog(level, '[automation][testcase-runner] ' + message);
+                } else {
+                    mirrorAutomationLog(level, '[automation][testcase-runner] ' + message, extra);
+                }
             };
 
             const clearPoll = () => {
@@ -1444,20 +1473,94 @@
     function openModal() {
         const modal = document.getElementById('testcase-response-modal');
         if (!modal) return null;
+        try {
+            const activeEl = document.activeElement;
+            if (activeEl && typeof activeEl.closest === 'function' && !modal.contains(activeEl)) {
+                _lastFocusedBeforeModal = activeEl;
+            } else if (activeEl && (!activeEl.closest || !modal.contains(activeEl))) {
+                _lastFocusedBeforeModal = activeEl;
+            }
+        } catch (_error) {
+            _lastFocusedBeforeModal = null;
+        }
         modal.hidden = false;
         modal.setAttribute('aria-hidden', 'false');
         const loading = document.getElementById('testcase-response-loading');
         if (loading) loading.hidden = false;
         const content = document.getElementById('testcase-response-content');
         if (content) content.hidden = true;
+        window.setTimeout(() => {
+            try {
+                let focusTarget = modal.querySelector('.modal-close');
+                if (!focusTarget) {
+                    const dialog = modal.querySelector('.modal-dialog');
+                    if (dialog) {
+                        if (!dialog.hasAttribute('tabindex')) {
+                            dialog.setAttribute('tabindex', '-1');
+                        }
+                        focusTarget = dialog;
+                    }
+                }
+                if (!focusTarget) {
+                    if (!modal.hasAttribute('tabindex')) {
+                        modal.setAttribute('tabindex', '-1');
+                    }
+                    focusTarget = modal;
+                }
+                if (focusTarget && typeof focusTarget.focus === 'function') {
+                    focusTarget.focus({ preventScroll: true });
+                }
+            } catch (_error) {
+                /* ignore focus errors */
+            }
+        }, 0);
         return modal;
     }
 
     function closeModal() {
         const modal = document.getElementById('testcase-response-modal');
         if (!modal) return;
+        try {
+            const closeBtn = modal.querySelector('.modal-close');
+            if (closeBtn && typeof closeBtn.blur === 'function') {
+                closeBtn.blur();
+            }
+        } catch (_error) {
+            /* ignore blur issues */
+        }
+        let restoreTarget = null;
+        if (_lastFocusedBeforeModal) {
+            try {
+                if (typeof document.contains === 'function' && document.contains(_lastFocusedBeforeModal)) {
+                    restoreTarget = _lastFocusedBeforeModal;
+                } else if (document.body && typeof document.body.contains === 'function' && document.body.contains(_lastFocusedBeforeModal)) {
+                    restoreTarget = _lastFocusedBeforeModal;
+                }
+            } catch (_error) {
+                restoreTarget = null;
+            }
+        }
+        if (!restoreTarget) {
+            try {
+                restoreTarget = document.querySelector('button[data-action="run-case"]');
+            } catch (_error) {
+                restoreTarget = null;
+            }
+        }
+        if (restoreTarget && typeof restoreTarget.focus === 'function') {
+            try {
+                restoreTarget.focus({ preventScroll: true });
+            } catch (_error) {
+                try {
+                    restoreTarget.focus();
+                } catch (_err) {
+                    /* ignore */
+                }
+            }
+        }
         modal.hidden = true;
         modal.setAttribute('aria-hidden', 'true');
+        _lastFocusedBeforeModal = null;
     }
 
     function setSummary(text) {
@@ -1838,9 +1941,7 @@
         }
 
         if (scriptContext && Array.isArray(scriptContext.logs) && scriptContext.logs.length) {
-            try {
-                console.info('[automation][testcase-runner] pre-request script logs', scriptContext.logs);
-            } catch (error) { /* ignore logging issues */ }
+            mirrorAutomationLog('info', '[automation][testcase-runner] pre-request script logs', scriptContext.logs);
         }
 
         publishSingleRunDiagnostics({
@@ -1868,8 +1969,11 @@
         }
 
         try {
-            if (payload.body_transforms) try { console.debug('testcase-run payload.body_transforms:', payload.body_transforms); } catch (e) { }
-            else try { console.debug('testcase-run no body_transforms present'); } catch (e) { }
+            if (payload.body_transforms) {
+                mirrorAutomationLog('debug', 'testcase-run payload.body_transforms:', payload.body_transforms);
+            } else {
+                mirrorAutomationLog('debug', 'testcase-run no body_transforms present');
+            }
 
             const resp = await fetch(POST_URL, {
                 method: 'POST',
@@ -1988,97 +2092,126 @@
         }
     }
 
+    function runCaseFromElement(buttonElement) {
+        if (!buttonElement || typeof buttonElement.getAttribute !== 'function') {
+            return;
+        }
+        const requestId = buttonElement.getAttribute('data-request-id');
+        if (!requestId) {
+            return;
+        }
+        let expectedRaw = null;
+        try {
+            const inlineExpected = buttonElement.getAttribute('data-expected-results');
+            if (inlineExpected) {
+                expectedRaw = inlineExpected;
+            } else {
+                const row = buttonElement.closest('tr');
+                if (row && typeof row.getAttribute === 'function') {
+                    expectedRaw = row.getAttribute('data-expected-results') || null;
+                }
+            }
+        } catch (_error) {
+            expectedRaw = null;
+        }
+
+        let responseEncrypted = false;
+        try {
+            let attr = buttonElement.getAttribute('data-response-encrypted');
+            if (attr === null || attr === undefined) {
+                const row = buttonElement.closest('tr');
+                if (row && typeof row.getAttribute === 'function') {
+                    attr = row.getAttribute('data-response-encrypted');
+                }
+            }
+            if (attr !== null && attr !== undefined) {
+                responseEncrypted = String(attr).toLowerCase() === 'true';
+            }
+        } catch (_error) {
+            responseEncrypted = false;
+        }
+
+        _currentCaseOptions = { responseEncrypted };
+        _currentExpectedResults = normalizeExpectedResultsEntries(expectedRaw || []);
+        runRequest(requestId);
+    }
+
+    function toggleSectionVisibility(targetId) {
+        if (!targetId) {
+            return;
+        }
+        const el = document.getElementById(targetId);
+        if (!el) {
+            return;
+        }
+        if (el.hidden || el.style.display === 'none') {
+            el.hidden = false;
+            el.style.display = '';
+        } else {
+            el.hidden = true;
+            el.style.display = 'none';
+        }
+    }
+
+    function setResponseView(view) {
+        if (!view) {
+            return;
+        }
+        _currentView = view;
+        try {
+            const buttons = document.querySelectorAll('button[data-response-body-view]');
+            buttons.forEach((btn) => {
+                const btnView = btn.getAttribute('data-response-body-view');
+                if (btnView === view) {
+                    btn.classList.add('is-active');
+                    btn.setAttribute('aria-pressed', 'true');
+                } else {
+                    btn.classList.remove('is-active');
+                    btn.setAttribute('aria-pressed', 'false');
+                }
+            });
+        } catch (_error) {
+            /* ignore UI sync issues */
+        }
+        try {
+            renderForTab(_currentView);
+        } catch (_error) {
+            /* ignore render errors */
+        }
+    }
+
+    function setResponseMode(mode) {
+        if (!mode) {
+            return;
+        }
+        _currentMode = mode;
+        try {
+            const buttons = document.querySelectorAll('button[data-response-body-mode]');
+            buttons.forEach((btn) => {
+                const btnMode = btn.getAttribute('data-response-body-mode');
+                if (btnMode === mode) {
+                    btn.classList.add('is-active');
+                    btn.setAttribute('aria-pressed', 'true');
+                } else {
+                    btn.classList.remove('is-active');
+                    btn.setAttribute('aria-pressed', 'false');
+                }
+            });
+        } catch (_error) {
+            /* ignore UI sync issues */
+        }
+        try {
+            if (_currentMode === 'preview') {
+                renderForTab('preview');
+            } else {
+                renderForTab(_currentView);
+            }
+        } catch (_error) {
+            /* ignore render errors */
+        }
+    }
+
     function init() {
-        document.addEventListener('click', function (ev) {
-            const target = ev.target;
-            if (!target) return;
-            const btn = target.closest && target.closest('button[data-action="run-case"]');
-            if (btn) {
-                ev.preventDefault();
-                const requestId = btn.getAttribute('data-request-id');
-                if (!requestId) return;
-                let expectedRaw = null;
-                try {
-                    const btnExpected = btn.getAttribute('data-expected-results');
-                    if (btnExpected) {
-                        expectedRaw = btnExpected;
-                    } else {
-                        const row = btn.closest('tr');
-                        if (row && row.getAttribute) {
-                            expectedRaw = row.getAttribute('data-expected-results') || null;
-                        }
-                    }
-                } catch (error) {
-                    expectedRaw = null;
-                }
-                let responseEncrypted = false;
-                try {
-                    let attr = btn.getAttribute('data-response-encrypted');
-                    if (attr === null || attr === undefined) {
-                        const row = btn.closest('tr');
-                        if (row && row.getAttribute) {
-                            attr = row.getAttribute('data-response-encrypted');
-                        }
-                    }
-                    if (attr !== null && attr !== undefined) {
-                        responseEncrypted = String(attr).toLowerCase() === 'true';
-                    }
-                } catch (_error) {
-                    responseEncrypted = false;
-                }
-                _currentCaseOptions = {
-                    responseEncrypted,
-                };
-                _currentExpectedResults = normalizeExpectedResultsEntries(expectedRaw || []);
-                runRequest(requestId);
-                return;
-            }
-        });
-
-        const close = document.getElementById('testcase-response-close');
-        if (close) close.addEventListener('click', closeModal);
-
-        document.addEventListener('click', function (ev) {
-            const t = ev.target;
-            if (!t) return;
-            const btn = t.closest && t.closest('button[data-action="toggle-section"]');
-            if (btn) {
-                const targetId = btn.getAttribute('data-target');
-                if (!targetId) return;
-                const el = document.getElementById(targetId);
-                if (!el) return;
-                if (el.hidden || el.style.display === 'none') { el.hidden = false; el.style.display = ''; }
-                else { el.hidden = true; el.style.display = 'none'; }
-                return;
-            }
-
-            const viewBtn = t.closest && t.closest('button[data-response-body-view]');
-            if (viewBtn) {
-                const view = viewBtn.getAttribute('data-response-body-view');
-                if (!view) return;
-                _currentView = view;
-                const container = viewBtn.parentElement;
-                if (container) Array.from(container.querySelectorAll('button[data-response-body-view]')).forEach(b => { b.classList.remove('is-active'); b.setAttribute('aria-pressed', 'false'); });
-                viewBtn.classList.add('is-active'); viewBtn.setAttribute('aria-pressed', 'true');
-                try { renderForTab(_currentView); } catch (e) { }
-                return;
-            }
-
-            const modeBtn = t.closest && t.closest('button[data-response-body-mode]');
-            if (modeBtn) {
-                const mode = modeBtn.getAttribute('data-response-body-mode');
-                if (!mode) return;
-                _currentMode = mode;
-                const container = modeBtn.parentElement;
-                if (container) Array.from(container.querySelectorAll('button[data-response-body-mode]')).forEach(b => { b.classList.remove('is-active'); b.setAttribute('aria-pressed', 'false'); });
-                modeBtn.classList.add('is-active'); modeBtn.setAttribute('aria-pressed', 'true');
-                try {
-                    if (_currentMode === 'preview') renderForTab('preview'); else renderForTab(_currentView);
-                } catch (e) { }
-                return;
-            }
-        });
-
         let activeResizer = null;
         let startY = 0;
         let startHeight = 0;
@@ -2104,12 +2237,17 @@
             } catch (e) { }
         });
         document.addEventListener('mouseup', function () { if (activeResizer) activeResizer = null; });
+    }
 
-        document.addEventListener('click', function (ev) {
-            const modal = document.getElementById('testcase-response-modal');
-            if (!modal || modal.hidden) return;
-            if (ev.target === modal) { closeModal(); }
-        });
+    if (typeof window !== 'undefined') {
+        window.__automationTestcaseControls = {
+            runCaseFromElement,
+            runRequest,
+            toggleSectionVisibility,
+            setResponseView,
+            setResponseMode,
+            closeModal,
+        };
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();

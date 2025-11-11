@@ -41,6 +41,34 @@
     const GLOBAL_STORAGE_KEY = 'automation.apiTester.globals';
     const VARIABLE_SERIALIZE_MAX_DEPTH = 10;
 
+    const shouldMirrorAutomationLog = (level) => {
+        if (level === 'error' || level === 'warn') {
+            return true;
+        }
+        try {
+            return Boolean(typeof window !== 'undefined' && window.__automationDebugMode);
+        } catch (_error) {
+            return false;
+        }
+    };
+
+    const mirrorAutomationLog = (level, ...args) => {
+        if (!shouldMirrorAutomationLog(level)) {
+            return;
+        }
+        try {
+            if (typeof console === 'undefined') {
+                return;
+            }
+            const method = typeof console[level] === 'function' ? console[level] : console.log;
+            if (typeof method === 'function') {
+                method.apply(console, args);
+            }
+        } catch (_error) {
+            /* ignore logging issues */
+        }
+    };
+
     const createCoercibleRequestBody = (bodySnapshot) => {
         const base = bodySnapshot && typeof bodySnapshot === 'object'
             ? { ...bodySnapshot }
@@ -6500,14 +6528,10 @@
         function createScriptConsoleProxy() {
             const buffer = [];
             const proxy = {};
-            ['log', 'info', 'warn', 'error'].forEach((method) => {
+            ['log', 'info', 'warn', 'error', 'debug'].forEach((method) => {
                 proxy[method] = (...args) => {
                     buffer.push({ level: method, args });
-                    if (typeof console[method] === 'function') {
-                        console[method](...args);
-                    } else {
-                        console.log(...args);
-                    }
+                    mirrorAutomationLog(method, ...args);
                 };
             });
             return { proxy, buffer };
@@ -8040,7 +8064,7 @@
             }
 
             ensureTransformState();
-            try { console.debug && console.debug('Raw override rows:', state.builder.transforms.overrides); } catch (e) { }
+            mirrorAutomationLog('debug', 'Raw override rows:', state.builder.transforms.overrides);
             const normalizedOverrides = state.builder.transforms.overrides
                 // keep rows that have a path, or external rows (we'll default their path if missing)
                 .filter((row) => (row.type === 'external') || (row.path && row.path.trim()))
@@ -8107,12 +8131,12 @@
                         charLimit: Number.isFinite(Number(row.charLimit)) && Number(row.charLimit) > 0 ? Number(row.charLimit) : null,
                     };
                 });
-            try { console.debug && console.debug('Normalized overrides to save:', normalizedOverrides); } catch (e) { }
+            mirrorAutomationLog('debug', 'Normalized overrides to save:', normalizedOverrides);
             // If there were external rows present but none were normalized, warn
             try {
                 const hadExternal = Array.isArray(state.builder.transforms.overrides) && state.builder.transforms.overrides.some((r) => r.type === 'external');
                 if (hadExternal && (!Array.isArray(normalizedOverrides) || !normalizedOverrides.some((r) => r.type === 'external'))) {
-                    console.warn && console.warn('External overrides present in editor but none were included in the saved definition. Check that each external override has a non-empty path.');
+                    mirrorAutomationLog('warn', 'External overrides present in editor but none were included in the saved definition. Check that each external override has a non-empty path.');
                 }
             } catch (e) { }
             const normalizedSignatures = state.builder.transforms.signatures
@@ -8639,10 +8663,7 @@
 
                 setStatus('Saving request...', 'loading');
                 try {
-                    // Debug: log the request definition before sending so we can
-                    // verify external overrides are present. Remove this when
-                    // debugging is complete.
-                    try { console.debug && console.debug('Request definition to save:', definition); } catch (e) { }
+                    mirrorAutomationLog('debug', 'Request definition to save:', definition);
                     const response = await postJson(detailUrl, definition, method);
                     const savedRequestId = existingRequest?.id || response?.id || null;
                     await refreshCollections({

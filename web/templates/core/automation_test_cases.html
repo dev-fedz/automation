@@ -74,7 +74,7 @@
                                             <button type="button" class="action-button" data-action="view-case" data-case-id="{{ test_case.id }}" data-related-api-request-name="{{ test_case.related_api_request_name|default:'' }}">View</button>
                                             <button type="button" class="action-button" data-action="edit-case" data-case-id="{{ test_case.id }}" data-related-api-request-name="{{ test_case.related_api_request_name|default:'' }}">Edit</button>
                                                     {% if test_case.related_api_request %}
-                                                        <button type="button" class="action-button" data-action="run-case" data-case-id="{{ test_case.id }}" data-request-id="{{ test_case.related_api_request }}" data-environment-id="1" data-response-encrypted="{% if test_case.is_response_encrypted %}true{% else %}false{% endif %}" title="Run related API request">Run</button>
+                                                        <button type="button" class="action-button" data-action="run-case" data-case-id="{{ test_case.id }}" data-request-id="{{ test_case.related_api_request }}" data-environment-id="1" data-response-encrypted="{% if test_case.is_response_encrypted %}true{% else %}false{% endif %}" title="Run related API request" onclick="if (window.__automationTestcaseControls) { window.__automationTestcaseControls.runCaseFromElement(this); }">Run</button>
                                                     {% endif %}
                                             <button type="button" class="action-button" data-action="delete-case" data-case-id="{{ test_case.id }}" data-variant="danger">Delete</button>
                                         </div>
@@ -292,7 +292,7 @@ response.json.plan: premium
     <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="testcase-response-title">
         <div class="modal-header">
             <h3 id="testcase-response-title">Request Response</h3>
-            <button type="button" id="testcase-response-close" class="btn btn-tertiary">Close</button>
+                <button type="button" id="testcase-response-close" class="modal-close" aria-label="Close">×</button>
         </div>
         <div class="modal-body">
             <div id="testcase-response-loading" class="response-loading">Running request…</div>
@@ -409,7 +409,7 @@ response.json.plan: premium
                 const selectAll = getSelectAll();
                 const boxes = getRowCheckboxes();
                 // DEBUG: trace state (only when there are boxes or global debug enabled)
-                try { if (boxes.length > 0 || window.CASES_DEBUG) console.debug('[cases] updateSelectAllState - boxes:', boxes.length); } catch (e) {}
+                try { if (window.CASES_DEBUG) console.debug('[cases] updateSelectAllState - boxes:', boxes.length); } catch (e) {}
 
                 if (boxes.length === 0) {
                     if (selectAll) {
@@ -425,7 +425,7 @@ response.json.plan: premium
                 if (selectAll) selectAll.disabled = false;
 
                 const checked = boxes.filter(b => b.checked).length;
-                try { console.debug('[cases] checked count:', checked); } catch (e) {}
+                try { if (window.CASES_DEBUG) console.debug('[cases] checked count:', checked); } catch (e) {}
 
                 if (selectAll) {
                     selectAll.checked = (checked === boxes.length);
@@ -445,14 +445,14 @@ response.json.plan: premium
                 // Ensure we watch the run button for attribute mutations (so if another script hides it again
                 // we reapply the visibility while cases remain checked).
                 try { watchRunBtn(); } catch (e) { /* ignore */ }
-                try { if (checked > 0 || window.CASES_DEBUG) console.debug('[cases] runBtn set visible=', (checked > 0)); } catch (e) {}
+                try { if (window.CASES_DEBUG) console.debug('[cases] runBtn set visible=', (checked > 0)); } catch (e) {}
             }
 
             // Catch native change events
             document.addEventListener('change', function (ev) {
                 const t = ev.target;
                 if (!t) return;
-                try { console.debug('[cases] change event target=', t && (t.id || t.className || t.getAttribute && t.getAttribute('aria-label'))); } catch (e) {}
+                try { if (window.CASES_DEBUG) console.debug('[cases] change event target=', t && (t.id || t.className || t.getAttribute && t.getAttribute('aria-label'))); } catch (e) {}
                 if (t.matches('#select-all-cases')) {
                     const boxes = getRowCheckboxes();
                     boxes.forEach(b => b.checked = t.checked);
@@ -473,7 +473,7 @@ response.json.plan: premium
             document.addEventListener('click', function (ev) {
                 const t = ev.target;
                 if (!t) return;
-                try { console.debug('[cases] click event target=', t && (t.id || t.className)); } catch (e) {}
+                try { if (window.CASES_DEBUG) console.debug('[cases] click event target=', t && (t.id || t.className)); } catch (e) {}
                 if (t.matches('.fake-checkbox') || t.closest('.case-checkbox-label')) {
                     // update after the click causes the native input to toggle; use debounced scheduler
                     try { debouncedUpdateSelectAllState(); } catch (e) { setTimeout(updateSelectAllState, 0); }

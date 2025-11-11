@@ -944,6 +944,43 @@ body.automation-modal-open {
     overflow-y: auto !important;
 }
 
+#testcase-response-modal .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+}
+
+#testcase-response-modal .modal-header h3 {
+    margin: 0;
+}
+
+#testcase-response-modal .modal-close {
+    border: none;
+    background: transparent;
+    color: rgba(48, 41, 16, 0.75);
+    font-size: 1.5rem;
+    line-height: 1;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+#testcase-response-modal .modal-close:hover,
+#testcase-response-modal .modal-close:focus {
+    background-color: rgba(244, 180, 0, 0.16);
+    color: rgba(37, 27, 4, 0.95);
+    box-shadow: 0 0 0 3px rgba(244, 180, 0, 0.15);
+    outline: none;
+}
+
 [data-role="plan-list"],
 [data-role="scenario-list"],
 [data-role="case-list"],

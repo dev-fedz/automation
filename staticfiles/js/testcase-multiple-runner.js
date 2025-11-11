@@ -2,6 +2,38 @@
 (function () {
     'use strict';
 
+    const shouldMirrorAutomationLog = (level) => {
+        if (level === 'error') {
+            return true;
+        }
+        try {
+            const debugEnabled = Boolean(typeof window !== 'undefined' && window.__automationDebugMode);
+            if (debugEnabled) {
+                return true;
+            }
+        } catch (_error) {
+            return false;
+        }
+        return false;
+    };
+
+    const mirrorAutomationLog = (level, ...args) => {
+        if (!shouldMirrorAutomationLog(level)) {
+            return;
+        }
+        try {
+            if (typeof console === 'undefined') {
+                return;
+            }
+            const method = typeof console[level] === 'function' ? console[level] : console.log;
+            if (typeof method === 'function') {
+                method.apply(console, args);
+            }
+        } catch (_error) {
+            /* ignore logging issues */
+        }
+    };
+
     const getJsonScript = (id) => {
         try {
             const el = document.getElementById(id);
@@ -382,15 +414,11 @@
             let pollTimer = null;
 
             const log = (level, message, extra) => {
-                try {
-                    if (level === 'error' && console && console.error) {
-                        console.error('[automation][testcase-multi-runner] ' + message, extra);
-                    } else if (level === 'warn' && console && console.warn) {
-                        console.warn('[automation][testcase-multi-runner] ' + message, extra);
-                    } else if (level === 'info' && console && console.info) {
-                        console.info('[automation][testcase-multi-runner] ' + message, extra);
-                    }
-                } catch (_loggingError) { /* ignore */ }
+                if (extra === undefined) {
+                    mirrorAutomationLog(level, '[automation][testcase-multi-runner] ' + message);
+                } else {
+                    mirrorAutomationLog(level, '[automation][testcase-multi-runner] ' + message, extra);
+                }
             };
 
             const clearPoll = () => {
@@ -2003,9 +2031,7 @@
         }
 
         if (scriptContext && Array.isArray(scriptContext.logs) && scriptContext.logs.length) {
-            try {
-                console.info('[automation][multi-runner] pre-request script logs', scriptContext.logs);
-            } catch (error) { /* ignore logging issues */ }
+            mirrorAutomationLog('info', '[automation][multi-runner] pre-request script logs', scriptContext.logs);
         }
 
         try {
@@ -2455,9 +2481,7 @@
             openModal(modal);
 
             runSelectedCasesSequentially(ordered, caseInfoById).catch((err) => {
-                try {
-                    console.error('[automation][multi-runner] failed to execute cases', err);
-                } catch (e) { /* ignore logging errors */ }
+                mirrorAutomationLog('error', '[automation][multi-runner] failed to execute cases', err);
                 ordered.forEach((caseInfo) => {
                     if (!caseInfo || !caseInfo.container) return;
                     if (!caseInfo.container.dataset.status || caseInfo.container.dataset.status === 'queued') {
