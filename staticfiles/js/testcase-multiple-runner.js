@@ -47,6 +47,8 @@
     const endpoints = getJsonScript('automation-api-endpoints') || {};
     const executeUrl = endpoints.tester_execute || endpoints['tester_execute'] || endpoints['tester.execute'] || endpoints.execute || window.__automation_execute_url || null;
     const POST_URL = executeUrl || '/api/core/tester/execute/';
+    const DEFAULT_PRE_CONSOLE_MESSAGE = 'No pre-request console output.';
+    const DEFAULT_POST_CONSOLE_MESSAGE = 'No post-request console output.';
 
     function createModal() {
         // remove existing if present
@@ -94,6 +96,8 @@
         const headersId = `testcase-response-headers-${idSafe}`;
         const bodyPreId = `testcase-response-body-${idSafe}`;
         const previewId = `testcase-response-preview-${idSafe}`;
+        const preConsoleId = `testcase-pre-request-logs-${idSafe}`;
+        const postConsoleId = `testcase-post-request-logs-${idSafe}`;
         const container = document.createElement('div');
         container.className = 'multi-item';
         container.innerHTML = `
@@ -139,6 +143,24 @@
                         <h4>Assertions</h4>
                         <div class="assertions-list"></div>
                     </div>
+                    <div class="response-section">
+                        <div class="response-section__header">
+                            <h4>Pre-request Console</h4>
+                            <div class="response-section-controls">
+                                <button type="button" class="action-button" data-action="toggle-section" data-target="${preConsoleId}">Toggle</button>
+                            </div>
+                        </div>
+                        <pre id="${preConsoleId}" class="response-pre response-console expandable" data-min-height="60" data-console="pre">No pre-request console output.</pre>
+                    </div>
+                    <div class="response-section">
+                        <div class="response-section__header">
+                            <h4>Post-request Console</h4>
+                            <div class="response-section-controls">
+                                <button type="button" class="action-button" data-action="toggle-section" data-target="${postConsoleId}">Toggle</button>
+                            </div>
+                        </div>
+                        <pre id="${postConsoleId}" class="response-pre response-console expandable" data-min-height="60" data-console="post">No post-request console output.</pre>
+                    </div>
                 </div>
             </div>
         `;
@@ -161,6 +183,119 @@
         return String(str).replace(/[&<>"']/g, function (m) {
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
         });
+    }
+
+    const stringifyConsoleArg = (value, seen) => {
+        if (value === null || value === undefined) {
+            return String(value);
+        }
+        const type = typeof value;
+        if (type === 'string') {
+            return value;
+        }
+        if (type === 'number' || type === 'boolean' || type === 'bigint') {
+            return String(value);
+        }
+        if (value instanceof Error) {
+            return value.stack || value.message || String(value);
+        }
+        if (type === 'function') {
+            return `[function ${value.name || 'anonymous'}]`;
+        }
+        if (type === 'object') {
+            if (seen && typeof seen.add === 'function') {
+                if (seen.has(value)) {
+                    return '[Circular]';
+                }
+                seen.add(value);
+            }
+            try {
+                return JSON.stringify(value, null, 2);
+            } catch (_error) {
+                try {
+                    return String(value);
+                } catch (_err) {
+                    return '[object Object]';
+                }
+            }
+        }
+        try {
+            return String(value);
+        } catch (_error) {
+            return '';
+        }
+    };
+
+    const formatConsoleEntry = (entry) => {
+        if (!entry) {
+            return null;
+        }
+        const level = typeof entry.level === 'string' ? entry.level.toUpperCase() : 'LOG';
+        let args = [];
+        if (Array.isArray(entry.args) && entry.args.length) {
+            args = entry.args;
+        } else if (entry && typeof entry === 'object') {
+            if (Object.prototype.hasOwnProperty.call(entry, 'message')) {
+                args = [entry.message];
+            } else if (Object.prototype.hasOwnProperty.call(entry, 'msg')) {
+                args = [entry.msg];
+            } else if (Object.prototype.hasOwnProperty.call(entry, 'data')) {
+                args = [entry.data];
+            }
+        }
+        if (!args.length) {
+            args = [entry];
+        }
+        const seen = typeof WeakSet === 'function' ? new WeakSet() : null;
+        const parts = args
+            .map((value) => stringifyConsoleArg(value, seen))
+            .filter((value) => value !== null && value !== undefined && value !== '')
+            .map((value) => String(value));
+        const message = parts.join(' ');
+        if (!message) {
+            return `[${level}]`;
+        }
+        return `[${level}] ${message}`;
+    };
+
+    const setConsoleSection = (container, type, logs, extraMessages) => {
+        if (!container) {
+            return;
+        }
+        const selector = type === 'post' ? '[data-console="post"]' : '[data-console="pre"]';
+        const el = container.querySelector(selector);
+        if (!el) {
+            return;
+        }
+        const normalizedLogs = Array.isArray(logs) ? logs : [];
+        const extras = Array.isArray(extraMessages) ? extraMessages.filter(Boolean) : [];
+        const lines = [];
+        normalizedLogs.forEach((entry) => {
+            const formatted = formatConsoleEntry(entry);
+            if (formatted) {
+                lines.push(formatted);
+            }
+        });
+        extras.forEach((message) => {
+            if (message && typeof message === 'string') {
+                lines.push(message);
+            }
+        });
+        if (lines.length) {
+            el.textContent = lines.join('\n');
+            el.dataset.hasLogs = 'true';
+        } else {
+            el.textContent = type === 'post' ? DEFAULT_POST_CONSOLE_MESSAGE : DEFAULT_PRE_CONSOLE_MESSAGE;
+            el.dataset.hasLogs = 'false';
+        }
+    };
+
+    function setPreRequestLogs(container, logs, extraMessages) {
+        setConsoleSection(container, 'pre', logs, extraMessages);
+    }
+
+    function setPostRequestLogs(container, logs, extraMessages) {
+        setConsoleSection(container, 'post', logs, extraMessages);
     }
 
     function splitPath(path) {
@@ -1751,6 +1886,8 @@
         const headersEl = container.querySelector('.response-headers');
         const bodyEl = container.querySelector('.response-body');
         const assertionsEl = container.querySelector('.assertions-list');
+        setPreRequestLogs(container, [], []);
+        setPostRequestLogs(container, [], []);
         const dependencyOverrides = (options && (options.overrides || options.dependencyOverrides)) || null;
         const hasDependencyOverrides = Boolean(dependencyOverrides && typeof dependencyOverrides === 'object' && Object.keys(dependencyOverrides).length);
 
@@ -1776,6 +1913,8 @@
         } catch (err) {
             const message = String(err || 'Failed to load request details');
             markCaseFailed(container, 'Unable to load request details.', message);
+            setPreRequestLogs(container, [], ['Unable to load request details.']);
+            setPostRequestLogs(container, [], []);
             return { success: false, errorSummary: message, blockChain: true };
         }
 
@@ -1970,6 +2109,8 @@
             : '';
         if (preScriptText && preScriptText.trim() && (!scriptHelpers || typeof scriptHelpers.runPreRequestScript !== 'function')) {
             markCaseFailed(container, 'Pre-request script unavailable.', 'Unable to execute the pre-request script because the script runner helpers failed to load. Refresh the page and try again.');
+            setPreRequestLogs(container, [], ['Pre-request script unavailable.']);
+            setPostRequestLogs(container, [], []);
             return { success: false, errorSummary: 'Pre-request script unavailable.', blockChain: true };
         }
         if (preScriptText && preScriptText.trim() && scriptHelpers && typeof scriptHelpers.runPreRequestScript === 'function') {
@@ -1983,9 +2124,15 @@
                     requestSnapshot,
                 });
                 container.__scriptContext = scriptContext;
+                if (scriptContext && Array.isArray(scriptContext.logs)) {
+                    setPreRequestLogs(container, scriptContext.logs, []);
+                }
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 markCaseFailed(container, `Pre-request script error.`, message);
+                const contextLogs = scriptContext && Array.isArray(scriptContext.logs) ? scriptContext.logs : [];
+                setPreRequestLogs(container, contextLogs, [`Pre-request script error: ${message}`]);
+                setPostRequestLogs(container, [], []);
                 return { success: false, errorSummary: message, blockChain: true };
             }
         } else if (!requestSnapshot) {
@@ -2140,6 +2287,23 @@
                 markCaseFailed(container, errorMessage, bodyMessage);
                 if (headersEl) headersEl.textContent = JSON.stringify(result && result.request_headers ? result.request_headers : {}, null, 2);
                 if (bodyEl && !bodyEl.textContent) bodyEl.textContent = bodyMessage;
+                const preLogsFailure = (result && Array.isArray(result.pre_request_logs)) ? result.pre_request_logs.slice() : (scriptContext && scriptContext.logs && Array.isArray(scriptContext.logs) ? scriptContext.logs.slice() : []);
+                const postLogsFailure = [];
+                if (result && result.tests_script && Array.isArray(result.tests_script.logs)) {
+                    Array.prototype.push.apply(postLogsFailure, result.tests_script.logs);
+                }
+                if (result && Array.isArray(result.post_request_logs)) {
+                    Array.prototype.push.apply(postLogsFailure, result.post_request_logs);
+                }
+                const postExtrasFailure = [];
+                if (result && result.tests_script && result.tests_script.error) {
+                    postExtrasFailure.push(`Tests script error: ${result.tests_script.error}`);
+                }
+                if (result && result.post_request_error) {
+                    postExtrasFailure.push(`Post-request error: ${result.post_request_error}`);
+                }
+                setPreRequestLogs(container, preLogsFailure, []);
+                setPostRequestLogs(container, postLogsFailure, postExtrasFailure);
                 return {
                     success: false,
                     statusCode: resp.status,
@@ -2194,6 +2358,26 @@
                 }
             }
 
+            const preLogsSuccess = (result && Array.isArray(result.pre_request_logs))
+                ? result.pre_request_logs.slice()
+                : (scriptContext && scriptContext.logs && Array.isArray(scriptContext.logs) ? scriptContext.logs.slice() : []);
+            const postLogsSuccess = [];
+            if (result && result.tests_script && Array.isArray(result.tests_script.logs)) {
+                Array.prototype.push.apply(postLogsSuccess, result.tests_script.logs);
+            }
+            if (result && Array.isArray(result.post_request_logs)) {
+                Array.prototype.push.apply(postLogsSuccess, result.post_request_logs);
+            }
+            const postExtrasSuccess = [];
+            if (result && result.tests_script && result.tests_script.error) {
+                postExtrasSuccess.push(`Tests script error: ${result.tests_script.error}`);
+            }
+            if (result && result.post_request_error) {
+                postExtrasSuccess.push(`Post-request error: ${result.post_request_error}`);
+            }
+            setPreRequestLogs(container, preLogsSuccess, []);
+            setPostRequestLogs(container, postLogsSuccess, postExtrasSuccess);
+
             return {
                 success: true,
                 statusCode,
@@ -2207,6 +2391,9 @@
         } catch (err) {
             const message = String(err || 'Request error');
             markCaseFailed(container, 'Request execution error.', message);
+            const preLogsCatch = scriptContext && scriptContext.logs && Array.isArray(scriptContext.logs) ? scriptContext.logs.slice() : [];
+            setPreRequestLogs(container, preLogsCatch, []);
+            setPostRequestLogs(container, [], [`Request error: ${message}`]);
             return { success: false, errorSummary: message, blockChain: true };
         }
     }

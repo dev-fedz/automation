@@ -56,6 +56,8 @@
         responseEncrypted: false,
     };
     let _lastFocusedBeforeModal = null;
+    const DEFAULT_PRE_CONSOLE_MESSAGE = 'No pre-request console output.';
+    const DEFAULT_POST_CONSOLE_MESSAGE = 'No post-request console output.';
 
     const fallbackCoerceExpectedResultValue = (raw) => {
         if (raw === null || raw === undefined) {
@@ -1619,6 +1621,115 @@
         if (preview) preview.hidden = true;
     }
 
+    const stringifyConsoleArg = (value, seen) => {
+        if (value === null || value === undefined) {
+            return String(value);
+        }
+        const valueType = typeof value;
+        if (valueType === 'string') {
+            return value;
+        }
+        if (valueType === 'number' || valueType === 'boolean' || valueType === 'bigint') {
+            return String(value);
+        }
+        if (value instanceof Error) {
+            return value.stack || value.message || String(value);
+        }
+        if (valueType === 'function') {
+            return `[function ${value.name || 'anonymous'}]`;
+        }
+        if (valueType === 'object') {
+            if (seen && typeof seen.add === 'function') {
+                if (seen.has(value)) {
+                    return '[Circular]';
+                }
+                seen.add(value);
+            }
+            try {
+                return JSON.stringify(value, null, 2);
+            } catch (_error) {
+                try {
+                    return String(value);
+                } catch (_err) {
+                    return '[object Object]';
+                }
+            }
+        }
+        try {
+            return String(value);
+        } catch (_error) {
+            return '';
+        }
+    };
+
+    const formatConsoleEntry = (entry) => {
+        if (!entry) {
+            return null;
+        }
+        const level = typeof entry.level === 'string' ? entry.level.toUpperCase() : 'LOG';
+        let rawArgs = [];
+        if (Array.isArray(entry.args) && entry.args.length) {
+            rawArgs = entry.args;
+        } else if (entry && typeof entry === 'object') {
+            if (Object.prototype.hasOwnProperty.call(entry, 'message')) {
+                rawArgs = [entry.message];
+            } else if (Object.prototype.hasOwnProperty.call(entry, 'msg')) {
+                rawArgs = [entry.msg];
+            } else if (Object.prototype.hasOwnProperty.call(entry, 'data')) {
+                rawArgs = [entry.data];
+            }
+        }
+        if (!rawArgs.length) {
+            rawArgs = [entry];
+        }
+        const seen = typeof WeakSet === 'function' ? new WeakSet() : null;
+        const parts = rawArgs
+            .map((value) => stringifyConsoleArg(value, seen))
+            .filter((value) => value !== null && value !== undefined && value !== '')
+            .map((value) => String(value));
+        const message = parts.join(' ');
+        if (!message) {
+            return `[${level}]`;
+        }
+        return `[${level}] ${message}`;
+    };
+
+    const setConsoleSection = (elementId, logs, extraMessages, emptyMessage) => {
+        const el = document.getElementById(elementId);
+        if (!el) {
+            return;
+        }
+        const normalizedLogs = Array.isArray(logs) ? logs : [];
+        const extras = Array.isArray(extraMessages) ? extraMessages.filter(Boolean) : [];
+        const lines = [];
+        normalizedLogs.forEach((entry) => {
+            const formatted = formatConsoleEntry(entry);
+            if (formatted) {
+                lines.push(formatted);
+            }
+        });
+        extras.forEach((message) => {
+            if (message && typeof message === 'string') {
+                lines.push(message);
+            }
+        });
+        if (lines.length) {
+            el.textContent = lines.join('\n');
+            el.dataset.hasLogs = 'true';
+        } else {
+            el.textContent = emptyMessage;
+            el.dataset.hasLogs = 'false';
+        }
+    };
+
+    function setPreRequestLogs(logs, extraMessages) {
+        setConsoleSection('testcase-pre-request-logs', logs, extraMessages, DEFAULT_PRE_CONSOLE_MESSAGE);
+    }
+
+    function setPostRequestLogs(logs, extraMessages) {
+        setConsoleSection('testcase-post-request-logs', logs, extraMessages, DEFAULT_POST_CONSOLE_MESSAGE);
+    }
+
     function renderForTab(tab) {
         const pre = document.getElementById('testcase-response-body');
         const preview = document.getElementById('testcase-response-preview');
@@ -1707,6 +1818,16 @@
         if (content) content.hidden = true;
         const assertionsEl = document.getElementById('testcase-response-assertions');
         if (assertionsEl) assertionsEl.innerHTML = '';
+
+        let latestPreLogs = [];
+        let latestPreExtras = [];
+        let latestPostLogs = [];
+        let latestPostExtras = [];
+        const syncConsoleOutputs = () => {
+            setPreRequestLogs(latestPreLogs, latestPreExtras);
+            setPostRequestLogs(latestPostLogs, latestPostExtras);
+        };
+        syncConsoleOutputs();
 
         let requestObj = null;
         try {
@@ -1880,6 +2001,9 @@
             setHeaders({});
             setBody('Unable to execute the pre-request script because the script runner helpers failed to load. Refresh the page and try again.');
             applyEvaluationOutcome({ evaluated: false, passed: false, assertions: [] });
+            latestPreLogs = [];
+            latestPreExtras = ['Pre-request script unavailable.'];
+            syncConsoleOutputs();
             return;
         }
         if (preScriptText && preScriptText.trim() && scriptHelpers && typeof scriptHelpers.runPreRequestScript === 'function') {
@@ -1892,6 +2016,11 @@
                     environmentSnapshot: selectedEnvironment,
                     requestSnapshot,
                 });
+                if (scriptContext && Array.isArray(scriptContext.logs)) {
+                    latestPreLogs = scriptContext.logs.slice();
+                    latestPreExtras = [];
+                    syncConsoleOutputs();
+                }
             } catch (error) {
                 if (loading) loading.hidden = true;
                 if (content) content.hidden = false;
@@ -1900,6 +2029,10 @@
                 setHeaders({});
                 setBody(`Pre-request script error: ${message}`);
                 applyEvaluationOutcome({ evaluated: false, passed: false, assertions: [] });
+                const existingLogs = scriptContext && Array.isArray(scriptContext.logs) ? scriptContext.logs.slice() : [];
+                latestPreLogs = existingLogs;
+                latestPreExtras = [`Pre-request script error: ${message}`];
+                syncConsoleOutputs();
                 return;
             }
         } else if (!requestSnapshot) {
@@ -2044,6 +2177,28 @@
                 const contentEl = document.getElementById('testcase-response-content'); if (contentEl) contentEl.hidden = false;
                 setHeaders(result && result.request_headers ? result.request_headers : {});
                 setBody(result && result.error ? result.error : (text || ''), null);
+                const preLogsForFailure = Array.isArray(result?.pre_request_logs)
+                    ? result.pre_request_logs.slice()
+                    : (Array.isArray(scriptContext?.logs) ? scriptContext.logs.slice() : []);
+                const aggregatedPostLogs = [];
+                if (Array.isArray(result?.tests_script?.logs)) {
+                    aggregatedPostLogs.push(...result.tests_script.logs);
+                }
+                if (Array.isArray(result?.post_request_logs)) {
+                    aggregatedPostLogs.push(...result.post_request_logs);
+                }
+                latestPreLogs = preLogsForFailure;
+                latestPreExtras = [];
+                latestPostLogs = aggregatedPostLogs;
+                const postExtras = [];
+                if (result?.tests_script && result.tests_script.error) {
+                    postExtras.push(`Tests script error: ${result.tests_script.error}`);
+                }
+                if (result?.post_request_error) {
+                    postExtras.push(`Post-request error: ${result.post_request_error}`);
+                }
+                latestPostExtras = postExtras;
+                syncConsoleOutputs();
                 return;
             }
 
@@ -2084,11 +2239,44 @@
                 responseEncrypted: Boolean(_currentCaseOptions.responseEncrypted),
             });
             applyEvaluationOutcome(evaluation);
+            const preLogsForSuccess = Array.isArray(result?.pre_request_logs)
+                ? result.pre_request_logs.slice()
+                : (Array.isArray(scriptContext?.logs) ? scriptContext.logs.slice() : []);
+            const aggregatedPostLogs = [];
+            if (Array.isArray(result?.tests_script?.logs)) {
+                aggregatedPostLogs.push(...result.tests_script.logs);
+            }
+            if (Array.isArray(result?.post_request_logs)) {
+                aggregatedPostLogs.push(...result.post_request_logs);
+            }
+            latestPreLogs = preLogsForSuccess;
+            latestPreExtras = [];
+            latestPostLogs = aggregatedPostLogs;
+            const postExtrasSuccess = [];
+            if (result?.tests_script && result.tests_script.error) {
+                postExtrasSuccess.push(`Tests script error: ${result.tests_script.error}`);
+            }
+            if (result?.post_request_error) {
+                postExtrasSuccess.push(`Post-request error: ${result.post_request_error}`);
+            }
+            latestPostExtras = postExtrasSuccess;
+            syncConsoleOutputs();
         } catch (err) {
             const loadingEl = document.getElementById('testcase-response-loading'); if (loadingEl) loadingEl.hidden = true;
             const contentEl = document.getElementById('testcase-response-content'); if (contentEl) contentEl.hidden = false;
             setSummary('Error'); setHeaders({}); setBody(String(err || 'Request error'));
             applyEvaluationOutcome({ evaluated: false, passed: false, assertions: [] });
+            const message = err instanceof Error ? err.message : String(err || 'Request error');
+            if (!latestPreLogs.length && Array.isArray(scriptContext?.logs)) {
+                latestPreLogs = scriptContext.logs.slice();
+            }
+            if (!Array.isArray(latestPreExtras)) {
+                latestPreExtras = [];
+            }
+            const postExtrasCatch = Array.isArray(latestPostExtras) ? latestPostExtras.slice() : [];
+            postExtrasCatch.push(`Request error: ${message}`);
+            latestPostExtras = postExtrasCatch;
+            syncConsoleOutputs();
         }
     }
 
