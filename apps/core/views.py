@@ -9,9 +9,21 @@ import binascii
 import io
 import json
 import logging
+import os
 import time
 
 import requests
+
+from django.conf import settings
+# Optional dependency: PyCryptodome for AES-CBC handling
+try:  # pragma: no cover - environment dependent
+    from Crypto.Cipher import AES as _AES
+    from Crypto.Util.Padding import pad as _pad
+    from Crypto.Util.Padding import unpad as _unpad
+except ImportError:  # pragma: no cover - handled gracefully at runtime
+    _AES = None
+    _pad = None
+    _unpad = None
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
@@ -31,6 +43,138 @@ from . import models, selectors, serializers, services
 
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_AES_KEY = "kRdVzIqmQsfpRGItSLP5SDz0jkRLO9Cm"
+DEFAULT_AES_IV = "1gJFNMeeQODA7wJA"
+DEFAULT_CHANNEL_KEY = "dgzCF9eJw2uX9LNV4JrkQLxSHxBlZeGV"
+
+
+def _get_paynamics_crypto_material() -> tuple[bytes | None, bytes | None, str | None]:
+    key = getattr(settings, "PAYNAMICS_AES_KEY", "") or os.environ.get("PAYNAMICS_AES_KEY") or DEFAULT_AES_KEY
+    iv = getattr(settings, "PAYNAMICS_AES_IV", "") or os.environ.get("PAYNAMICS_AES_IV") or DEFAULT_AES_IV
+    channel_key = (
+        getattr(settings, "PAYNAMICS_CHANNEL_KEY", "")
+        or os.environ.get("PAYNAMICS_CHANNEL_KEY")
+        or DEFAULT_CHANNEL_KEY
+    )
+    try:
+        key_bytes = key.encode("utf-8") if key else None
+        iv_bytes = iv.encode("utf-8") if iv else None
+    except Exception:
+        key_bytes = None
+        iv_bytes = None
+    return key_bytes, iv_bytes, channel_key
+
+
+def _Crypto_available() -> bool:
+    return bool(_AES and _pad and _unpad)
+
+
+def _aes_encrypt_text(plaintext: str, key_bytes: bytes, iv_bytes: bytes) -> str:
+    cipher = _AES.new(key_bytes, _AES.MODE_CBC, iv_bytes)
+    padded = _pad(plaintext.encode("utf-8"), _AES.block_size)
+    return base64.b64encode(cipher.encrypt(padded)).decode("utf-8")
+
+
+def _aes_decrypt_text(encoded: str, key_bytes: bytes, iv_bytes: bytes) -> str:
+    cipher = _AES.new(key_bytes, _AES.MODE_CBC, iv_bytes)
+    decrypted = cipher.decrypt(base64.b64decode(encoded))
+    return _unpad(decrypted, _AES.block_size).decode("utf-8")
+
+
+def _compute_paynamics_signature(amount: str, pay_reference: str, pchannel: str, key_bytes: bytes, iv_bytes: bytes, channel_key: str | None) -> str:
+    secret = channel_key or ""
+    signature_input = f"{amount}{pay_reference}{pchannel}{secret}"
+    return _aes_encrypt_text(signature_input, key_bytes, iv_bytes)
+
+
+def _attempt_decrypt_response_data(encrypted_value: str) -> tuple[str | None, Any | None]:
+    if not isinstance(encrypted_value, str) or not encrypted_value.strip():
+        return None, None
+
+    key_bytes, iv_bytes, _ = _get_paynamics_crypto_material()
+    if not key_bytes or not iv_bytes:
+        return None, None
+
+    if not _Crypto_available():
+        logger.warning("[tester.execute] PyCryptodome not available; unable to decrypt response data.")
+        print("[tester.execute] decrypt skipped (missing PyCryptodome)")
+        return None, None
+
+    try:
+        plaintext = _aes_decrypt_text(encrypted_value, key_bytes, iv_bytes)
+    except Exception as exc:  # pragma: no cover - diagnostics path
+        logger.exception("[tester.execute] failed to decrypt response data: %s", exc)
+        print(f"[tester.execute] decrypt failure: {exc}")
+        return None, None
+
+    parsed: Any | None
+    try:
+        parsed = json.loads(plaintext)
+    except json.JSONDecodeError:
+        parsed = None
+
+    return plaintext, parsed
+
+
+def _apply_pay_reference_override(resolved_json: dict[str, Any], overrides: dict[str, Any]) -> tuple[str | None, dict[str, Any] | None, bool]:
+    if not isinstance(resolved_json, dict) or not overrides:
+        return None, None, False
+    pay_reference = overrides.get("pay_reference") or overrides.get("dependency_value")
+    if not pay_reference:
+        return None, None, False
+    data_field = resolved_json.get("data")
+    if not isinstance(data_field, str) or not data_field.strip():
+        return None, None, False
+
+    key_bytes, iv_bytes, channel_key = _get_paynamics_crypto_material()
+    if not key_bytes or not iv_bytes or not _Crypto_available():
+        return None, None, False
+
+    try:
+        plaintext = _aes_decrypt_text(data_field, key_bytes, iv_bytes)
+        payload = json.loads(plaintext)
+    except Exception as exc:
+        logger.exception("[tester.execute] failed to decode outbound payload: %s", exc)
+        return None, None, False
+
+    if not isinstance(payload, dict):
+        return None, None, False
+
+    amount = str(payload.get("amount") or "")
+    pchannel = str(payload.get("pchannel") or "")
+    pay_reference_str = str(pay_reference)
+    changed = False
+
+    if payload.get("pay_reference") != pay_reference_str:
+        payload["pay_reference"] = pay_reference_str
+        changed = True
+
+    if amount and pchannel:
+        try:
+            payload["signature"] = _compute_paynamics_signature(
+                amount,
+                pay_reference_str,
+                pchannel,
+                key_bytes,
+                iv_bytes,
+                channel_key,
+            )
+            changed = True
+        except Exception as exc:
+            logger.exception("[tester.execute] failed to recompute signature: %s", exc)
+
+    if not changed:
+        return plaintext, payload, False
+
+    updated_plaintext = json.dumps(payload, separators=(",", ":"))
+    try:
+        resolved_json["data"] = _aes_encrypt_text(updated_plaintext, key_bytes, iv_bytes)
+    except Exception as exc:
+        logger.exception("[tester.execute] failed to re-encrypt outbound payload: %s", exc)
+        return plaintext, payload, False
+
+    return updated_plaintext, payload, True
 
 
 class ApiEnvironmentViewSet(viewsets.ModelViewSet):
@@ -1066,6 +1210,23 @@ class ApiAdhocRequestView(APIView):
         # Finally, merge any runtime overrides which should take precedence over environment vars
         variables.update(overrides)
 
+        if overrides:
+            try:
+                overrides_snapshot = json.dumps(overrides, ensure_ascii=False)
+            except TypeError:
+                overrides_snapshot = str(overrides)
+            truncated_snapshot = overrides_snapshot[:2000]
+            logger.info("[tester.execute] runtime overrides: %s", truncated_snapshot)
+            print("[tester.execute] runtime overrides:", truncated_snapshot)
+            try:
+                for key, value in overrides.items():
+                    normalized = str(key).lower()
+                    if "pay" in normalized or "reference" in normalized:
+                        logger.info("[tester.execute] override %s=%s", key, value)
+                        print(f"[tester.execute] override {key}={value}")
+            except Exception:
+                pass
+
         # Resolve url/headers/params after collection/environment and overrides have been merged
         resolved_url = services._resolve_variables(url, variables)  # type: ignore[attr-defined]
         resolved_headers = services._resolve_variables(headers, variables)  # type: ignore[attr-defined]
@@ -1219,6 +1380,26 @@ class ApiAdhocRequestView(APIView):
             status=models.ApiRunResult.Status.ERROR,
         )
 
+        outbound_plaintext = None
+        outbound_payload = None
+        payload_reencrypted = False
+        if isinstance(resolved_json, dict):
+            try:
+                outbound_plaintext, outbound_payload, payload_reencrypted = _apply_pay_reference_override(resolved_json, overrides)
+                if payload_reencrypted:
+                    logger.info("[tester.execute] outbound payload updated with overridden pay_reference.")
+                    print("[tester.execute] outbound payload updated with overridden pay_reference.")
+                    if outbound_payload is not None:
+                        try:
+                            outbound_preview = json.dumps(outbound_payload, ensure_ascii=False)[:2000]
+                        except TypeError:
+                            outbound_preview = str(outbound_payload)[:2000]
+                        logger.info("[tester.execute] outbound decrypted payload: %s", outbound_preview)
+                        print("[tester.execute] outbound decrypted payload:", outbound_preview)
+            except Exception:
+                # helper already logs; continue without blocking execution
+                pass
+
         start = time.perf_counter()
         try:
             if resolved_json is not None:
@@ -1270,6 +1451,49 @@ class ApiAdhocRequestView(APIView):
             response_json = response.json()
         except ValueError:
             response_json = None
+
+        if response_json is not None:
+            try:
+                response_snapshot = json.dumps(response_json, ensure_ascii=False)
+            except TypeError:
+                response_snapshot = str(response_json)
+            truncated_response = response_snapshot[:2000]
+            logger.info("[tester.execute] response json: %s", truncated_response)
+            print("[tester.execute] response json:", truncated_response)
+
+            pay_reference = None
+            decrypted_plaintext = None
+            decrypted_payload: Any | None = None
+
+            if isinstance(response_json, dict):
+                try:
+                    pay_reference = response_json.get("pay_reference")
+                    if not pay_reference and isinstance(response_json.get("data"), dict):
+                        pay_reference = response_json["data"].get("pay_reference")
+                except Exception:
+                    pay_reference = None
+
+                encrypted_field = response_json.get("data")
+                if isinstance(encrypted_field, str):
+                    decrypted_plaintext, decrypted_payload = _attempt_decrypt_response_data(encrypted_field)
+                    if decrypted_plaintext:
+                        truncated_plaintext = decrypted_plaintext[:2000]
+                        logger.info("[tester.execute] decrypted text: %s", truncated_plaintext)
+                        print("[tester.execute] decrypted text:", truncated_plaintext)
+                    if decrypted_payload is not None:
+                        try:
+                            decrypted_snapshot = json.dumps(decrypted_payload, ensure_ascii=False)
+                        except TypeError:
+                            decrypted_snapshot = str(decrypted_payload)
+                        truncated_decrypted = decrypted_snapshot[:2000]
+                        logger.info("[tester.execute] decrypted json: %s", truncated_decrypted)
+                        print("[tester.execute] decrypted json:", truncated_decrypted)
+                        if pay_reference is None and isinstance(decrypted_payload, dict):
+                            pay_reference = decrypted_payload.get("pay_reference")
+
+            if pay_reference:
+                logger.info("[tester.execute] response pay_reference=%s", pay_reference)
+                print(f"[tester.execute] response pay_reference={pay_reference}")
 
         run_result.response_status = response.status_code
         run_result.response_headers = dict(response.headers)

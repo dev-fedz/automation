@@ -20,6 +20,9 @@
     let _currentView = 'json';
     let _currentMode = 'pretty';
     let _currentExpectedResults = [];
+    let _currentCaseOptions = {
+        responseEncrypted: false,
+    };
 
     const fallbackCoerceExpectedResultValue = (raw) => {
         if (raw === null || raw === undefined) {
@@ -913,6 +916,182 @@
         }
     };
 
+    const DECRYPTED_KEY_CANDIDATES = [
+        'decrypteddata',
+        'decryptedpayload',
+        'decrypteddatabody',
+        'decryptedresponse',
+        'decryptedbody',
+        'responsedecrypted',
+        'bodydecrypted',
+    ];
+
+    const normalizeDecryptedKey = (key) => {
+        if (!key && key !== 0) {
+            return '';
+        }
+        return String(key)
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '');
+    };
+
+    const parseDecryptedScalar = (value) => {
+        if (value === null || value === undefined) {
+            return null;
+        }
+        if (typeof value === 'string') {
+            const trimmed = value.trim();
+            if (!trimmed) {
+                return null;
+            }
+            try {
+                return JSON.parse(trimmed);
+            } catch (_jsonError) {
+                const lowered = trimmed.toLowerCase();
+                if (lowered === 'true') {
+                    return true;
+                }
+                if (lowered === 'false') {
+                    return false;
+                }
+                if (lowered === 'null') {
+                    return null;
+                }
+                const num = Number(trimmed);
+                if (!Number.isNaN(num) && String(num) === trimmed) {
+                    return num;
+                }
+                return trimmed;
+            }
+        }
+        if (typeof value === 'object') {
+            return value;
+        }
+        return value;
+    };
+
+    const tryParseDecryptedFromString = (value) => {
+        if (typeof value !== 'string') {
+            return undefined;
+        }
+        const trimmed = value.trim();
+        if (!trimmed) {
+            return undefined;
+        }
+        const lower = trimmed.toLowerCase();
+        const hasKeyword = DECRYPTED_KEY_CANDIDATES.some((candidate) => {
+            if (!candidate) {
+                return false;
+            }
+            return lower.startsWith(candidate) || lower.includes(`${candidate}:`) || lower.includes(`${candidate}=`) || lower.includes(`"${candidate}`);
+        });
+        if (!hasKeyword) {
+            return undefined;
+        }
+        const jsonMatch = trimmed.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+        if (jsonMatch && jsonMatch[1]) {
+            const parsed = parseDecryptedScalar(jsonMatch[1]);
+            if (parsed !== null && parsed !== undefined && parsed !== '') {
+                return parsed;
+            }
+        }
+        const delimiterIndex = Math.max(trimmed.lastIndexOf(':'), trimmed.lastIndexOf('='));
+        if (delimiterIndex !== -1 && delimiterIndex < trimmed.length - 1) {
+            const tail = trimmed.slice(delimiterIndex + 1).trim();
+            if (tail) {
+                const parsed = parseDecryptedScalar(tail);
+                if (parsed !== null && parsed !== undefined && parsed !== '') {
+                    return parsed;
+                }
+            }
+        }
+        const parsedFallback = parseDecryptedScalar(trimmed);
+        return (parsedFallback !== null && parsedFallback !== undefined && parsedFallback !== '') ? parsedFallback : undefined;
+    };
+
+    const findDecryptedValueInStore = (store) => {
+        if (!store || typeof store !== 'object') {
+            return undefined;
+        }
+        const entries = Object.keys(store);
+        for (let i = 0; i < entries.length; i += 1) {
+            const key = entries[i];
+            const normalized = normalizeDecryptedKey(key);
+            if (!normalized) {
+                continue;
+            }
+            if (DECRYPTED_KEY_CANDIDATES.includes(normalized)) {
+                const parsed = parseDecryptedScalar(store[key]);
+                if (parsed !== null && parsed !== undefined && parsed !== '') {
+                    return parsed;
+                }
+            }
+        }
+        return undefined;
+    };
+
+    const extractDecryptedPayload = ({ scriptContext, templatingStores, testsScript }) => {
+        const storesToInspect = [];
+        if (scriptContext && typeof scriptContext === 'object') {
+            if (scriptContext.localVariables && typeof scriptContext.localVariables === 'object') {
+                storesToInspect.push(scriptContext.localVariables);
+            }
+            if (scriptContext.environmentVariables && typeof scriptContext.environmentVariables === 'object') {
+                storesToInspect.push(scriptContext.environmentVariables);
+            }
+            if (scriptContext.overrides && typeof scriptContext.overrides === 'object') {
+                storesToInspect.push(scriptContext.overrides);
+            }
+        }
+        if (Array.isArray(templatingStores) && templatingStores.length) {
+            templatingStores.forEach((store) => {
+                if (store && typeof store === 'object') {
+                    storesToInspect.push(store);
+                }
+            });
+        }
+        for (let i = 0; i < storesToInspect.length; i += 1) {
+            const candidate = findDecryptedValueInStore(storesToInspect[i]);
+            if (candidate !== undefined) {
+                return candidate;
+            }
+        }
+        if (testsScript && Array.isArray(testsScript.logs)) {
+            for (let logIndex = 0; logIndex < testsScript.logs.length; logIndex += 1) {
+                const entry = testsScript.logs[logIndex];
+                if (!entry || !Array.isArray(entry.args)) {
+                    continue;
+                }
+                const args = entry.args;
+                for (let argIndex = 0; argIndex < args.length; argIndex += 1) {
+                    const arg = args[argIndex];
+                    if (typeof arg === 'string') {
+                        const normalized = normalizeDecryptedKey(arg.replace(/[:]+$/, ''));
+                        if (normalized && DECRYPTED_KEY_CANDIDATES.includes(normalized)) {
+                            const nextArg = args[argIndex + 1];
+                            const parsedNext = parseDecryptedScalar(nextArg);
+                            if (parsedNext !== null && parsedNext !== undefined && parsedNext !== '') {
+                                return parsedNext;
+                            }
+                        }
+                        const parsedFromString = tryParseDecryptedFromString(arg);
+                        if (parsedFromString !== undefined) {
+                            return parsedFromString;
+                        }
+                        continue;
+                    }
+                    if (arg && typeof arg === 'object') {
+                        const candidate = findDecryptedValueInStore(arg);
+                        if (candidate !== undefined) {
+                            return candidate;
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    };
+
     const deepEqual = (left, right) => {
         if (left === right) {
             return true;
@@ -1016,7 +1195,14 @@
     const buildEvaluationContext = (runResult) => {
         const result = runResult && runResult.result ? runResult.result : {};
         const responseText = runResult && typeof runResult.responseText === 'string' ? runResult.responseText : '';
-        const responseData = (runResult && runResult.responseData !== undefined) ? runResult.responseData : (result && (result.json !== undefined ? result.json : null));
+        const originalResponseData = (runResult && runResult.responseData !== undefined)
+            ? runResult.responseData
+            : (result && Object.prototype.hasOwnProperty.call(result, 'json') ? result.json : null);
+        const decryptedCandidate = runResult && runResult.responseEncrypted
+            ? parseDecryptedScalar(runResult.decryptedData)
+            : null;
+        const hasDecrypted = Boolean(runResult && runResult.responseEncrypted && decryptedCandidate !== null && decryptedCandidate !== undefined && decryptedCandidate !== '');
+        const effectiveResponseData = hasDecrypted ? decryptedCandidate : originalResponseData;
         const headers = result && (result.headers || result.response_headers) ? (result.headers || result.response_headers) : {};
         const context = {
             status_code: runResult ? runResult.statusCode : undefined,
@@ -1029,16 +1215,22 @@
                 headers,
                 body: responseText,
                 text: responseText,
-                json: responseData,
-                data: responseData,
+                json: effectiveResponseData,
+                data: effectiveResponseData,
+                original_json: originalResponseData,
             },
             headers,
             body: responseText,
             text: responseText,
-            json: responseData,
-            data: responseData,
+            json: effectiveResponseData,
+            data: effectiveResponseData,
+            original_json: originalResponseData,
             result,
         };
+        if (hasDecrypted) {
+            context.response.decrypted_json = decryptedCandidate;
+            context.decrypted = decryptedCandidate;
+        }
         if (runResult && runResult.overridesApplied) {
             context.overrides = runResult.overridesApplied;
         }
@@ -1433,6 +1625,7 @@
         const payload = { request_id: requestId };
         let overridesApplied = null;
         let scriptContext = null;
+        let decryptedPayload = null;
         let requestSnapshot = null;
         const scriptHelpers = await ensureScriptRunnerReady();
         let selectedEnvironment = null;
@@ -1766,6 +1959,16 @@
             renderForTab(_currentView);
             const expectedSource = Array.isArray(result.expected_results) ? result.expected_results : _currentExpectedResults;
             _currentExpectedResults = normalizeExpectedResultsEntries(expectedSource || []);
+            if (_currentCaseOptions.responseEncrypted) {
+                decryptedPayload = extractDecryptedPayload({
+                    scriptContext,
+                    templatingStores: templatingResult ? templatingResult.stores : null,
+                    testsScript: result.tests_script,
+                });
+                if (decryptedPayload !== null && decryptedPayload !== undefined && decryptedPayload !== '') {
+                    result.decrypted_payload = decryptedPayload;
+                }
+            }
             const evaluation = evaluateExpectedResults(_currentExpectedResults, {
                 statusCode,
                 elapsed,
@@ -1773,6 +1976,8 @@
                 responseText: _lastResponse.text,
                 result,
                 overridesApplied,
+                decryptedData: decryptedPayload,
+                responseEncrypted: Boolean(_currentCaseOptions.responseEncrypted),
             });
             applyEvaluationOutcome(evaluation);
         } catch (err) {
@@ -1806,6 +2011,24 @@
                 } catch (error) {
                     expectedRaw = null;
                 }
+                let responseEncrypted = false;
+                try {
+                    let attr = btn.getAttribute('data-response-encrypted');
+                    if (attr === null || attr === undefined) {
+                        const row = btn.closest('tr');
+                        if (row && row.getAttribute) {
+                            attr = row.getAttribute('data-response-encrypted');
+                        }
+                    }
+                    if (attr !== null && attr !== undefined) {
+                        responseEncrypted = String(attr).toLowerCase() === 'true';
+                    }
+                } catch (_error) {
+                    responseEncrypted = false;
+                }
+                _currentCaseOptions = {
+                    responseEncrypted,
+                };
                 _currentExpectedResults = normalizeExpectedResultsEntries(expectedRaw || []);
                 runRequest(requestId);
                 return;

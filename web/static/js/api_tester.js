@@ -7211,12 +7211,12 @@
             };
             const overridesStore = preContext?.overrides && typeof preContext.overrides === 'object'
                 ? { ...preContext.overrides }
-                : {};
+                : null;
 
             const { proxy: consoleProxy, buffer: consoleBuffer } = createScriptConsoleProxy();
 
-            const activeLookups = [localStore, seededEnvironmentStore, state.globalVariables, overridesStore]
-                .filter((store) => store && Object.keys(store).length);
+            const lookupCandidates = [overridesStore, localStore, seededEnvironmentStore, state.globalVariables];
+            const activeLookups = lookupCandidates.filter((store) => store && Object.keys(store).length);
 
             const attachReplaceIn = (scope) => {
                 scope.replaceIn = (template) => resolveTemplateWithLookups(template, activeLookups);
@@ -7242,6 +7242,7 @@
             const variablesScope = attachReplaceIn(
                 createVariableScope({
                     store: localStore,
+                    fallbackStores: [overridesStore].filter((store) => store && Object.keys(store).length),
                 }),
             );
 
@@ -7317,7 +7318,9 @@
             const postman = pm;
             postman.expect = pm.expect;
 
-            if (trimmed) {
+            const scriptSource = trimmed ? resolveTemplateWithLookups(trimmed, activeLookups) : '';
+
+            if (scriptSource) {
                 try {
                     if (!cryptoJs) {
                         throw new Error('CryptoJS failed to load. Refresh the page and ensure static assets are available.');
@@ -7358,7 +7361,7 @@
                         'btoa',
                         'atob',
                         'URLSearchParams',
-                        `"use strict";\n${trimmed}`,
+                        `"use strict";\n${scriptSource}`,
                     );
                     scriptFunction(
                         pm,

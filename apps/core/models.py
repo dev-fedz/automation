@@ -520,6 +520,8 @@ class TestCase(TimeStampedModel):
     requires_dependency = models.BooleanField(default=False)
     # Dot-notation path to extract from the dependency response payload.
     dependency_response_key = models.CharField(max_length=255, blank=True)
+    # When true, expected results should evaluate against decrypted post-request output
+    is_response_encrypted = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["scenario", "testcase_id", "id"]

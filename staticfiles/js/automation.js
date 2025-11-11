@@ -604,6 +604,7 @@
                 requirements: document.getElementById('case-requirements'),
                 dynamic: document.getElementById('case-dynamic'),
                 priority: document.getElementById('case-priority'),
+                responseEncrypted: document.getElementById('case-response-encrypted'),
             },
             maintenance: {
                 version: document.getElementById('maintenance-version'),
@@ -2975,8 +2976,9 @@
                     const dependencyIdAttr = testCase.test_case_dependency || testCase.test_case_dependency_id || '';
                     const dependencyKeyAttr = escapeHtml(testCase.dependency_response_key || '');
                     const expectedAttr = escapeHtml(JSON.stringify(testCase.expected_results || []));
+                    const responseEncryptedAttr = testCase.is_response_encrypted ? 'true' : 'false';
                     return `
-                        <tr data-case-id="${testCase.id || ''}" data-scenario-id="${testCase.scenario || testCase.scenario_id || ''}" data-requires-dependency="${requiresDependencyAttr}" data-dependency-id="${dependencyIdAttr}" data-dependency-key="${dependencyKeyAttr}" data-expected-results="${expectedAttr}">
+                        <tr data-case-id="${testCase.id || ''}" data-scenario-id="${testCase.scenario || testCase.scenario_id || ''}" data-requires-dependency="${requiresDependencyAttr}" data-dependency-id="${dependencyIdAttr}" data-dependency-key="${dependencyKeyAttr}" data-expected-results="${expectedAttr}" data-response-encrypted="${responseEncryptedAttr}">
                             <td>
                                 <label class="case-checkbox-label">
                                     <input type="checkbox" class="case-checkbox" data-case-id="${testCase.id || ''}" aria-label="Select test case ${idLabel}" />
@@ -2992,7 +2994,7 @@
                                 <div class="table-action-group">
                                     <button type="button" class="action-button" data-action="view-case" data-case-id="${testCase.id || ''}" data-related-api-request-name="${escapeHtml(testCase.related_api_request_name || '')}">View</button>
                                     <button type="button" class="action-button" data-action="edit-case" data-case-id="${testCase.id || ''}" data-related-api-request-name="${escapeHtml(testCase.related_api_request_name || '')}">Edit</button>
-                                    ${testCase.related_api_request ? `<button type="button" class="action-button" data-action="run-case" data-case-id="${testCase.id || ''}" data-request-id="${testCase.related_api_request || ''}" data-expected-results="${expectedAttr}" title="Run related API request">Run</button>` : ''}
+                                    ${testCase.related_api_request ? `<button type="button" class="action-button" data-action="run-case" data-case-id="${testCase.id || ''}" data-request-id="${testCase.related_api_request || ''}" data-expected-results="${expectedAttr}" data-response-encrypted="${responseEncryptedAttr}" title="Run related API request">Run</button>` : ''}
                                     <button type="button" class="action-button" data-action="delete-case" data-case-id="${testCase.id || ''}" data-variant="danger">Delete</button>
                                 </div>
                             </td>
@@ -3317,6 +3319,7 @@
                         const stepsInput = document.getElementById('module-add-case-steps');
                         const expectedInput = document.getElementById('module-add-case-expected');
                         const priorityInput = document.getElementById('module-add-case-priority');
+                        const responseEncryptedInput = document.getElementById('module-add-case-response-encrypted');
                         const requiresDependencyInput = document.getElementById('module-add-case-requires-dependency');
                         const dependencySelect = document.getElementById('module-add-case-dependency-id');
                         const dependencyKeyInput = document.getElementById('module-add-case-dependency-key');
@@ -3344,6 +3347,7 @@
                             priority: priorityInput && priorityInput.value ? priorityInput.value : '',
                             precondition: (document.getElementById('module-add-case-precondition') && document.getElementById('module-add-case-precondition').value) || '',
                             requirements: (document.getElementById('module-add-case-requirements') && document.getElementById('module-add-case-requirements').value) || '',
+                            is_response_encrypted: Boolean(responseEncryptedInput && responseEncryptedInput.checked),
                         };
                         const requiresDependency = !!(requiresDependencyInput && requiresDependencyInput.checked);
                         payload.requires_dependency = requiresDependency;
@@ -3508,6 +3512,7 @@
                         const priorityInput = document.getElementById('module-add-case-priority'); if (priorityInput) priorityInput.value = data && data.priority ? data.priority : '';
                         const preconditionsInput = document.getElementById('module-add-case-precondition'); if (preconditionsInput) preconditionsInput.value = data && data.precondition ? data.precondition : '';
                         const requirementsInput = document.getElementById('module-add-case-requirements'); if (requirementsInput) requirementsInput.value = data && data.requirements ? data.requirements : '';
+                        const responseEncryptedInput = document.getElementById('module-add-case-response-encrypted'); if (responseEncryptedInput) responseEncryptedInput.checked = Boolean(data && data.is_response_encrypted);
                         const dependencyCheckbox = document.getElementById('module-add-case-requires-dependency');
                         const dependencySelect = document.getElementById('module-add-case-dependency-id');
                         const dependencyKeyInput = document.getElementById('module-add-case-dependency-key');
@@ -3560,7 +3565,7 @@
                                 if (openApiBtn) openApiBtn.hidden = false;
                             }
                         } catch (e) { /* ignore */ }
-                        const editableFields = [titleInput, descInput, stepsInput, expectedInput, priorityInput, requestInput, preconditionsInput, requirementsInput, dependencySelect, dependencyKeyInput];
+                        const editableFields = [titleInput, descInput, stepsInput, expectedInput, priorityInput, preconditionsInput, requirementsInput, dependencySelect, dependencyKeyInput, responseEncryptedInput];
                         editableFields.forEach((n) => { if (n) { if (n.tagName === 'SELECT') { n.disabled = isView; } else { n.readOnly = isView; n.disabled = isView; } } });
                         if (dependencyCheckbox) dependencyCheckbox.disabled = isView;
                         const submit = form.querySelector('button[type="submit"]'); if (submit) submit.hidden = isView;
@@ -4105,6 +4110,7 @@
                     priority: inputs.case.priority.value || '',
                     precondition: (document.getElementById('case-precondition') && document.getElementById('case-precondition').value) || '',
                     requirements: (document.getElementById('case-requirements') && document.getElementById('case-requirements').value) || '',
+                    is_response_encrypted: Boolean(inputs.case.responseEncrypted && inputs.case.responseEncrypted.checked),
                 };
                 // If an API request was selected via the explorer, include it.
                 // Force-sync visible label.dataset.requestId into the hidden input

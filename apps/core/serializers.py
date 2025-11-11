@@ -380,6 +380,7 @@ class TestCaseSerializer(serializers.ModelSerializer):
     )
     requires_dependency = serializers.BooleanField(required=False)
     dependency_response_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    is_response_encrypted = serializers.BooleanField(required=False)
 
     class Meta:
         model = models.TestCase
@@ -402,6 +403,7 @@ class TestCaseSerializer(serializers.ModelSerializer):
             "test_case_dependency",
             "requires_dependency",
             "dependency_response_key",
+            "is_response_encrypted",
             "created_at",
             "updated_at",
         ]
