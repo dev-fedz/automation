@@ -450,6 +450,7 @@
             modalCaseModule: document.querySelector('[data-role="modal-case-module"]'),
             modalCaseScenario: document.querySelector('[data-role="modal-case-scenario"]'),
             caseSelectionContinue: document.getElementById('case-selection-continue'),
+            caseSelectionCancel: document.getElementById('case-selection-cancel'),
             caseSelectedScenarioHidden: document.getElementById('case-selected-scenario-id'),
             maintenanceForm: document.getElementById('automation-maintenance-form'),
             planModal: root.querySelector('[data-role="plan-modal"]'),
@@ -1263,6 +1264,31 @@
                         if (inputs.case.title) inputs.case.title.focus();
                         setStatus('Scenario selected. You may now fill and save the test case.', 'success');
                     } catch (e) { /* ignore */ }
+                });
+            }
+            if (els.caseSelectionCancel) {
+                els.caseSelectionCancel.addEventListener('click', (ev) => {
+                    try {
+                        ev.preventDefault();
+                        closeCaseSelectionModal();
+                        try { renderAll(); } catch (error) { try { renderCaseList(); } catch (_error) { /* ignore */ } }
+                        try {
+                            const panelContainer = document.getElementById('test-cases-panel-container');
+                            if (panelContainer) {
+                                restoreIfHidden(panelContainer);
+                                panelContainer.style.removeProperty('display');
+                            }
+                            if (els.automationGrid) {
+                                restoreIfHidden(els.automationGrid);
+                                els.automationGrid.style.removeProperty('display');
+                            }
+                            syncCasesPanelForVisibilityFlag();
+                        } catch (error) {
+                            /* ignore */
+                        }
+                    } catch (error) {
+                        /* ignore */
+                    }
                 });
             }
             // Prevent closing the selection modal by clicking outside or on 'close' actions.
