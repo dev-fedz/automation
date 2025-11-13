@@ -927,12 +927,60 @@ def automation_test_scenarios(request):
 @login_required
 def automation_test_cases(request):
     data = _prepare_automation_data()
+    selected_plan = data["selected_plan"]
+    selected_scenario = data["selected_scenario"]
+
+    plan_param = request.GET.get("plan")
+    scenario_param = request.GET.get("scenario")
+
+    scenario_match = None
+    plan_match = None
+
+    if scenario_param not in (None, ""):
+        try:
+            scenario_id = int(scenario_param)
+        except (TypeError, ValueError):
+            scenario_id = None
+        if scenario_id is not None:
+            for plan in data.get("plans", []):
+                for scenario in plan.get("scenarios", []):
+                    try:
+                        if int(scenario.get("id")) == scenario_id:
+                            scenario_match = scenario
+                            plan_match = plan
+                            break
+                    except (TypeError, ValueError):
+                        continue
+                if scenario_match:
+                    break
+    if scenario_match:
+        selected_scenario = scenario_match
+        selected_plan = plan_match or selected_plan
+    elif plan_param not in (None, ""):
+        try:
+            plan_id = int(plan_param)
+        except (TypeError, ValueError):
+            plan_id = None
+        if plan_id is not None:
+            for plan in data.get("plans", []):
+                try:
+                    if int(plan.get("id")) == plan_id:
+                        selected_plan = plan
+                        scenarios = plan.get("scenarios", []) or []
+                        selected_scenario = scenarios[0] if scenarios else None
+                        break
+                except (TypeError, ValueError):
+                    continue
+    if scenario_param in (None, "") and plan_param in (None, ""):
+        selected_plan = None
+        selected_scenario = None
+
     context = {
         "initial_plans": data["plans"],
         "initial_metrics": data["metrics"],
         "api_endpoints": data["api_endpoints"],
-        "initial_selected_plan": data["selected_plan"],
-        "initial_selected_scenario": data["selected_scenario"],
+        "initial_selected_plan": selected_plan,
+        "initial_selected_scenario": selected_scenario,
     }
     # include initial modules so the test cases page can populate modal selects
     try:

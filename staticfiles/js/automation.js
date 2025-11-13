@@ -420,6 +420,8 @@
 
         const initialPlans = readScriptJson('automation-initial-plans') || [];
         const apiEndpoints = readScriptJson('automation-api-endpoints') || {};
+        const initialSelectedPlan = readScriptJson('automation-initial-selected-plan');
+        const initialSelectedScenario = readScriptJson('automation-initial-selected-scenario');
 
         const els = {
             status: root.querySelector('[data-role="status"]'),
@@ -430,6 +432,8 @@
             maintenanceList: root.querySelector('[data-role="maintenance-list"]'),
             planName: root.querySelector('[data-role="selected-plan-name"]'),
             scenarioName: root.querySelector('[data-role="selected-scenario-name"]'),
+            casePanelContainer: document.getElementById('test-cases-panel-container'),
+            automationGrid: root.querySelector('.automation-grid'),
             caseSummary: root.querySelector('[data-role="case-summary"]'),
             planForm: document.getElementById('automation-plan-form'),
             scenarioForm: document.getElementById('automation-scenario-form'),
@@ -468,6 +472,32 @@
             key: document.getElementById('module-add-case-dependency-key'),
         };
         const dependencyOptionsCache = new Map();
+
+        const rememberAndHide = (node) => {
+            if (!node) {
+                return;
+            }
+            if (node.dataset.modalHidden === '1') {
+                return;
+            }
+            node.dataset.modalHidden = '1';
+            node.dataset.modalOriginalDisplay = node.style.display || '';
+            node.style.display = 'none';
+        };
+
+        const restoreIfHidden = (node) => {
+            if (!node || node.dataset.modalHidden !== '1') {
+                return;
+            }
+            const previous = node.dataset.modalOriginalDisplay || '';
+            if (previous === '') {
+                node.style.removeProperty('display');
+            } else {
+                node.style.display = previous;
+            }
+            delete node.dataset.modalHidden;
+            delete node.dataset.modalOriginalDisplay;
+        };
 
         const ensureTrailingSlash = (value) => {
             if (!value) {
@@ -807,6 +837,13 @@
             try {
                 automationLog('debug', '[automation] openCaseSelectionModal invoked');
                 if (!els.caseSelectionModal) return;
+                // hide sections of the grid while the modal is visible to prevent duplicate content
+                try {
+                    rememberAndHide(els.casePanelContainer);
+                    rememberAndHide(els.automationGrid);
+                } catch (err) {
+                    automationLog('debug', '[automation] unable to hide case panel container', err);
+                }
                 // Fetch latest plans from API before populating modal so the
                 // options reflect the current server state. We do this even if
                 // state.plans exists to ensure freshness.
@@ -873,6 +910,13 @@
                 els.caseSelectionModal.hidden = true;
                 try { const overlay = els.caseSelectionModal.querySelector('[data-role="case-selection-overlay"]'); if (overlay) overlay.hidden = true; } catch (e) { }
                 document.body.classList.remove('automation-modal-open');
+                // restore grid visibility when modal closes
+                try {
+                    restoreIfHidden(els.casePanelContainer);
+                    restoreIfHidden(els.automationGrid);
+                } catch (err) {
+                    automationLog('debug', '[automation] unable to restore case panel container', err);
+                }
                 // restore focus to previously focused element if still in document
                 try {
                     if (_previouslyFocused && typeof _previouslyFocused.focus === 'function') {
@@ -951,8 +995,9 @@
                     try {
                         if (!pid) {
                             state.selectedPlanId = null;
+                            state.selectedScenarioId = null;
                         } else {
-                            state.selectedPlanId = Number(pid);
+                            state.selectedPlanId = toNumericId(pid);
                         }
                     } catch (ie) { /* ignore */ }
                     // reuse logic: update modal module list based on plan
@@ -1180,125 +1225,35 @@
                         }
                         // Update client-side selection state so renderers show the selected scenario
                         try {
-                            // modal plan select may contain the selected plan id
                             const modalPlanVal = (els.modalCasePlan && els.modalCasePlan.value) ? els.modalCasePlan.value : (document.getElementById('modal-case-plan') && document.getElementById('modal-case-plan').value) || null;
                             if (modalPlanVal) {
                                 state.selectedPlanId = Number(modalPlanVal);
                             }
                             state.selectedScenarioId = Number(selectedScenario);
+                            const modalModuleVal = (els.modalCaseModule && els.modalCaseModule.value) ? els.modalCaseModule.value : (document.getElementById('modal-case-module') && document.getElementById('modal-case-module').value) || null;
+                            syncSelectionQueryParams({ moduleId: modalModuleVal || null });
+                            markListVisible();
                         } catch (e) { /* ignore */ }
                         // enable form fieldset
                         if (els.caseForm) {
                             const fieldset = els.caseForm.querySelector('fieldset'); if (fieldset) fieldset.disabled = false;
                         }
-                        // show the test cases panel container if hidden
+                        // show the test cases grid/panel when a scenario is confirmed
                         try {
-                            const panel = document.getElementById('test-cases-panel-container');
-                            if (panel) panel.style.display = '';
-                        } catch (ie) { /* ignore */ }
-                        // Convert the Test Cases panel into a scenarios-style table layout
-                        try {
-                            const panel = document.querySelector('.automation-panel[data-panel="cases"]');
-                            if (panel) {
-                                // clear existing contents
-                                panel.innerHTML = '';
-                                // inject header + controls similar to scenarios panel
-                                panel.innerHTML = `
-                                    <div class="panel-header">
-                                        <h2 id="headline-cases">Test Cases</h2>
-                                        <div class="panel-controls">
-                                            <div class="case-breadcrumb-label" aria-hidden="true">plan &middot; modules &middot; scenarios</div>
-                                            <input type="search" id="case-search" class="automation-search" placeholder="Search cases" aria-label="Search cases">
-                                            <button type="button" class="btn-primary" id="open-new-case">New Test Case</button>
-                                        </div>
-                                    </div>
-                                    <div class="card table-card automation-table-card" aria-live="polite">
-                                        <table class="table-modern automation-table" aria-label="Test cases">
-                                            <thead>
-                                                <tr>
-                                                    <th scope="col" class="col-checkbox">
-                                                        <label class="case-checkbox-label">
-                                                            <input id="select-all-cases" type="checkbox" aria-label="Select all test cases">
-                                                            <span class="fake-checkbox" aria-hidden="true"></span>
-                                                        </label>
-                                                    </th>
-                                                    <th scope="col">ID</th>
-                                                    <th scope="col">Title</th>
-                                                    <th scope="col">Description</th>
-                                                    <th scope="col">Created</th>
-                                                    <th scope="col">Updated</th>
-                                                    <th scope="col">Actions</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody data-role="case-table-body">
-                                                <tr><td colspan="7" class="empty">Loading test cases…</td></tr>
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                `;
-                                // populate breadcrumb label with actual selected names
-                                try {
-                                    const crumb = panel.querySelector('.case-breadcrumb-label');
-                                    if (crumb) {
-                                        // plan name
-                                        let planName = '—';
-                                        try {
-                                            const p = state.plans.find((pp) => Number(pp.id) === Number(state.selectedPlanId));
-                                            if (p) planName = p.name || p.title || `Plan ${p.id}`;
-                                        } catch (e) { /* ignore */ }
-                                        // initialize checkbox wiring for the new header if present
-                                        try { initCaseCheckboxes(); } catch (e) { /* ignore */ }
-                                        // scenario title and module name
-                                        let scenarioTitle = '—';
-                                        let moduleName = '—';
-                                        try {
-                                            const s = (function () {
-                                                const plan = state.plans.find((pp) => Number(pp.id) === Number(state.selectedPlanId));
-                                                if (!plan || !Array.isArray(plan.scenarios)) return null;
-                                                return plan.scenarios.find((sc) => Number(sc.id) === Number(state.selectedScenarioId)) || null;
-                                            }());
-                                            if (s) {
-                                                scenarioTitle = s.title || `Scenario ${s.id}`;
-                                                // module id may be in s.module or s.module_id
-                                                const mid = s.module || s.module_id || null;
-                                                if (mid) {
-                                                    const mObj = initialModules.find((m) => Number(m.id) === Number(mid));
-                                                    if (mObj) moduleName = mObj.title || `Module ${mObj.id}`;
-                                                    else moduleName = `Module ${mid}`;
-                                                } else {
-                                                    moduleName = '—';
-                                                }
-                                            }
-                                        } catch (e) { /* ignore */ }
-                                        crumb.textContent = `${planName} · ${moduleName} · ${scenarioTitle}`;
-                                    }
-                                } catch (e) { /* ignore */ }
-                                // attach handler to the New Test Case button so it opens the add-case modal
-                                try {
-                                    const newCaseBtn = panel.querySelector('#open-new-case');
-                                    if (newCaseBtn) {
-                                        newCaseBtn.addEventListener('click', (ev) => {
-                                            try {
-                                                ev.preventDefault();
-                                                const sid = state.selectedScenarioId || null;
-                                                const caseModal = document.querySelector('[data-role="module-add-case-modal"]');
-                                                if (caseModal) {
-                                                    const hid = document.getElementById('module-add-case-scenario-id'); if (hid) hid.value = sid || '';
-                                                    // ensure modal title reflects creation
-                                                    const modalTitle = document.getElementById('module-add-case-modal-title');
-                                                    if (modalTitle) modalTitle.textContent = 'Add Test Case';
-                                                    if (typeof toggleDependencyFields === 'function') toggleDependencyFields(false);
-                                                    if (sid && typeof loadDependencyOptions === 'function') loadDependencyOptions(sid);
-                                                    caseModal.hidden = false; body.classList.add('automation-modal-open');
-                                                    const titleInput = document.getElementById('module-add-case-title'); if (titleInput) titleInput.focus();
-                                                } else {
-                                                    setStatus('Unable to open test case modal.', 'error');
-                                                }
-                                            } catch (err) { /* ignore */ }
-                                        });
-                                    }
-                                } catch (_err) { /* ignore */ }
+                            if (els.automationGrid) {
+                                restoreIfHidden(els.automationGrid);
+                                els.automationGrid.style.removeProperty('display');
                             }
+                            const panel = document.getElementById('test-cases-panel-container');
+                            if (panel) {
+                                restoreIfHidden(panel);
+                                panel.style.removeProperty('display');
+                            }
+                        } catch (ie) { /* ignore */ }
+                        // Ensure persisted panel replaces the default data card after Continue
+                        try {
+                            activatePersistedCasePanel();
+                            updateCaseBreadcrumb();
                         } catch (e) { /* ignore */ }
                         // re-render UI so cases for the selected scenario are shown (table body will be populated)
                         try { renderAll(); } catch (e) { try { renderCaseList(); } catch (_e) { /* ignore */ } }
@@ -1683,12 +1638,437 @@
 
         const initialModules = readScriptJson('automation-initial-modules') || [];
 
+        const toNumericId = (value) => {
+            if (value === undefined || value === null || value === '') {
+                return null;
+            }
+            const num = Number(value);
+            return Number.isNaN(num) ? null : num;
+        };
+
+        let initialSelectedPlanId = toNumericId(initialSelectedPlan && initialSelectedPlan.id);
+        let initialSelectedScenarioId = toNumericId(initialSelectedScenario && initialSelectedScenario.id);
+
+        if (!initialSelectedPlanId && initialSelectedScenario) {
+            const candidatePlan = initialSelectedScenario.plan !== undefined && initialSelectedScenario.plan !== null
+                ? initialSelectedScenario.plan
+                : initialSelectedScenario.plan_id;
+            const coercedPlan = toNumericId(candidatePlan);
+            if (coercedPlan !== null) {
+                initialSelectedPlanId = coercedPlan;
+            }
+        }
+
+        if (!initialSelectedScenarioId && initialSelectedPlan && Array.isArray(initialSelectedPlan.scenarios) && initialSelectedPlan.scenarios.length) {
+            const fallbackScenario = toNumericId(initialSelectedPlan.scenarios[0] && initialSelectedPlan.scenarios[0].id);
+            if (fallbackScenario !== null) {
+                initialSelectedScenarioId = fallbackScenario;
+            }
+        }
+
         const state = {
             plans: normalizePlans(initialPlans),
-            selectedPlanId: null,
-            selectedScenarioId: null,
+            selectedPlanId: initialSelectedPlanId,
+            selectedScenarioId: initialSelectedScenarioId,
             editingPlan: false,
         };
+
+        if (!state.selectedPlanId && Array.isArray(state.plans) && state.selectedScenarioId) {
+            for (const plan of state.plans) {
+                if (!plan || !Array.isArray(plan.scenarios)) {
+                    continue;
+                }
+                const found = plan.scenarios.find((scenario) => Number(scenario.id) === Number(state.selectedScenarioId));
+                if (found) {
+                    state.selectedPlanId = toNumericId(plan.id);
+                    break;
+                }
+            }
+        }
+
+        if (!state.selectedScenarioId && state.selectedPlanId) {
+            const selectedPlan = state.plans.find((plan) => Number(plan.id) === Number(state.selectedPlanId));
+            if (selectedPlan && Array.isArray(selectedPlan.scenarios) && selectedPlan.scenarios.length) {
+                state.selectedScenarioId = toNumericId(selectedPlan.scenarios[0].id);
+            }
+        }
+
+        const selectionStorageKey = 'automation:testcases:selection';
+        const listVisibleStorageKey = 'automation:testcases:list-visible';
+        const PERSISTED_CASES_PANEL_ID = 'automation-cases-table-panel';
+
+        const buildPersistedCasesPanelMarkup = () => `
+            <div class="panel-header">
+                <h2 id="headline-cases">Test Cases</h2>
+                <div class="panel-controls">
+                    <div class="case-breadcrumb-label" aria-hidden="true">plan &middot; modules &middot; scenarios</div>
+                    <input type="search" id="case-search" class="automation-search" placeholder="Search cases" aria-label="Search cases">
+                    <button type="button" class="btn-primary" id="open-new-case">New Test Case</button>
+                </div>
+            </div>
+            <div class="card table-card automation-table-card" aria-live="polite">
+                <div class="automation-list" data-role="case-list">
+                    <table class="table-modern automation-table" aria-label="Test cases">
+                        <thead>
+                            <tr>
+                                <th scope="col" class="col-checkbox">
+                                    <label class="case-checkbox-label">
+                                        <input id="select-all-cases" type="checkbox" aria-label="Select all test cases">
+                                        <span class="fake-checkbox" aria-hidden="true"></span>
+                                    </label>
+                                </th>
+                                <th scope="col">ID</th>
+                                <th scope="col">Title</th>
+                                <th scope="col">Description</th>
+                                <th scope="col">Created</th>
+                                <th scope="col">Updated</th>
+                                <th scope="col">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody data-role="case-table-body">
+                            <tr><td colspan="7" class="empty">Loading test cases…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+
+        const getCasesDataCardPanel = () => document.querySelector('.automation-panel.data-card[data-panel="cases"]');
+
+        const ensurePersistedCasesPanel = () => {
+            const container = els.casePanelContainer;
+            if (!container) {
+                return null;
+            }
+            let panel = document.getElementById(PERSISTED_CASES_PANEL_ID);
+            if (!panel) {
+                panel = document.createElement('section');
+                panel.id = PERSISTED_CASES_PANEL_ID;
+                panel.className = 'automation-panel cases-table-panel';
+                panel.dataset.panel = 'cases-persisted';
+                panel.setAttribute('aria-labelledby', 'headline-cases');
+                panel.innerHTML = buildPersistedCasesPanelMarkup();
+                container.appendChild(panel);
+                wirePersistedCasePanel(panel);
+            }
+            const listNode = panel.querySelector('[data-role="case-list"]');
+            if (listNode) {
+                els.caseList = listNode;
+            }
+            return panel;
+        };
+
+        const deactivatePersistedCasePanel = () => {
+            const panel = document.getElementById(PERSISTED_CASES_PANEL_ID);
+            if (panel && panel.parentNode) {
+                panel.parentNode.removeChild(panel);
+            }
+            const dataCard = getCasesDataCardPanel();
+            if (dataCard) {
+                if (dataCard.dataset.persistedOriginalHtml) {
+                    dataCard.innerHTML = dataCard.dataset.persistedOriginalHtml;
+                }
+                dataCard.style.removeProperty('display');
+                dataCard.removeAttribute('aria-hidden');
+                const fallbackList = dataCard.querySelector('[data-role="case-list"]');
+                if (fallbackList) {
+                    els.caseList = fallbackList;
+                }
+            }
+        };
+
+        const activatePersistedCasePanel = () => {
+            const dataCard = getCasesDataCardPanel();
+            if (dataCard) {
+                if (!dataCard.dataset.persistedOriginalHtml) {
+                    dataCard.dataset.persistedOriginalHtml = dataCard.innerHTML;
+                }
+                dataCard.innerHTML = '';
+                dataCard.style.display = 'none';
+                dataCard.setAttribute('aria-hidden', 'true');
+            }
+            const panel = ensurePersistedCasesPanel();
+            if (panel) {
+                panel.hidden = false;
+                panel.style.removeProperty('display');
+                updateCaseBreadcrumb();
+                window.requestAnimationFrame(() => {
+                    try {
+                        if (typeof initCaseCheckboxes === 'function') {
+                            initCaseCheckboxes();
+                        }
+                    } catch (error) {
+                        /* ignore */
+                    }
+                });
+            }
+            return panel;
+        };
+
+        const syncCasesPanelForVisibilityFlag = () => {
+            try {
+                if (getListVisibleFlag()) {
+                    activatePersistedCasePanel();
+                } else {
+                    deactivatePersistedCasePanel();
+                }
+            } catch (error) {
+                /* ignore */
+            }
+        };
+
+        const getListVisibleFlag = () => {
+            try {
+                if (!window.localStorage) {
+                    return false;
+                }
+                return window.localStorage.getItem(listVisibleStorageKey) === '1';
+            } catch (error) {
+                return false;
+            }
+        };
+
+        const markListVisible = () => {
+            try {
+                if (window.localStorage) {
+                    window.localStorage.setItem(listVisibleStorageKey, '1');
+                }
+                activatePersistedCasePanel();
+            } catch (error) {
+                /* ignore */
+            }
+        };
+
+        const clearListVisibleFlag = () => {
+            try {
+                if (window.localStorage) {
+                    window.localStorage.removeItem(listVisibleStorageKey);
+                }
+                deactivatePersistedCasePanel();
+            } catch (error) {
+                /* ignore */
+            }
+        };
+
+        const navigationType = (() => {
+            try {
+                if (typeof performance !== 'undefined' && typeof performance.getEntriesByType === 'function') {
+                    const entries = performance.getEntriesByType('navigation');
+                    if (entries && entries.length && entries[0].type) {
+                        return entries[0].type;
+                    }
+                }
+                if (typeof performance !== 'undefined' && performance.navigation) {
+                    const navType = performance.navigation.type;
+                    if (navType === performance.navigation.TYPE_RELOAD) return 'reload';
+                    if (navType === performance.navigation.TYPE_BACK_FORWARD) return 'back_forward';
+                }
+            } catch (error) {
+                /* ignore */
+            }
+            return 'navigate';
+        })();
+
+        const isReloadNavigation = navigationType === 'reload' || navigationType === 'back_forward';
+
+        if (!isReloadNavigation) {
+            clearPersistedSelection();
+        }
+
+        const listVisibleOnReload = isReloadNavigation && getListVisibleFlag();
+
+        if (listVisibleOnReload && els.caseSelectionModal) {
+            try {
+                els.caseSelectionModal.hidden = true;
+                body.classList.remove('automation-modal-open');
+            } catch (error) {
+                /* ignore */
+            }
+        }
+
+        function clearPersistedSelection() {
+            try {
+                if (window.localStorage) {
+                    window.localStorage.removeItem(selectionStorageKey);
+                }
+                clearListVisibleFlag();
+            } catch (error) {
+                /* ignore */
+            }
+        }
+
+        function persistSelection() {
+            try {
+                if (!window.localStorage) {
+                    return;
+                }
+                if (!state.selectedPlanId || !state.selectedScenarioId) {
+                    clearPersistedSelection();
+                    return;
+                }
+                const payload = {
+                    planId: state.selectedPlanId,
+                    scenarioId: state.selectedScenarioId,
+                };
+                window.localStorage.setItem(selectionStorageKey, JSON.stringify(payload));
+            } catch (error) {
+                /* ignore */
+            }
+        }
+
+        function tryRestoreSelection() {
+            try {
+                if (!window.localStorage) {
+                    return false;
+                }
+                const raw = window.localStorage.getItem(selectionStorageKey);
+                if (!raw) {
+                    return false;
+                }
+                const parsed = JSON.parse(raw);
+                const planId = toNumericId(parsed && parsed.planId);
+                const scenarioId = toNumericId(parsed && parsed.scenarioId);
+                if (!scenarioId) {
+                    clearPersistedSelection();
+                    return false;
+                }
+                if (planId) {
+                    state.selectedPlanId = planId;
+                }
+                state.selectedScenarioId = scenarioId;
+                return true;
+            } catch (error) {
+                return false;
+            }
+        }
+
+        if (isReloadNavigation && !listVisibleOnReload) {
+            clearPersistedSelection();
+        }
+
+        if (!state.selectedScenarioId && isReloadNavigation && listVisibleOnReload) {
+            const restored = tryRestoreSelection();
+            if (restored) {
+                const scenarioProbe = (() => {
+                    try {
+                        const plan = state.plans.find((p) => Number(p.id) === Number(state.selectedPlanId));
+                        if (!plan || !Array.isArray(plan.scenarios)) {
+                            return null;
+                        }
+                        return plan.scenarios.find((sc) => Number(sc.id) === Number(state.selectedScenarioId)) || null;
+                    } catch (error) {
+                        return null;
+                    }
+                })();
+                if (!scenarioProbe) {
+                    state.selectedScenarioId = null;
+                    state.selectedPlanId = null;
+                    clearPersistedSelection();
+                }
+            }
+        }
+
+        if (listVisibleOnReload) {
+            activatePersistedCasePanel();
+        }
+
+        if (els.caseSelectedScenarioHidden) {
+            try {
+                els.caseSelectedScenarioHidden.value = state.selectedScenarioId ? String(state.selectedScenarioId) : '';
+            } catch (error) {
+                /* ignore */
+            }
+        }
+
+        const syncSelectionQueryParams = (options = {}) => {
+            const { moduleId } = options;
+            try {
+                const url = new URL(window.location.href);
+                if (els.caseSelectedScenarioHidden) {
+                    els.caseSelectedScenarioHidden.value = state.selectedScenarioId ? String(state.selectedScenarioId) : '';
+                }
+                if (state.selectedPlanId) {
+                    url.searchParams.set('plan', String(state.selectedPlanId));
+                } else {
+                    url.searchParams.delete('plan');
+                }
+                if (state.selectedScenarioId) {
+                    url.searchParams.set('scenario', String(state.selectedScenarioId));
+                } else {
+                    url.searchParams.delete('scenario');
+                }
+                if (moduleId !== undefined) {
+                    if (moduleId) {
+                        url.searchParams.set('module', String(moduleId));
+                    } else {
+                        url.searchParams.delete('module');
+                    }
+                } else {
+                    url.searchParams.delete('module');
+                }
+                const nextUrl = url.toString();
+                window.history.replaceState({}, '', nextUrl);
+                if (state.selectedScenarioId) {
+                    persistSelection();
+                } else {
+                    clearPersistedSelection();
+                }
+            } catch (error) {
+                automationLog('debug', '[automation] syncSelectionQueryParams failed', error);
+            }
+        };
+
+        if (state.selectedPlanId || state.selectedScenarioId) {
+            syncSelectionQueryParams();
+        }
+
+        try {
+            let hasSelection = Boolean(state.selectedScenarioId);
+            const panel = document.getElementById('test-cases-panel-container');
+            if (isReloadNavigation && hasSelection && !listVisibleOnReload) {
+                hasSelection = false;
+                state.selectedScenarioId = null;
+                state.selectedPlanId = null;
+                clearPersistedSelection();
+                if (els.caseSelectedScenarioHidden) {
+                    try { els.caseSelectedScenarioHidden.value = ''; } catch (error) { /* ignore */ }
+                }
+                try { syncSelectionQueryParams(); } catch (error) { /* ignore */ }
+            }
+            if (!hasSelection) {
+                deactivatePersistedCasePanel();
+                if (panel) {
+                    panel.style.display = 'none';
+                }
+                if (els.automationGrid) {
+                    els.automationGrid.style.display = 'none';
+                }
+                window.requestAnimationFrame(() => {
+                    try {
+                        if (!state.selectedScenarioId && !listVisibleOnReload) {
+                            openCaseSelectionModal();
+                        } else if (listVisibleOnReload && els.caseSelectionModal) {
+                            els.caseSelectionModal.hidden = true;
+                            body.classList.remove('automation-modal-open');
+                        }
+                    } catch (error) {
+                        /* ignore */
+                    }
+                });
+            } else {
+                syncCasesPanelForVisibilityFlag();
+                if (panel) {
+                    restoreIfHidden(panel);
+                    panel.style.removeProperty('display');
+                }
+                if (els.automationGrid) {
+                    restoreIfHidden(els.automationGrid);
+                    els.automationGrid.style.removeProperty('display');
+                }
+            }
+        } catch (error) {
+            /* ignore */
+        }
 
         // Debug: expose the initial plans we were given server-side so we can
         // confirm in browser console whether the payload arrived correctly.
@@ -1719,6 +2099,91 @@
             els.status.dataset.variant = variant;
             els.status.textContent = message;
         };
+
+        function wirePersistedCasePanel(panel) {
+            if (!panel) {
+                return;
+            }
+            const newCaseBtn = panel.querySelector('#open-new-case');
+            if (newCaseBtn && !newCaseBtn.dataset.boundNewCase) {
+                newCaseBtn.dataset.boundNewCase = '1';
+                newCaseBtn.addEventListener('click', (ev) => {
+                    try {
+                        ev.preventDefault();
+                        const sid = state.selectedScenarioId || null;
+                        const caseModal = document.querySelector('[data-role="module-add-case-modal"]');
+                        if (caseModal) {
+                            const hiddenScenario = document.getElementById('module-add-case-scenario-id');
+                            if (hiddenScenario) {
+                                hiddenScenario.value = sid || '';
+                            }
+                            const modalTitle = document.getElementById('module-add-case-modal-title');
+                            if (modalTitle) {
+                                modalTitle.textContent = 'Add Test Case';
+                            }
+                            if (typeof toggleDependencyFields === 'function') {
+                                toggleDependencyFields(false);
+                            }
+                            if (sid && typeof loadDependencyOptions === 'function') {
+                                loadDependencyOptions(sid);
+                            }
+                            caseModal.hidden = false;
+                            body.classList.add('automation-modal-open');
+                            const titleInput = document.getElementById('module-add-case-title');
+                            if (titleInput) {
+                                titleInput.focus();
+                            }
+                        } else {
+                            setStatus('Unable to open test case modal.', 'error');
+                        }
+                    } catch (error) {
+                        /* ignore */
+                    }
+                });
+            }
+        }
+
+        function updateCaseBreadcrumb() {
+            try {
+                const crumb = document.querySelector('.case-breadcrumb-label');
+                if (!crumb) {
+                    return;
+                }
+                let planName = '—';
+                try {
+                    const plan = state.plans.find((p) => Number(p.id) === Number(state.selectedPlanId));
+                    if (plan) {
+                        planName = plan.name || plan.title || `Plan ${plan.id}`;
+                    }
+                } catch (error) {
+                    /* ignore */
+                }
+                let scenarioTitle = '—';
+                let moduleName = '—';
+                try {
+                    const scenario = (() => {
+                        const plan = state.plans.find((p) => Number(p.id) === Number(state.selectedPlanId));
+                        if (!plan || !Array.isArray(plan.scenarios)) {
+                            return null;
+                        }
+                        return plan.scenarios.find((sc) => Number(sc.id) === Number(state.selectedScenarioId)) || null;
+                    })();
+                    if (scenario) {
+                        scenarioTitle = scenario.title || `Scenario ${scenario.id}`;
+                        const mid = scenario.module || scenario.module_id || null;
+                        if (mid) {
+                            const moduleObj = initialModules.find((m) => Number(m.id) === Number(mid));
+                            moduleName = moduleObj ? (moduleObj.title || `Module ${moduleObj.id}`) : `Module ${mid}`;
+                        }
+                    }
+                } catch (error) {
+                    /* ignore */
+                }
+                crumb.textContent = `${planName} · ${moduleName} · ${scenarioTitle}`;
+            } catch (error) {
+                /* ignore */
+            }
+        }
 
         // Lightweight toast helper for transient messages
         const showToast = (message, timeout = 3000) => {
@@ -1781,12 +2246,20 @@
         populateModuleSelects();
         populateScenarioPlanAndModule();
 
-        // Hide Test Cases panel on init if no scenario is selected
+        // Hide Test Cases panel/grid on init when there is no pre-selected scenario
         try {
+            const selected = getSelectedScenario();
             const panel = document.getElementById('test-cases-panel-container');
-            if (panel) {
-                const selected = getSelectedScenario();
-                if (!selected) panel.style.display = 'none';
+            if (!selected) {
+                if (panel) panel.style.display = 'none';
+                if (els.automationGrid) els.automationGrid.style.display = 'none';
+                // defer modal open so layout settles first
+                window.requestAnimationFrame(() => {
+                    try { if (!state.selectedScenarioId) openCaseSelectionModal(); } catch (e2) { /* ignore */ }
+                });
+            } else {
+                if (panel) panel.style.removeProperty('display');
+                if (els.automationGrid) els.automationGrid.style.removeProperty('display');
             }
         } catch (e) { /* ignore */ }
 
@@ -1811,6 +2284,7 @@
                     if (moduleFilter) moduleFilter.disabled = true;
                     // clear scenario list message
                     state.selectedPlanId = null;
+                    state.selectedScenarioId = null;
                 } else {
                     if (moduleFilter) moduleFilter.disabled = false;
                     // select plan in state and re-render
@@ -1819,6 +2293,7 @@
                     const plan = state.plans.find(p => Number(p.id) === Number(val));
                     state.selectedScenarioId = plan && Array.isArray(plan.scenarios) && plan.scenarios.length ? plan.scenarios[0].id : null;
                 }
+                syncSelectionQueryParams();
                 automationLog('debug', '[automation] plan changed', { selectedPlanId: state.selectedPlanId, selectedScenarioId: state.selectedScenarioId });
                 // load scenarios for this plan from the API and attach them to the
                 // selected plan so the table shows up-to-date data for the plan.
@@ -1843,6 +2318,7 @@
                             planObj.scenarios = normalized;
                             state.selectedScenarioId = planObj.scenarios.length ? planObj.scenarios[0].id : null;
                         }
+                        syncSelectionQueryParams();
                         renderAll();
                         setStatus('', 'info');
                     } catch (err) {
@@ -2026,6 +2502,7 @@
                             if (planObj) {
                                 planObj.scenarios = normalized;
                                 state.selectedScenarioId = planObj.scenarios.length ? planObj.scenarios[0].id : null;
+                                syncSelectionQueryParams();
                             }
                             renderAll();
                             setStatus('', 'info');
@@ -2692,9 +3169,10 @@
 
                 const selectPlan = () => {
                     if (state.selectedPlanId !== plan.id) {
-                        state.selectedPlanId = plan.id;
-                        const firstScenario = Array.isArray(plan.scenarios) && plan.scenarios.length ? plan.scenarios[0].id : null;
+                        state.selectedPlanId = toNumericId(plan.id);
+                        const firstScenario = Array.isArray(plan.scenarios) && plan.scenarios.length ? toNumericId(plan.scenarios[0].id) : null;
                         state.selectedScenarioId = firstScenario;
+                        syncSelectionQueryParams();
                         renderAll();
                     }
                 };
@@ -2836,7 +3314,8 @@
                             const planObj = state.plans.find((p) => Number(p.id) === Number(state.selectedPlanId));
                             if (planObj) {
                                 planObj.scenarios = normalized;
-                                state.selectedScenarioId = planObj.scenarios.length ? planObj.scenarios[0].id : null;
+                                state.selectedScenarioId = planObj.scenarios.length ? toNumericId(planObj.scenarios[0].id) : null;
+                                syncSelectionQueryParams({ moduleId: mid });
                             } else {
                                 // Client-side plan cache didn't contain the selected
                                 // plan id (possible if plans were refreshed elsewhere).
@@ -2950,10 +3429,17 @@
         };
 
         const renderCaseList = () => {
+            if (!els.caseList || !els.caseList.isConnected) {
+                const fallback = document.querySelector('[data-role="case-list"]');
+                if (fallback) {
+                    els.caseList = fallback;
+                }
+            }
             if (!els.caseList) {
                 return;
             }
             const scenario = getSelectedScenario();
+            updateCaseBreadcrumb();
             if (els.scenarioName) {
                 els.scenarioName.textContent = scenario ? scenario.title : '—';
             }
@@ -2972,14 +3458,21 @@
                 }
             }
 
-            els.caseList.innerHTML = '';
-            if (!scenario) {
-                els.caseList.innerHTML = '<p class="empty">No scenario selected.</p>';
+            const caseTbody = document.querySelector('[data-role="case-table-body"]');
+            if (caseTbody && !scenario) {
+                caseTbody.innerHTML = '<tr><td colspan="7" class="empty">No scenario selected.</td></tr>';
+                try { initCaseCheckboxes(); } catch (e) { /* ignore */ }
                 return;
+            }
+            if (!caseTbody) {
+                els.caseList.innerHTML = '';
+                if (!scenario) {
+                    els.caseList.innerHTML = '<p class="empty">No scenario selected.</p>';
+                    return;
+                }
             }
             // If the cases panel has been converted to a table layout (copied from scenarios)
             // render rows into the table body instead of card-based list.
-            const caseTbody = document.querySelector('[data-role="case-table-body"]');
             if (caseTbody) {
                 let cases = [];
                 // If remote search results are present, render those (cross-scenario)
@@ -3053,27 +3546,27 @@
                 els.caseList.innerHTML = '<p class="empty">No test cases found. Capture one using the form below.</p>';
                 return;
             }
-            const wrapper = document.createElement('div');
-            wrapper.className = 'automation-case-list';
-            cases.forEach((testCase) => {
-                const card = document.createElement('article');
-                card.className = 'automation-case-card';
-                const steps = Array.isArray(testCase.steps) ? testCase.steps : [];
-                const expected = normalizeExpectedResultsEntries(Array.isArray(testCase.expected_results) ? testCase.expected_results : []);
-                const dynamic = testCase.dynamic_variables || {};
-                card.innerHTML = `
-                    <header>
-                        <h3>${escapeHtml(testCase.title || 'Untitled case')}</h3>
-                        <div class="case-meta">Priority: ${escapeHtml(testCase.priority || '—')} · Owner: ${escapeHtml(testCase.owner || '—')}</div>
-                    </header>
-                    ${testCase.description ? `<p>${escapeHtml(testCase.description)}</p>` : ''}
-                    ${steps.length ? `<div><strong>Steps</strong><ol class="case-detail-list">${steps.map((step, index) => `<li>Step ${index + 1}: ${escapeHtml(formatStructuredValue(step))}</li>`).join('')}</ol></div>` : ''}
-                    ${expected.length ? `<div><strong>Expected</strong><ul class="case-detail-list">${expected.map((item) => `<li>${escapeHtml(formatStructuredValue(item))}</li>`).join('')}</ul></div>` : ''}
-                    ${Object.keys(dynamic).length ? `<div><strong>Dynamic variables</strong><pre>${escapeHtml(JSON.stringify(dynamic, null, 2))}</pre></div>` : ''}
-                `;
-                wrapper.appendChild(card);
-            });
-            els.caseList.appendChild(wrapper);
+            // const wrapper = document.createElement('div');
+            // wrapper.className = 'automation-case-list';
+            // cases.forEach((testCase) => {
+            //     const card = document.createElement('article');
+            //     card.className = 'automation-case-card';
+            //     const steps = Array.isArray(testCase.steps) ? testCase.steps : [];
+            //     const expected = normalizeExpectedResultsEntries(Array.isArray(testCase.expected_results) ? testCase.expected_results : []);
+            //     const dynamic = testCase.dynamic_variables || {};
+            //     card.innerHTML = `
+            //         <header>
+            //             <h3>${escapeHtml(testCase.title || 'Untitled case')}</h3>
+            //             <div class="case-meta">Priority: ${escapeHtml(testCase.priority || '—')} · Owner: ${escapeHtml(testCase.owner || '—')}</div>
+            //         </header>
+            //         ${testCase.description ? `<p>${escapeHtml(testCase.description)}</p>` : ''}
+            //         ${steps.length ? `<div><strong>Steps</strong><ol class="case-detail-list">${steps.map((step, index) => `<li>Step ${index + 1}: ${escapeHtml(formatStructuredValue(step))}</li>`).join('')}</ol></div>` : ''}
+            //         ${expected.length ? `<div><strong>Expected</strong><ul class="case-detail-list">${expected.map((item) => `<li>${escapeHtml(formatStructuredValue(item))}</li>`).join('')}</ul></div>` : ''}
+            //         ${Object.keys(dynamic).length ? `<div><strong>Dynamic variables</strong><pre>${escapeHtml(JSON.stringify(dynamic, null, 2))}</pre></div>` : ''}
+            //     `;
+            //     wrapper.appendChild(card);
+            // });
+            // els.caseList.appendChild(wrapper);
         };
 
         const renderMaintenance = () => {
@@ -3118,9 +3611,33 @@
         };
 
         const initialSelection = () => {
+            if (state.selectedPlanId && state.selectedScenarioId) {
+                return;
+            }
+            if (state.selectedPlanId && !state.selectedScenarioId) {
+                const plan = getSelectedPlan();
+                if (plan && Array.isArray(plan.scenarios) && plan.scenarios.length) {
+                    state.selectedScenarioId = toNumericId(plan.scenarios[0].id);
+                    return;
+                }
+            }
+            if (!state.selectedPlanId && state.selectedScenarioId) {
+                for (const plan of state.plans) {
+                    if (!plan || !Array.isArray(plan.scenarios)) {
+                        continue;
+                    }
+                    const match = plan.scenarios.find((scenario) => Number(scenario.id) === Number(state.selectedScenarioId));
+                    if (match) {
+                        state.selectedPlanId = toNumericId(plan.id);
+                        return;
+                    }
+                }
+            }
             if (state.plans.length) {
-                state.selectedPlanId = state.plans[0].id;
-                const firstScenario = Array.isArray(state.plans[0].scenarios) && state.plans[0].scenarios.length ? state.plans[0].scenarios[0].id : null;
+                state.selectedPlanId = toNumericId(state.plans[0].id);
+                const firstScenario = Array.isArray(state.plans[0].scenarios) && state.plans[0].scenarios.length
+                    ? toNumericId(state.plans[0].scenarios[0].id)
+                    : null;
                 state.selectedScenarioId = firstScenario;
             }
         };
@@ -3191,6 +3708,7 @@
                 }
                 state.selectedScenarioId = nextScenarioId;
 
+                syncSelectionQueryParams();
                 renderAll();
                 if (!silent) {
                     setStatus('Plans updated successfully.', 'success');
@@ -4385,6 +4903,7 @@
                 }
                 initialSelection();
                 renderAll();
+                syncSelectionQueryParams();
                 setStatus('', 'info');
             } catch (err) {
                 console.warn('[automation] direct scenarios load failed, falling back to refreshPlans()', err);
@@ -4395,6 +4914,7 @@
                     // if that fails, render with whatever we have and show error
                     initialSelection();
                     renderAll();
+                    syncSelectionQueryParams();
                 }
             }
         };

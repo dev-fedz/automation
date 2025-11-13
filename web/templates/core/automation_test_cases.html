@@ -11,29 +11,10 @@
 {% block content %}
 <div class="automation-dashboard" id="automation-app">
 
-    <div class="automation-grid">
-
-        <div id="test-cases-panel-container" {% if not initial_selected_scenario %}style="display:none;"{% endif %}>
+    <div class="automation-grid" {% if not initial_selected_scenario %}style="display:none;"{% endif %}>
+        <div id="test-cases-panel-container" style="display:none;">
         <section class="automation-panel data-card" data-panel="cases" aria-labelledby="headline-cases">
-            <div class="panel-header">
-                <div>
-                    <h2 id="headline-cases">Test Cases</h2>
-                    <p class="panel-subtitle">Inspect and capture test cases for a scenario.</p>
-                </div>
-                <div class="panel-actions">
-                    <p class="panel-meta">Scenario: <span data-role="selected-scenario-name">{{ initial_selected_scenario.title|default:"—" }}</span></p>
-                </div>
-            </div>
             <div class="card table-card automation-table-card" aria-live="polite">
-            <div class="automation-case-summary" data-role="case-summary">
-                {% if initial_selected_scenario %}
-                    <strong>{{ initial_selected_scenario.cases|length }} test case{% if initial_selected_scenario.cases|length != 1 %}s{% endif %} in scope.</strong>
-                    <div>Preconditions: {{ initial_selected_scenario.preconditions|default:"—" }}</div>
-                    <div>Postconditions: {{ initial_selected_scenario.postconditions|default:"—" }}</div>
-                {% else %}
-                    <p class="empty">Choose a scenario to inspect detailed test cases.</p>
-                {% endif %}
-            </div>
             <div class="automation-list" data-role="case-list" aria-live="polite">
                 <button type="button" id="run-cases-btn" class="btn-primary" style="display:none;margin-bottom:12px;">Run Selected Case</button>
                 {% if initial_selected_scenario and initial_selected_scenario.cases %}
@@ -41,7 +22,6 @@
                         <thead>
                             <tr>
                                 <th scope="col" class="col-checkbox">
-                                    <!-- Select-all checkbox for the table (wrapped for a visual fallback) -->
                                     <label class="case-checkbox-label">
                                         <input id="select-all-cases" type="checkbox" aria-label="Select all test cases">
                                         <span class="fake-checkbox" aria-hidden="true"></span>
@@ -90,76 +70,9 @@
                 {% endif %}
             </div>
             </div>
-            <details class="automation-form-group">
-                <summary>Create Test Case</summary>
-                <form id="automation-case-form" class="automation-form" autocomplete="off">
-                    <fieldset>
-                        <legend class="sr-only">New test case</legend>
-                        <div class="form-row">
-                            <label for="case-title">Title<span aria-hidden="true">*</span></label>
-                            <input type="text" id="case-title" name="title" required maxlength="150" placeholder="Upgrade via API">
-                        </div>
-                        <div class="form-row">
-                            <label for="case-description">Description</label>
-                            <textarea id="case-description" name="description" rows="3" placeholder="Outline the path exercised by this test case."></textarea>
-                        </div>
-                        <div class="form-row inline">
-                            <div>
-                                <label for="case-steps">Steps (one per line)</label>
-                                <textarea id="case-steps" name="steps" rows="4" placeholder="POST /subscriptions
-Verify response status"></textarea>
-                            </div>
-                            <div>
-                                <label for="case-expected">Expected results (key: value per line)</label>
-                                <textarea id="case-expected" name="expected" rows="4" placeholder="response.status_code: 200
-response.json.plan: premium
-# Optional note"></textarea>
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <label for="case-precondition">Preconditions</label>
-                            <textarea id="case-precondition" name="precondition" rows="2" placeholder="Any setup or state required before executing this test."></textarea>
-                        </div>
-                        <div class="form-row">
-                            <label for="case-requirements">Requirements</label>
-                            <textarea id="case-requirements" name="requirements" rows="2" placeholder="Linked requirement IDs or description."></textarea>
-                        </div>
-                        <div class="form-row">
-                            <label for="case-dynamic">Dynamic variables (JSON)</label>
-                            <textarea id="case-dynamic" name="dynamic" rows="3" placeholder='{"expected_status": 200, "expected_plan": "premium"}'></textarea>
-                            <p class="form-hint">Provide key-value pairs used during API validation. Must be valid JSON.</p>
-                        </div>
-                        <div class="form-row dependency-toggle">
-                            <label class="dependency-toggle__label" for="case-response-encrypted">
-                                <input type="checkbox" id="case-response-encrypted" name="is_response_encrypted">
-                                <span>Response body requires post-request decryption</span>
-                            </label>
-                            <small class="form-hint">When checked, expected results evaluate against the decrypted payload captured in the post-request script.</small>
-                        </div>
-                        <div class="form-row">
-                            <label for="case-priority">Priority</label>
-                            <input type="text" id="case-priority" name="priority" placeholder="P1">
-                        </div>
-                        <!-- Related API request removed: field retained in DB but not exposed in create/edit UI -->
-                        <input type="hidden" id="case-related-api-request-id" name="related_api_request" value="">
-                        <div class="form-row">
-                            <button type="button" id="open-api-explorer" class="btn-secondary">Choose Related API Request</button>
-                            <small id="case-related-api-request-label" class="form-hint">No API request selected</small>
-                        </div>
-                        <!-- Button to open selection modal (Plan -> Module -> Scenario) -->
-                        <div class="form-row">
-                            <button type="button" id="open-case-selection-modal" class="btn-secondary">Select Plan · Module · Scenario</button>
-                            <small class="form-hint">Choose Plan → Module → Scenario before saving. You can also select a scenario from the main Scenarios table.</small>
-                        </div>
-                    </fieldset>
-                    <div class="form-actions">
-                        <button type="submit" class="btn-primary">Save Test Case</button>
-                        <button type="reset" class="btn-secondary" data-action="reset-case-form">Clear</button>
-                    </div>
-                </form>
-            </details>
         </section>
-    </div>
+    </div> {# end #test-cases-panel-container #}
+    </div> {# end .automation-grid #}
 
     <!-- Modal: Select Plan -> Module -> Scenario for creating a case -->
     <!-- Note: aria-hidden is controlled by JS; the dialog container exposes role/aria-modal and is focusable. -->
@@ -196,10 +109,8 @@ response.json.plan: premium
         </div>
     </dialog>
 
-    <!-- Hidden field used to set selected scenario id when modal continues -->
-    <input type="hidden" id="case-selected-scenario-id" name="selected_scenario_id" value="">
-
-    </div> {# end #test-cases-panel-container #}
+<!-- Hidden field used to set selected scenario id when modal continues -->
+<input type="hidden" id="case-selected-scenario-id" name="selected_scenario_id" value="">
 
     <!-- Add Test Case modal (copied from data management) -->
     <div class="automation-modal" data-role="module-add-case-modal" hidden>
@@ -285,6 +196,8 @@ response.json.plan: premium
     {{ initial_plans|json_script:"automation-initial-plans" }}
     {{ api_endpoints|json_script:"automation-api-endpoints" }}
     {{ initial_metrics|json_script:"automation-initial-metrics" }}
+    {{ initial_selected_plan|json_script:"automation-initial-selected-plan" }}
+    {{ initial_selected_scenario|json_script:"automation-initial-selected-scenario" }}
     {{ initial_modules|default:"[]"|json_script:"automation-initial-modules" }}
 </div>
 <!-- Hidden response modal reused from API tester layout (minimal) -->
