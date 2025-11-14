@@ -16,11 +16,11 @@
         <section class="automation-panel" data-panel="scenarios" aria-labelledby="headline-scenarios">
             <div class="panel-header">
                 <h2 id="headline-scenarios">Scenarios</h2>
-                <div class="panel-controls">
+                <div class="panel-controls scenario-controls">
                     <input type="search" id="scenario-search" class="automation-search" placeholder="Search scenarios" aria-label="Search scenarios">
-                    <label for="scenario-plan" class="sr-only">Filter by plan</label>
-                    <select id="scenario-plan" class="inline-select" aria-label="Filter by plan">
-                        <option value="">— Select plan —</option>
+                    <label for="scenario-plan" class="sr-only">Filter by project</label>
+                    <select id="scenario-plan" class="inline-select" aria-label="Filter by project">
+                        <option value="">— Select project —</option>
                     </select>
                     <label for="module-filter" class="sr-only">Filter by module</label>
                     <select id="module-filter" class="inline-select" data-action="module-filter" disabled>
@@ -35,6 +35,7 @@
                         <tr>
                             <th scope="col">Title</th>
                             <th scope="col">Description</th>
+                            <th scope="col">Module</th>
                             <th scope="col">Created</th>
                             <th scope="col">Updated</th>
                             <th scope="col">Actions</th>
@@ -42,7 +43,7 @@
                     </thead>
                     <tbody data-role="scenario-table-body">
                         <tr>
-                            <td colspan="5" class="empty">Select a plan to view scenarios.</td>
+                            <td colspan="6" class="empty">Select a project to view scenarios.</td>
                         </tr>
                     </tbody>
                 </table>

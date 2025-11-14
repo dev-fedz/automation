@@ -1391,28 +1391,43 @@
                     planSelect.innerHTML = '';
                     const placeholder = document.createElement('option');
                     placeholder.value = '';
-                    placeholder.textContent = '— Select plan —';
+                    placeholder.textContent = '— Select project —';
                     planSelect.appendChild(placeholder);
                     state.plans.forEach((p) => {
                         const opt = document.createElement('option');
                         opt.value = p.id;
-                        opt.textContent = p.name || `Plan ${p.id}`;
+                        opt.textContent = p.name || `Project ${p.id}`;
                         planSelect.appendChild(opt);
                     });
+                    const hasSelectedPlan = state.selectedPlanId !== null && state.selectedPlanId !== undefined;
+                    const desiredPlanValue = hasSelectedPlan ? String(state.selectedPlanId) : '';
+                    if (desiredPlanValue && planSelect.querySelector(`option[value="${desiredPlanValue}"]`)) {
+                        planSelect.value = desiredPlanValue;
+                    } else {
+                        planSelect.value = '';
+                    }
                 }
                 // populate module filter with initialModules (keep disabled until plan selected)
                 if (moduleFilter) {
-                    // leave first placeholder option intact, then append modules
-                    const first = moduleFilter.querySelector('option');
+                    const previousModuleValue = moduleFilter.value || '';
                     moduleFilter.innerHTML = '';
-                    if (first) moduleFilter.appendChild(first);
-                    const allOpt = document.createElement('option'); allOpt.value = ''; allOpt.textContent = 'All modules'; moduleFilter.appendChild(allOpt);
+                    const allOpt = document.createElement('option');
+                    allOpt.value = '';
+                    allOpt.textContent = 'All modules';
+                    moduleFilter.appendChild(allOpt);
                     if (Array.isArray(initialModules)) {
                         initialModules.forEach((m) => {
                             const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.title || m.name || `Module ${m.id}`;
                             moduleFilter.appendChild(opt);
                         });
                     }
+                    if (previousModuleValue && moduleFilter.querySelector(`option[value="${previousModuleValue}"]`)) {
+                        moduleFilter.value = previousModuleValue;
+                    } else {
+                        moduleFilter.value = '';
+                    }
+                    const hasSelectedPlan = state.selectedPlanId !== null && state.selectedPlanId !== undefined;
+                    moduleFilter.disabled = !hasSelectedPlan;
                 }
                 // populate scenario module select in the create form
                 if (moduleSelect) {
@@ -2246,17 +2261,21 @@
                 const filter = document.getElementById('module-filter');
                 const select = document.getElementById('scenario-module');
                 if (!Array.isArray(initialModules)) return;
-                // clear existing options except the placeholder
+                const previousFilterValue = filter ? filter.value || '' : '';
+                const previousScenarioModuleValue = select ? select.value || '' : '';
                 if (filter) {
-                    // keep first option (All modules)
-                    const first = filter.querySelector('option');
                     filter.innerHTML = '';
-                    if (first) filter.appendChild(first);
-                    const opt = document.createElement('option'); opt.value = ''; opt.textContent = 'All modules'; filter.appendChild(opt); // ensure placeholder
+                    const placeholder = document.createElement('option');
+                    placeholder.value = '';
+                    placeholder.textContent = 'All modules';
+                    filter.appendChild(placeholder);
                 }
                 if (select) {
                     select.innerHTML = '';
-                    const none = document.createElement('option'); none.value = ''; none.textContent = '(none)'; select.appendChild(none);
+                    const none = document.createElement('option');
+                    none.value = '';
+                    none.textContent = '(none)';
+                    select.appendChild(none);
                 }
                 initialModules.forEach((m) => {
                     const option = document.createElement('option');
@@ -2265,6 +2284,20 @@
                     if (filter) filter.appendChild(option.cloneNode(true));
                     if (select) select.appendChild(option.cloneNode(true));
                 });
+                if (filter) {
+                    if (previousFilterValue && filter.querySelector(`option[value="${previousFilterValue}"]`)) {
+                        filter.value = previousFilterValue;
+                    } else {
+                        filter.value = '';
+                    }
+                }
+                if (select) {
+                    if (previousScenarioModuleValue && select.querySelector(`option[value="${previousScenarioModuleValue}"]`)) {
+                        select.value = previousScenarioModuleValue;
+                    } else {
+                        select.value = '';
+                    }
+                }
             } catch (e) { /* ignore */ }
         };
 
@@ -2276,8 +2309,9 @@
         try {
             const selected = getSelectedScenario();
             const panel = document.getElementById('test-cases-panel-container');
-            if (!selected) {
-                if (panel) panel.style.display = 'none';
+            const manageCasePanel = Boolean(panel);
+            if (!selected && manageCasePanel) {
+                panel.style.display = 'none';
                 if (els.automationGrid) els.automationGrid.style.display = 'none';
                 // defer modal open so layout settles first
                 window.requestAnimationFrame(() => {
@@ -2307,12 +2341,18 @@
                 const moduleFilter = document.getElementById('module-filter');
                 if (!val) {
                     // no plan selected -> disable module filter
-                    if (moduleFilter) moduleFilter.disabled = true;
+                    if (moduleFilter) {
+                        moduleFilter.disabled = true;
+                        moduleFilter.value = '';
+                    }
                     // clear scenario list message
                     state.selectedPlanId = null;
                     state.selectedScenarioId = null;
                 } else {
-                    if (moduleFilter) moduleFilter.disabled = false;
+                    if (moduleFilter) {
+                        moduleFilter.disabled = false;
+                        moduleFilter.value = '';
+                    }
                     // select plan in state and re-render
                     state.selectedPlanId = Number(val);
                     // when selecting a plan, choose first scenario if present
@@ -2330,7 +2370,7 @@
                         return;
                     }
                     try {
-                        setStatus('Loading scenarios for selected plan…', 'info');
+                        setStatus('Loading scenarios for selected project…', 'info');
                         const base = apiEndpoints.scenarios || '/api/core/test-scenarios/';
                         const url = `${base}?plan=${encodeURIComponent(pid)}`;
                         const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
@@ -2348,7 +2388,7 @@
                         renderAll();
                         setStatus('', 'info');
                     } catch (err) {
-                        setStatus(err instanceof Error ? err.message : 'Unable to load scenarios for plan.', 'error');
+                        setStatus(err instanceof Error ? err.message : 'Unable to load scenarios for project.', 'error');
                         // still render whatever we have
                         renderAll();
                     }
@@ -2456,8 +2496,8 @@
                 // Debug: log the user click and current selection so it's visible in Console
                 automationLog('info', '[automation] open-new-scenario clicked', { planIdCandidate: planId, moduleFilterValue: mid });
                 if (!planId) {
-                    setStatus('Please select a plan before creating a scenario.', 'error');
-                    showToast('Please select a plan before creating a scenario.');
+                    setStatus('Please select a project before creating a scenario.', 'error');
+                    showToast('Please select a project before creating a scenario.');
                     return;
                 }
                 if (!mid) {
@@ -3226,12 +3266,31 @@
             }
             const plan = getSelectedPlan();
             automationLog('debug', '[automation] renderScenarioList called', { selectedPlanId: state.selectedPlanId, plan: plan ? { id: plan.id, scenarios: Array.isArray(plan.scenarios) ? plan.scenarios.length : 0 } : null });
+            if (els.scenarioPlan) {
+                const desiredValue = state.selectedPlanId !== null && state.selectedPlanId !== undefined
+                    ? String(state.selectedPlanId)
+                    : '';
+                if (els.scenarioPlan.value !== desiredValue) {
+                    els.scenarioPlan.value = desiredValue;
+                }
+            }
+            const moduleFilterElForRender = document.getElementById('module-filter');
+            if (moduleFilterElForRender) {
+                if (state.selectedPlanId) {
+                    moduleFilterElForRender.disabled = false;
+                } else {
+                    moduleFilterElForRender.disabled = true;
+                    if (moduleFilterElForRender.value) {
+                        moduleFilterElForRender.value = '';
+                    }
+                }
+            }
             if (els.planName) els.planName.textContent = plan ? plan.name : '—';
             // render into table body if present
             const tbody = els.scenarioTableBody;
             if (!plan) {
-                const emptyTableHtml = '<tr><td colspan="6" class="empty">Select a plan to view scenarios.</td></tr>';
-                const emptyListHtml = '<p class="empty">Select a plan to view scenarios.</p>';
+                const emptyTableHtml = '<tr><td colspan="6" class="empty">Select a project to view scenarios.</td></tr>';
+                const emptyListHtml = '<p class="empty">Select a project to view scenarios.</p>';
                 if (tbody) tbody.innerHTML = emptyTableHtml;
                 if (els.scenarioList) els.scenarioList.innerHTML = emptyListHtml;
                 return;
@@ -3266,13 +3325,13 @@
                 return true;
             });
             if (!filtered.length) {
-                if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="empty">No scenarios match the current filters for this plan.</td></tr>';
-                else els.scenarioList.innerHTML = '<p class="empty">No scenarios match the current filters for this plan.</p>';
+                if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="empty">No scenarios match the current filters for this project.</td></tr>';
+                else els.scenarioList.innerHTML = '<p class="empty">No scenarios match the current filters for this project.</p>';
                 return;
             }
             if (!scenarios.length) {
-                if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="empty">No scenarios created yet for this plan.</td></tr>';
-                else els.scenarioList.innerHTML = '<p class="empty">No scenarios created yet for this plan.</p>';
+                if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="empty">No scenarios created yet for this project.</td></tr>';
+                else els.scenarioList.innerHTML = '<p class="empty">No scenarios created yet for this project.</p>';
                 return;
             }
             if (tbody) {
@@ -3735,6 +3794,7 @@
                 state.selectedScenarioId = nextScenarioId;
 
                 syncSelectionQueryParams();
+                try { populateScenarioPlanAndModule(); } catch (e) { /* ignore */ }
                 renderAll();
                 if (!silent) {
                     setStatus('Plans updated successfully.', 'success');
