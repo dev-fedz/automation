@@ -10,9 +10,9 @@ class RelatedApiRequestTest(APITestCase):
         # create a collection and request to reference
         self.collection = models.ApiCollection.objects.create(name='Test Coll', slug='test-coll')
         self.api_request = models.ApiRequest.objects.create(collection=self.collection, name='Sample', method='GET', url='https://example.com')
-        # TestScenario requires a non-null TestPlan foreign key; create a simple plan
-        self.plan = models.TestPlan.objects.create(name='Plan 1')
-        self.scenario = models.TestScenario.objects.create(title='S', plan=self.plan)
+        # TestScenario requires a non-null Project foreign key; create a simple project
+        self.project = models.Project.objects.create(name='Project 1')
+        self.scenario = models.TestScenario.objects.create(title='S', project=self.project)
         # create and authenticate a user
         from django.contrib.auth import get_user_model
         User = get_user_model()

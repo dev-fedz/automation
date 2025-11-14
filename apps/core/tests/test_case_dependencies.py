@@ -2,7 +2,7 @@ from django.test import TestCase
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
-from apps.core.models import TestCase as TestCaseModel
+from apps.core.models import Project, TestScenario, TestCase as TestCaseModel
 
 
 class TestCaseDependencyPersistenceTest(TestCase):
@@ -11,9 +11,8 @@ class TestCaseDependencyPersistenceTest(TestCase):
         self.user = User.objects.create_user(username='dep_user', password='pass')
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
-        from apps.core.models import TestPlan, TestScenario
-        self.plan = TestPlan.objects.create(name='Plan 1')
-        self.scenario = TestScenario.objects.create(plan=self.plan, title='Scenario 1')
+        self.project = Project.objects.create(name='Project 1')
+        self.scenario = TestScenario.objects.create(project=self.project, title='Scenario 1')
 
         # Base payload values for creating cases in this scenario.
         self.base_payload = {

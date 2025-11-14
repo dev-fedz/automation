@@ -295,7 +295,7 @@
     const parseExpectedResultsTextarea = automationHelpers.parseExpectedResultsTextarea || fallbackParseExpectedResultsTextarea;
     const formatExpectedResultsTextarea = automationHelpers.formatExpectedResultsTextarea || fallbackFormatExpectedResultsTextarea;
 
-    // Normalize scenario objects from the API so `module` and `plan` are ids
+    // Normalize scenario objects from the API so `module` and `project` are ids
     // (some API responses may return nested objects for these fields).
     const normalizeScenario = (s) => {
         if (!s || typeof s !== 'object') return s;
@@ -306,21 +306,30 @@
             }
         } catch (e) { /* ignore */ }
         try {
-            if (next.plan && typeof next.plan === 'object') {
-                next.plan = next.plan.id || next.plan.pk || null;
+            if (next.project && typeof next.project === 'object') {
+                next.project = next.project.id || next.project.pk || null;
             }
         } catch (e) { /* ignore */ }
-        // support module_id / plan_id fields
+        // support module_id / project_id fields
         try {
             if ((next.module === undefined || next.module === null) && (next.module_id !== undefined)) {
                 next.module = next.module_id;
             }
         } catch (e) { }
         try {
-            if ((next.plan === undefined || next.plan === null) && (next.plan_id !== undefined)) {
-                next.plan = next.plan_id;
+            if ((next.project === undefined || next.project === null) && (next.project_id !== undefined)) {
+                next.project = next.project_id;
             }
         } catch (e) { }
+        // Backwards compatibility: support legacy plan fields
+        try {
+            if ((next.project === undefined || next.project === null) && (next.plan !== undefined)) {
+                next.project = next.plan;
+            }
+            if ((next.project_id === undefined || next.project_id === null) && (next.plan_id !== undefined)) {
+                next.project_id = next.plan_id;
+            }
+        } catch (e) { /* ignore */ }
         return next;
     };
 
@@ -431,7 +440,7 @@
         const initialRisks = readScriptJson("automation-initial-risks") || [];
         const initialMitigations = readScriptJson("automation-initial-mitigation-plans") || [];
         const initialMappings = readScriptJson("automation-initial-risk-mitigations") || [];
-        const initialPlans = readScriptJson("automation-initial-plans") || [];
+        const initialProjects = readScriptJson("automation-initial-plans") || [];
         const initialSection = readScriptJson("data-management-initial-section") || "";
         const apiEndpoints = readScriptJson("automation-api-endpoints") || {};
 
@@ -443,11 +452,40 @@
             testTools: ensureTrailingSlash(apiEndpoints.test_tools || ""),
             testModules: ensureTrailingSlash(apiEndpoints.test_modules || ""),
             cases: ensureTrailingSlash(apiEndpoints.cases || ""),
+            scenarios: ensureTrailingSlash(apiEndpoints.scenarios || ""),
         };
 
-        if (!endpoints.environments || !endpoints.risks || !endpoints.mitigations || !endpoints.mappings) {
-            // eslint-disable-next-line no-console
-            console.warn("[data-management] Missing API endpoints. Aborting module initialisation.");
+        const endpointRequirements = [];
+        if (root.querySelector('[data-role="environment-list"]')) {
+            endpointRequirements.push(["environments", "environments"]);
+        }
+        if (root.querySelector('[data-role="risk-list"]')) {
+            endpointRequirements.push(["risks", "risks"]);
+        }
+        if (root.querySelector('[data-role="mitigation-list"]')) {
+            endpointRequirements.push(["mitigations", "mitigation plans"]);
+        }
+        if (root.querySelector('[data-role="mapping-list"]')) {
+            endpointRequirements.push(["mappings", "risk mitigations"]);
+        }
+        if (root.querySelector('[data-role="test-tools-list"]')) {
+            endpointRequirements.push(["testTools", "test tools"]);
+        }
+        if (root.querySelector('[data-role="test-modules-list"]')) {
+            endpointRequirements.push(["testModules", "test modules"]);
+            endpointRequirements.push(["scenarios", "test scenarios"]);
+            endpointRequirements.push(["cases", "test cases"]);
+        }
+
+        const missingEndpoints = endpointRequirements.filter(([key]) => !endpoints[key]);
+        if (missingEndpoints.length) {
+            const labels = missingEndpoints.map(([, label]) => label).join(", ");
+            try {
+                // eslint-disable-next-line no-console
+                console.warn(`[data-management] Missing API endpoints for: ${labels}. Aborting module initialisation.`);
+            } catch (error) {
+                /* ignore */
+            }
             return;
         }
 
@@ -506,8 +544,8 @@
             testModulesForm: document.getElementById("test-modules-form"),
             testModulesTitle: document.getElementById("test-modules-title"),
             testModulesDescription: document.getElementById("test-modules-description"),
-            testModulesPlan: document.getElementById("test-modules-plan"),
-            testModulesFilterPlan: document.getElementById("test-modules-filter-plan"),
+            testModulesProject: document.getElementById("test-modules-project"),
+            testModulesFilterProject: document.getElementById("test-modules-filter-project"),
             testModulesSubmit: root.querySelector('[data-role="test-modules-submit"]'),
             testModulesMeta: root.querySelector('[data-role="test-modules-meta"]'),
             testModulesCreated: root.querySelector('[data-role="test-modules-created"]'),
@@ -689,12 +727,12 @@
             let filtered = state.testModules.filter((m) => {
                 const q = state.testModulesSearch.toLowerCase();
                 if (!q) return true;
-                return (m.title || "").toLowerCase().includes(q) || (m.description || "").toLowerCase().includes(q) || String(m.plan_id || "").toLowerCase().includes(q);
+                return (m.title || "").toLowerCase().includes(q) || (m.description || "").toLowerCase().includes(q) || String(m.project_id || "").toLowerCase().includes(q);
             });
-            // apply plan filter if selected
-            if (els.testModulesFilterPlan && els.testModulesFilterPlan.value) {
-                const planVal = Number(els.testModulesFilterPlan.value);
-                filtered = filtered.filter((m) => Number(m.plan_id) === planVal);
+            // apply project filter if selected
+            if (els.testModulesFilterProject && els.testModulesFilterProject.value) {
+                const projectVal = Number(els.testModulesFilterProject.value);
+                filtered = filtered.filter((m) => Number(m.project_id) === projectVal);
             }
             if (!filtered.length) {
                 els.testModulesList.innerHTML = '<tr><td colspan="7" class="empty">No test modules match the current filters.</td></tr>';
@@ -703,8 +741,8 @@
             // render modules as collapsible rows with a nested sublist for scenarios
             const rows = filtered
                 .map((m) => {
-                    const plan = initialPlans.find((p) => Number(p.id) === Number(m.plan_id));
-                    const planLabel = plan ? (plan.name || plan.title || `Plan ${plan.id}`) : "";
+                    const project = initialProjects.find((p) => Number(p.id) === Number(m.project_id));
+                    const projectLabel = project ? (project.name || project.title || `Project ${project.id}`) : "";
                     const scenariosAll = Array.isArray(m.scenarios) ? m.scenarios : [];
                     const query = state.moduleScenarioSearch && state.moduleScenarioSearch[m.id] ? String(state.moduleScenarioSearch[m.id]).toLowerCase() : '';
                     const scenarios = query ? scenariosAll.filter((s) => {
@@ -736,7 +774,7 @@
                         </td>
                         <td>${escapeHtml(m.title || "")}</td>
                         <td>${escapeHtml(m.description || "")}</td>
-                        <td>${escapeHtml(planLabel)}</td>
+                        <td>${escapeHtml(projectLabel)}</td>
                         <td>${escapeHtml(formatDateTime(m.created_at || null))}</td>
                         <td>${escapeHtml(formatDateTime(m.updated_at || null))}</td>
                         <td>
@@ -955,6 +993,22 @@
             event.preventDefault();
             const form = document.getElementById('module-add-scenario-form');
             if (!form) return;
+            const abortScenarioSubmit = (message, focusId, options = {}) => {
+                if (message) {
+                    setStatus(message, 'error');
+                }
+                state.moduleScenarioSubmitting = false;
+                if (saveBtn) saveBtn.disabled = false;
+                if (focusId) {
+                    const target = document.getElementById(focusId);
+                    if (target && typeof target.focus === 'function') {
+                        target.focus();
+                    }
+                    if (options.select && target && typeof target.select === 'function') {
+                        target.select();
+                    }
+                }
+            };
             const moduleInput = document.getElementById('module-add-scenario-module-id');
             const titleInput = document.getElementById('module-add-scenario-title');
             const descInput = document.getElementById('module-add-scenario-description');
@@ -965,31 +1019,38 @@
             // Require module selection: New Scenario must be opened with a
             // module selected. If missing, surface an error and abort save.
             if (!moduleId) {
-                setStatus('Please select a module before creating a scenario.', 'error');
+                abortScenarioSubmit('Please select a module before creating a scenario.');
                 return;
             }
             const payload = {
                 module: moduleId,
+                project: null,
                 title: (titleInput && titleInput.value || '').trim(),
                 description: descInput && descInput.value || '',
                 precondition: preInput && preInput.value || '',
                 postconditions: postInput && postInput.value || '',
-                tags: tagsInput && tagsInput.value ? tagsInput.value.split(/[,\n]/).map(s => s.trim()).filter(Boolean) : [],
-                plan: null,
+                tags: tagsInput && tagsInput.value ? tagsInput.value.split(/[\,\n]/).map(s => s.trim()).filter(Boolean) : [],
             };
             // Basic client-side validation: title required
             const titleVal = payload.title ? String(payload.title).trim() : '';
             if (!titleVal) {
-                setStatus('Scenario title is required.', 'error');
-                try { const t = document.getElementById('module-add-scenario-title'); if (t) { t.focus(); } } catch (e) { }
+                abortScenarioSubmit('Scenario title is required.', 'module-add-scenario-title', { select: true });
                 return;
             }
-            // try to infer plan from module if available
+            // try to infer project from module if available
             const moduleObj = moduleId ? state.testModules.find((m) => Number(m.id) === Number(moduleId)) : null;
-            if (moduleObj && moduleObj.plan_id) {
-                payload.plan = moduleObj.plan_id;
+            if (moduleObj && (moduleObj.project_id || moduleObj.plan_id)) {
+                const rawProject = moduleObj.project_id || moduleObj.plan_id;
+                const parsedProject = Number(rawProject);
+                if (!Number.isNaN(parsedProject) && parsedProject > 0) {
+                    payload.project = parsedProject;
+                }
             }
-            // Prevent duplicate scenario titles within the same plan (client-side)
+            if (!payload.project) {
+                abortScenarioSubmit('Assign the module to a project before creating scenarios.');
+                return;
+            }
+            // Prevent duplicate scenario titles within the same project (client-side)
             try {
                 if (moduleObj && Array.isArray(moduleObj.scenarios)) {
                     const exists = moduleObj.scenarios.some((s) => {
@@ -1003,16 +1064,15 @@
                         return sTitle === newTitle;
                     });
                     if (exists) {
-                        setStatus('A scenario with that title already exists in the selected plan. Choose a different title.', 'error');
                         try { console.info('[data-management] duplicate scenario title prevented (client-side)'); } catch (e) { }
-                        const t = document.getElementById('module-add-scenario-title'); if (t) { t.focus(); t.select(); }
+                        abortScenarioSubmit('A scenario with that title already exists in the selected project. Choose a different title.', 'module-add-scenario-title', { select: true });
                         return;
                     }
                 }
             } catch (e) { /* ignore */ }
             try {
                 setStatus('Saving scenario…', 'info');
-                try { console.info('[data-management] submitting scenario', { payloadPreview: { module: payload.module, title: payload.title, plan: payload.plan } }); } catch (e) { }
+                try { console.info('[data-management] submitting scenario', { payloadPreview: { module: payload.module, title: payload.title, project: payload.project } }); } catch (e) { }
                 const urlBase = endpoints.scenarios || (apiEndpoints.scenarios ? ensureTrailingSlash(apiEndpoints.scenarios) : '/api/core/test-scenarios/');
                 if (state.moduleScenarioModalMode === 'edit' && state.moduleScenarioCurrentId) {
                     // update existing scenario
@@ -1074,17 +1134,17 @@
                 }
             } catch (error) {
                 const message = error instanceof Error ? error.message : 'Unable to save scenario.';
-                // If the API returned a unique constraint error like "The fields plan, title must make a unique set.",
+                // If the API returned a unique constraint error like "The fields project, title must make a unique set.",
                 // surface a clearer message and focus the title input.
-                if (message && (/unique set/i.test(message) || /fields\s+plan,\s*title/i.test(message))) {
-                    setStatus('A scenario with that title already exists in the selected plan. Choose a different title.', 'error');
+                if (message && (/unique set/i.test(message) || /fields\s+(plan|project),\s*title/i.test(message))) {
+                    setStatus('A scenario with that title already exists in the selected project. Choose a different title.', 'error');
                     try { console.info('[data-management] server-side unique constraint detected'); } catch (e) { }
                     const t = document.getElementById('module-add-scenario-title'); if (t) { t.focus(); t.select(); }
-                    // Refresh scenarios from the server for the current plan/module
+                    // Refresh scenarios from the server for the current project/module
                     try {
                         const scenariosBase = apiEndpoints.scenarios || '/api/core/test-scenarios/';
-                        // prefer fetching by plan if we have it, otherwise by module
-                        const fetchUrl = payload && payload.plan ? `${scenariosBase}?plan=${encodeURIComponent(payload.plan)}` : `${scenariosBase}?module=${encodeURIComponent(moduleId)}`;
+                        // prefer fetching by project if we have it, otherwise by module
+                        const fetchUrl = payload && payload.project ? `${scenariosBase}?project=${encodeURIComponent(payload.project)}` : `${scenariosBase}?module=${encodeURIComponent(moduleId)}`;
                         try { console.info('[data-management] fetching latest scenarios after unique constraint', { fetchUrl }); } catch (e) { }
                         const latest = await request(fetchUrl, { method: 'GET' });
                         const normalized = Array.isArray(latest) ? latest.map(normalizeScenario) : [];
@@ -1092,7 +1152,7 @@
                         try {
                             const freshModuleObj = moduleId ? state.testModules.find((m) => Number(m.id) === Number(moduleId)) : null;
                             if (freshModuleObj) {
-                                // if we fetched by plan, filter to this module
+                                // if we fetched by project, filter to this module
                                 freshModuleObj.scenarios = Array.isArray(normalized) ? normalized.filter((s) => Number(s.module) === Number(moduleId)) : [];
                                 renderTestModulesList();
                                 ensureModuleExpanded(moduleId);
@@ -1155,8 +1215,8 @@
         const loadTestModules = async () => {
             try {
                 const params = { search: state.testModulesSearch };
-                if (els.testModulesFilterPlan && els.testModulesFilterPlan.value) {
-                    params.plan = els.testModulesFilterPlan.value;
+                if (els.testModulesFilterProject && els.testModulesFilterProject.value) {
+                    params.project = els.testModulesFilterProject.value;
                 }
                 const url = buildUrl(endpoints.testModules, params);
                 const data = await request(url, { method: 'GET' });
@@ -1208,10 +1268,16 @@
             state.testModulesModalMode = mode;
             if (mode === "create") {
                 state.testModulesCurrentId = null;
-                state.testModulesForm = { title: "", description: "" };
+                state.testModulesForm = { title: "", description: "", project_id: null };
             } else if ((mode === "edit" || mode === "view") && module) {
                 state.testModulesCurrentId = module.id;
-                state.testModulesForm = { title: module.title || "", description: module.description || "", createdAt: module.created_at, updatedAt: module.updated_at, plan_id: module.plan_id || null };
+                state.testModulesForm = {
+                    title: module.title || "",
+                    description: module.description || "",
+                    createdAt: module.created_at,
+                    updatedAt: module.updated_at,
+                    project_id: module.project_id || module.plan_id || null,
+                };
             }
             if (els.testModulesTitle) {
                 els.testModulesTitle.value = state.testModulesForm.title || "";
@@ -1221,20 +1287,22 @@
                 els.testModulesDescription.value = state.testModulesForm.description || "";
                 els.testModulesDescription.readOnly = mode === "view";
             }
-            // populate plans select
-            if (els.testModulesPlan) {
+            // populate projects select
+            if (els.testModulesProject) {
                 // clear existing
-                els.testModulesPlan.innerHTML = '<option value="">— Select plan —</option>';
-                initialPlans.forEach((p) => {
+                els.testModulesProject.innerHTML = '<option value="">— Select project —</option>';
+                initialProjects.forEach((p) => {
                     const opt = document.createElement('option');
                     opt.value = p.id || '';
-                    opt.textContent = p.name || p.title || `Plan ${p.id}`;
-                    els.testModulesPlan.appendChild(opt);
+                    opt.textContent = p.name || p.title || `Project ${p.id}`;
+                    els.testModulesProject.appendChild(opt);
                 });
                 // set selected value when editing/viewing
-                const selectedPlanId = state.testModulesForm && state.testModulesForm.plan_id ? String(state.testModulesForm.plan_id) : (module && module.plan_id ? String(module.plan_id) : '');
-                els.testModulesPlan.value = selectedPlanId || '';
-                els.testModulesPlan.disabled = mode === 'view';
+                const selectedProjectId = state.testModulesForm && state.testModulesForm.project_id
+                    ? String(state.testModulesForm.project_id)
+                    : (module && (module.project_id || module.plan_id) ? String(module.project_id || module.plan_id) : '');
+                els.testModulesProject.value = selectedProjectId || '';
+                els.testModulesProject.disabled = mode === 'view';
             }
             if (els.testModulesSubmit) {
                 els.testModulesSubmit.textContent = mode === "edit" ? "Update" : "Save";
@@ -1301,7 +1369,7 @@
                 const payload = {
                     title: (els.testModulesTitle.value || "").trim(),
                     description: els.testModulesDescription.value || "",
-                    plan: (els.testModulesPlan && els.testModulesPlan.value) ? Number(els.testModulesPlan.value) : null,
+                    project: (els.testModulesProject && els.testModulesProject.value) ? Number(els.testModulesProject.value) : null,
                 };
                 if (!payload.title) throw new Error("Module title is required.");
                 const url = endpoints.testModules;
@@ -2658,7 +2726,11 @@
                     setStatus('Module title is required.', 'error');
                     return;
                 }
-                const payload = { title, description, plan: (els.testModulesPlan && els.testModulesPlan.value) ? Number(els.testModulesPlan.value) : null };
+                const payload = {
+                    title,
+                    description,
+                    project: (els.testModulesProject && els.testModulesProject.value) ? Number(els.testModulesProject.value) : null,
+                };
                 try {
                     if (state.testModulesModalMode === 'edit' && state.testModulesCurrentId) {
                         const updated = await request(`${endpoints.testModules}${state.testModulesCurrentId}/`, { method: 'PATCH', body: JSON.stringify(payload) });
@@ -2897,8 +2969,8 @@
                     toggleDependencyFields(false);
                     dependencyOptionsCache.delete(Number.isFinite(Number(sid)) ? Number(sid) : String(sid));
                     setStatus('Test case saved.', 'success');
-                    // optional: refresh modules or plans to show newly created case in related views
-                    // if plans API is available, refresh plans so scenario/case counts update
+                    // optional: refresh modules or projects to show newly created case in related views
+                    // if projects API is available, refresh project-derived metrics so counts update
                     if (endpoints.testModules) {
                         // try updating modules scenarios cache by reloading modules
                         await loadTestModules();
@@ -2936,17 +3008,17 @@
         testModulesCloseTriggers.forEach((node) => node.addEventListener('click', (ev) => { ev.preventDefault(); closeTestModulesModal(); }));
         if (els.testModulesSearch) els.testModulesSearch.addEventListener('input', debounce((ev) => { state.testModulesSearch = (ev.target.value || '').trim(); renderTestModulesList(); }, 250));
 
-        // populate plan filter select
-        if (els.testModulesFilterPlan) {
+        // populate project filter select
+        if (els.testModulesFilterProject) {
             // clear then populate
-            els.testModulesFilterPlan.innerHTML = '<option value="">All plans</option>';
-            initialPlans.forEach((p) => {
+            els.testModulesFilterProject.innerHTML = '<option value="">All projects</option>';
+            initialProjects.forEach((p) => {
                 const opt = document.createElement('option');
                 opt.value = p.id || '';
-                opt.textContent = p.name || p.title || `Plan ${p.id}`;
-                els.testModulesFilterPlan.appendChild(opt);
+                opt.textContent = p.name || p.title || `Project ${p.id}`;
+                els.testModulesFilterProject.appendChild(opt);
             });
-            els.testModulesFilterPlan.addEventListener('change', () => {
+            els.testModulesFilterProject.addEventListener('change', () => {
                 // reload modules when filter changes
                 loadTestModules();
             });

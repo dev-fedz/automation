@@ -2,7 +2,7 @@ from django.test import TestCase
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
-from apps.core.models import TestCase as TestCaseModel
+from apps.core.models import Project, TestScenario, TestCase as TestCaseModel
 
 
 class OwnerAssignmentTest(TestCase):
@@ -12,11 +12,9 @@ class OwnerAssignmentTest(TestCase):
         self.client = APIClient()
         # Authenticate the client as the created user so the API can infer ownership.
         self.client.force_authenticate(user=self.user)
-
-        # Create the minimal plan/scenario hierarchy required by TestCase creates.
-        from apps.core.models import TestPlan, TestScenario
-        self.plan = TestPlan.objects.create(name='Plan 1')
-        self.scenario = TestScenario.objects.create(plan=self.plan, title='Scenario 1')
+        # Create the minimal project/scenario hierarchy required by TestCase creates.
+        self.project = Project.objects.create(name='Project 1')
+        self.scenario = TestScenario.objects.create(project=self.project, title='Scenario 1')
 
     def _base_payload(self) -> dict:
         return {

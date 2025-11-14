@@ -44,73 +44,37 @@ def api_run_get(pk: int) -> models.ApiRun | None:
     return api_run_list().filter(pk=pk).first()
 
 
-def test_plan_list() -> QuerySet[models.TestPlan]:
-    scenario_qs = models.TestScenario.objects.prefetch_related(
-            Prefetch("cases", queryset=models.TestCase.objects.order_by("testcase_id", "id"))
-    ).order_by("title", "id")
-    maintenance_qs = models.TestPlanMaintenance.objects.order_by("-effective_date", "-created_at", "id")
-    scope_qs = models.TestPlanScope.objects.order_by("category", "order", "id")
-    # RiskAndMitigationPlan now references TestPlan via FK named `plan` and the
-    # related_name on TestPlan is `risk_mitigation_links`.
-    risk_mitigation_qs = models.RiskAndMitigationPlan.objects.select_related("risk", "mitigation_plan").order_by(
-        "risk__title",
-        "mitigation_plan__title",
-        "id",
+def project_list() -> QuerySet[models.Project]:
+    scenario_qs = (
+        models.TestScenario.objects.select_related("module")
+        .prefetch_related(Prefetch("cases", queryset=models.TestCase.objects.order_by("testcase_id", "id")))
+        .order_by("title", "id")
     )
+    modules_qs = models.TestModules.objects.order_by("title", "id")
     return (
-        models.TestPlan.objects.order_by("name", "id")
+        models.Project.objects.order_by("name", "id")
         .prefetch_related(
             Prefetch("scenarios", queryset=scenario_qs),
-            Prefetch("maintenances", queryset=maintenance_qs),
-            Prefetch("scopes", queryset=scope_qs),
-            Prefetch("risk_mitigation_links", queryset=risk_mitigation_qs),
+            Prefetch("test_modules", queryset=modules_qs),
         )
     )
 
 
-def test_plan_get(pk: int) -> models.TestPlan | None:
-    return test_plan_list().filter(pk=pk).first()
+def project_get(pk: int) -> models.Project | None:
+    return project_list().filter(pk=pk).first()
 
 
 def test_scenario_list() -> QuerySet[models.TestScenario]:
-    return models.TestScenario.objects.select_related("plan").prefetch_related("cases").order_by("plan", "title", "id")
+    return (
+        models.TestScenario.objects.select_related("project")
+        .prefetch_related("cases")
+        .order_by("project", "title", "id")
+    )
 
 
 def test_case_list() -> QuerySet[models.TestCase]:
     return (
         models.TestCase.objects
-        .select_related("scenario", "scenario__plan", "test_case_dependency", "related_api_request")
+        .select_related("scenario", "scenario__project", "test_case_dependency", "related_api_request")
         .order_by("scenario", "testcase_id", "id")
     )
-
-
-def test_plan_maintenance_list() -> QuerySet[models.TestPlanMaintenance]:
-    return models.TestPlanMaintenance.objects.select_related("plan").order_by("-effective_date", "-created_at", "id")
-
-
-def risk_list() -> QuerySet[models.Risk]:
-    return models.Risk.objects.order_by("title", "id")
-
-
-def mitigation_plan_list() -> QuerySet[models.MitigationPlan]:
-    return models.MitigationPlan.objects.order_by("title", "id")
-
-
-def risk_and_mitigation_list(plan_id: int | None = None) -> QuerySet[models.RiskAndMitigationPlan]:
-    """Return RiskAndMitigationPlan queryset, optionally filtered by plan id.
-
-    Args:
-        plan_id: If provided, filter mappings belonging to the given TestPlan id.
-    """
-    qs = models.RiskAndMitigationPlan.objects.select_related("risk", "mitigation_plan").order_by(
-        "risk__title",
-        "mitigation_plan__title",
-        "id",
-    )
-    if plan_id is not None:
-        try:
-            qs = qs.filter(plan_id=int(plan_id))
-        except (TypeError, ValueError):
-            # If plan_id is invalid, return an empty queryset instead of raising
-            return qs.none()
-    return qs

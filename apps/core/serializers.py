@@ -68,26 +68,19 @@ class ApiCollectionDirectorySerializer(serializers.ModelSerializer):
         }
 
 
-class TestToolsSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = models.TestTools
-        fields = ["id", "title", "description", "created_at", "updated_at"]
-        read_only_fields = ["id", "created_at", "updated_at"]
-
-
 class TestModulesSerializer(serializers.ModelSerializer):
-    plan = serializers.PrimaryKeyRelatedField(
-        queryset=models.TestPlan.objects.all(),
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=models.Project.objects.all(),
         write_only=True,
         required=False,
         allow_null=True,
     )
-    plan_id = serializers.IntegerField(source="plan.id", read_only=True)
+    project_id = serializers.IntegerField(source="project.id", read_only=True)
 
     class Meta:
         model = models.TestModules
-        fields = ["id", "title", "description", "plan", "plan_id", "created_at", "updated_at"]
-        read_only_fields = ["id", "created_at", "updated_at", "plan_id"]
+        fields = ["id", "title", "description", "project", "project_id", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at", "project_id"]
 
 
 class ApiRequestSerializer(serializers.ModelSerializer):
@@ -521,12 +514,19 @@ class TestScenarioSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     module_id = serializers.IntegerField(source="module.id", read_only=True)
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=models.Project.objects.all(),
+        write_only=True,
+        required=True,
+    )
+    project_id = serializers.IntegerField(source="project.id", read_only=True)
 
     class Meta:
         model = models.TestScenario
         fields = [
             "id",
-            "plan",
+            "project",
+            "project_id",
             "module",
             "module_id",
             "title",
@@ -538,243 +538,63 @@ class TestScenarioSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "cases", "created_at", "updated_at"]
+        read_only_fields = ["id", "cases", "created_at", "updated_at", "project_id"]
 
 
-class TestPlanScopeSerializer(serializers.ModelSerializer):
+class ProjectSerializer(serializers.ModelSerializer):
+    description = serializers.CharField(allow_blank=True, required=False)
+    test_modules = TestModulesSerializer(many=True, read_only=True)
+    scenarios = TestScenarioSerializer(many=True, read_only=True)
+    modules_count = serializers.SerializerMethodField()
+    scenarios_count = serializers.SerializerMethodField()
+
     class Meta:
-        model = models.TestPlanScope
+        model = models.Project
         fields = [
             "id",
-            "category",
-            "item",
-            "order",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "order", "created_at", "updated_at"]
-
-
-class TestPlanMaintenanceSerializer(serializers.ModelSerializer):
-    updates = serializers.DictField(child=serializers.JSONField(), required=False)
-
-    class Meta:
-        model = models.TestPlanMaintenance
-        fields = [
-            "id",
-            "plan",
-            "version",
-            "summary",
-            "updates",
-            "effective_date",
-            "updated_by",
-            "approved_by",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "created_at", "updated_at"]
-
-
-class RiskSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = models.Risk
-        fields = ["id", "title", "description", "created_at", "updated_at"]
-        read_only_fields = ["id", "created_at", "updated_at"]
-
-
-class MitigationPlanSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = models.MitigationPlan
-        fields = ["id", "title", "description", "created_at", "updated_at"]
-        read_only_fields = ["id", "created_at", "updated_at"]
-
-
-class RiskAndMitigationPlanSerializer(serializers.ModelSerializer):
-    plan = serializers.PrimaryKeyRelatedField(queryset=models.TestPlan.objects.all(), required=False, allow_null=True)
-    risk = serializers.PrimaryKeyRelatedField(queryset=models.Risk.objects.all())
-    mitigation_plan = serializers.PrimaryKeyRelatedField(queryset=models.MitigationPlan.objects.all())
-    risk_title = serializers.CharField(source="risk.title", read_only=True)
-    risk_description = serializers.CharField(source="risk.description", read_only=True)
-    mitigation_plan_title = serializers.CharField(source="mitigation_plan.title", read_only=True)
-    mitigation_plan_description = serializers.CharField(source="mitigation_plan.description", read_only=True)
-
-    def create(self, validated_data: dict[str, Any]) -> models.RiskAndMitigationPlan:
-        """
-        Make creation idempotent: if a mapping for the same (risk, mitigation_plan)
-        already exists, return that instance instead of raising a uniqueness
-        error. Update the impact field when a different value is provided.
-        """
-        plan = validated_data.get("plan")
-        risk = validated_data.get("risk")
-        mitigation = validated_data.get("mitigation_plan")
-        impact = validated_data.get("impact", "")
-        defaults = {"impact": impact}
-        if plan is not None:
-            defaults["plan"] = plan
-        obj, created = models.RiskAndMitigationPlan.objects.get_or_create(
-            risk=risk,
-            mitigation_plan=mitigation,
-            defaults=defaults,
-        )
-        # If an existing mapping was returned but a plan or impact was
-        # provided in the request, ensure we update the existing record so
-        # that mappings can be associated with a TestPlan after the fact.
-        if not created:
-            changed = False
-            if impact and obj.impact != impact:
-                obj.impact = impact
-                changed = True
-            if plan is not None and getattr(obj, "plan_id", None) != getattr(plan, "id", None):
-                obj.plan = plan
-                changed = True
-            if changed:
-                obj.save()
-        return obj
-
-    class Meta:
-        model = models.RiskAndMitigationPlan
-        fields = [
-            "plan",
-            "id",
-            "risk",
-            "risk_title",
-            "risk_description",
-            "mitigation_plan",
-            "mitigation_plan_title",
-            "mitigation_plan_description",
-            "impact",
+            "name",
+            "description",
+            "test_modules",
+            "scenarios",
+            "modules_count",
+            "scenarios_count",
             "created_at",
             "updated_at",
         ]
         read_only_fields = [
             "id",
-            "risk_title",
-            "risk_description",
-            "mitigation_plan_title",
-            "mitigation_plan_description",
-            "created_at",
-            "updated_at",
-        ]
-        # Disable automatic model validators (e.g. UniqueTogetherValidator)
-        # so we can implement idempotent create() logic that safely
-        # resolves existing mappings via get_or_create.
-        validators = []
-
-
-class TestPlanSerializer(serializers.ModelSerializer):
-    modules_under_test = serializers.ListField(child=serializers.CharField(), required=False)
-    testing_types = serializers.DictField(child=serializers.ListField(child=serializers.CharField()), required=False)
-    tools = serializers.ListField(child=serializers.CharField(), required=False)
-    testing_timeline = serializers.DictField(child=serializers.JSONField(), required=False)
-    testers = serializers.ListField(child=serializers.CharField(), required=False)
-    scopes = TestPlanScopeSerializer(many=True, required=False)
-    maintenances = TestPlanMaintenanceSerializer(many=True, read_only=True)
-    scenarios = TestScenarioSerializer(many=True, read_only=True)
-    # The relationship was changed: RiskAndMitigationPlan now has a ForeignKey to
-    # TestPlan with related_name='risk_mitigation_links'. Expose the detailed
-    # link objects on the TestPlan serializer via that related_name. We no
-    # longer expose a direct M2M of mapping ids on the plan.
-    risk_mitigation_details = RiskAndMitigationPlanSerializer(
-        source="risk_mitigation_links",
-        many=True,
-        read_only=True,
-    )
-
-    class Meta:
-        model = models.TestPlan
-        fields = [
-            "id",
-            "name",
-            "objective",
-            "objectives",
-            "description",
-            "modules_under_test",
-            "testing_types",
-            "tools",
-            "testing_timeline",
-            "testers",
-            "approver",
-            "scopes",
-            "risk_mitigation_details",
-            "maintenances",
+            "test_modules",
             "scenarios",
+            "modules_count",
+            "scenarios_count",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "maintenances", "scenarios", "created_at", "updated_at"]
 
-    def validate_testing_types(self, value: dict[str, list[str]]) -> dict[str, list[str]]:
-        if not isinstance(value, dict):
-            raise ValidationError({"testing_types": "Testing types must be an object with functional categories."})
-        allowed_keys = {"functional", "non_functional"}
-        for key, tests in value.items():
-            if key not in allowed_keys:
-                raise ValidationError({"testing_types": f"Unsupported category '{key}'."})
-            if not isinstance(tests, list):
-                raise ValidationError({"testing_types": f"Category '{key}' must be a list."})
-        return value
+    def get_modules_count(self, obj: models.Project) -> int:
+        related = getattr(obj, "test_modules", None)
+        if related is None:
+            return obj.test_modules.count()
+        if hasattr(related, "count"):
+            try:
+                return related.count()
+            except TypeError:
+                pass
+        try:
+            return len(related)
+        except TypeError:
+            return obj.test_modules.count()
 
-    def validate_objectives(self, value: Any) -> list[dict[str, str]]:
-        if value in (None, serializers.empty):
-            if self.instance is not None:
-                return self.instance.objectives
-
-            raise ValidationError({"objectives": "At least one objective/goal pair is required."})
-        if not isinstance(value, list):
-            raise ValidationError({"objectives": "Objectives must be a list of entries."})
-
-        normalized: list[dict[str, str]] = []
-        for index, entry in enumerate(value, start=1):
-            if not isinstance(entry, dict):
-                raise ValidationError({"objectives": f"Entry {index} must be an object."})
-            title = str(entry.get("title", "")).strip()
-            objective_text = str(entry.get("objective", "")).strip()
-            goal = str(entry.get("goal", "")).strip()
-            if not title or not objective_text or not goal:
-                raise ValidationError(
-                    {
-                        "objectives": f"Entry {index} requires title, objective, and goal values.",
-                    }
-                )
-            normalized.append({
-                "title": title,
-                "objective": objective_text,
-                "goal": goal,
-            })
-
-        if not normalized:
-            raise ValidationError({"objectives": "At least one objective/goal pair is required."})
-
-        return normalized
-
-    @transaction.atomic
-    def create(self, validated_data: dict[str, Any]) -> models.TestPlan:
-        scopes_data = validated_data.pop("scopes", [])
-        plan = models.TestPlan.objects.create(**validated_data)
-        self._replace_scopes(plan, scopes_data)
-        return plan
-
-    @transaction.atomic
-    def update(self, instance: models.TestPlan, validated_data: dict[str, Any]) -> models.TestPlan:
-        scopes_data = validated_data.pop("scopes", None)
-        # The M2M relationship was removed; mappings are now separate objects
-        # (RiskAndMitigationPlan) referencing the plan. Updates to links should
-        # be performed via the RiskAndMitigationPlan endpoints.
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
-        if scopes_data is not None:
-            self._replace_scopes(instance, scopes_data)
-        return instance
-        return instance
-
-    def _replace_scopes(self, plan: models.TestPlan, scopes_data: list[dict[str, Any]]) -> None:
-        plan.scopes.all().delete()
-        if not scopes_data:
-            return
-        for index, entry in enumerate(scopes_data):
-            models.TestPlanScope.objects.create(
-                plan=plan,
-                order=index,
-                **entry,
-            )
+    def get_scenarios_count(self, obj: models.Project) -> int:
+        related = getattr(obj, "scenarios", None)
+        if related is None:
+            return obj.scenarios.count()
+        if hasattr(related, "count"):
+            try:
+                return related.count()
+            except TypeError:
+                pass
+        try:
+            return len(related)
+        except TypeError:
+            return obj.scenarios.count()

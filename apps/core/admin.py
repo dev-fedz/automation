@@ -58,48 +58,22 @@ class ApiAssertionAdmin(admin.ModelAdmin):
     search_fields = ("request__name", "field")
 
 
-@admin.register(models.TestPlan)
-class TestPlanAdmin(admin.ModelAdmin):
-    list_display = ("name", "approver", "created_at", "updated_at")
-    search_fields = ("name", "objective", "approver")
+@admin.register(models.Project)
+class ProjectAdmin(admin.ModelAdmin):
+    list_display = ("name", "created_at", "updated_at")
+    search_fields = ("name",)
     ordering = ("name",)
-
-
-@admin.register(models.TestPlanMaintenance)
-class TestPlanMaintenanceAdmin(admin.ModelAdmin):
-    list_display = ("plan", "version", "effective_date", "updated_by", "approved_by")
-    search_fields = ("plan__name", "version", "summary")
-    list_filter = ("effective_date", "plan")
 
 
 @admin.register(models.TestScenario)
 class TestScenarioAdmin(admin.ModelAdmin):
-    list_display = ("title", "plan", "created_at")
-    search_fields = ("title", "description", "plan__name")
-    list_filter = ("plan",)
+    list_display = ("title", "project", "created_at")
+    search_fields = ("title", "description", "project__name")
+    list_filter = ("project",)
 
 
 @admin.register(models.TestCase)
 class TestCaseAdmin(admin.ModelAdmin):
     list_display = ("testcase_id", "scenario", "created_at")
     search_fields = ("testcase_id", "description", "scenario__title")
-    list_filter = ("scenario__plan", "scenario")
-
-
-@admin.register(models.Risk)
-class RiskAdmin(admin.ModelAdmin):
-    list_display = ("title", "created_at", "updated_at")
-    search_fields = ("title", "description")
-
-
-@admin.register(models.MitigationPlan)
-class MitigationPlanAdmin(admin.ModelAdmin):
-    list_display = ("title", "created_at", "updated_at")
-    search_fields = ("title", "description")
-
-
-@admin.register(models.RiskAndMitigationPlan)
-class RiskAndMitigationPlanAdmin(admin.ModelAdmin):
-    list_display = ("risk", "mitigation_plan", "impact", "created_at")
-    search_fields = ("risk__title", "mitigation_plan__title", "impact")
-    list_filter = ("risk", "mitigation_plan")
+    list_filter = ("scenario__project", "scenario")

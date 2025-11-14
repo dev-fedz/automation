@@ -1,7 +1,7 @@
 {% extends "base/base.html" %}
 {% load static %}
 
-{% block title %}Automation · Test Plans{% endblock %}
+{% block title %}Automation · Projects{% endblock %}
 
 {% block head_css %}
     {{ block.super }}
@@ -10,56 +10,47 @@
 
 {% block content %}
 <div class="automation-dashboard" id="automation-app">
-    <section class="automation-panel" data-panel="plans" aria-labelledby="headline-plans">
+    <section class="automation-panel" data-panel="projects" aria-labelledby="headline-projects">
         <div class="panel-header">
             <div>
-                <h2 id="headline-plans">Plan Backlog</h2>
-                <p class="panel-subtitle">Plans form the backbone of the automation STLC. Capture scope, stakeholders, and timelines here.</p>
+                <h2 id="headline-projects">Projects</h2>
+                <p class="panel-subtitle">Track automation readiness per project with a quick view of modules and scenarios.</p>
             </div>
             <div class="panel-actions">
-                <button type="button" class="btn-primary" data-action="open-plan-modal">Create Test Plan</button>
+                <button type="button" class="btn-primary" data-action="open-project-modal">Create Project</button>
             </div>
         </div>
         <div class="card table-card automation-table-card" aria-live="polite">
-            <table class="table-modern automation-table" aria-label="Test plans overview">
+            <table class="table-modern automation-table" aria-label="Projects overview">
                 <thead>
                     <tr>
-                        <th scope="col">Plan</th>
+                        <th scope="col">Name</th>
                         <th scope="col">Modules</th>
                         <th scope="col">Scenarios</th>
-                        <th scope="col">Testers</th>
-                        <th scope="col">Kickoff</th>
-                        <th scope="col">Sign-off</th>
-                        <th scope="col">Approver</th>
                         <th scope="col">Actions</th>
                     </tr>
                 </thead>
-                <tbody data-role="plan-list">
+                <tbody data-role="project-list">
                     {% if initial_plans %}
                         {% for plan in initial_plans %}
-                            <tr data-plan-id="{{ plan.id }}" tabindex="0" aria-selected="{% if initial_selected_plan and plan.id == initial_selected_plan.id %}true{% else %}false{% endif %}">
-                                <td data-label="Plan">
-                                    <strong>{{ plan.name|default:"Untitled plan" }}</strong>
+                            <tr data-project-id="{{ plan.id }}">
+                                <td data-label="Name">
+                                    <strong>{{ plan.name|default:"Untitled project" }}</strong>
                                     {% if plan.description %}<div class="table-secondary">{{ plan.description }}</div>{% endif %}
-                                    {% if plan.objective %}<div class="table-tertiary table-tertiary-rich">{{ plan.objective }}</div>{% endif %}
                                 </td>
-                                <td data-label="Modules">{{ plan.modules_under_test|length }}</td>
-                                <td data-label="Testers">{{ plan.testers|length }}</td>
-                                <td data-label="Scenarios">{{ plan.scenarios|length }}</td>
-                                <td data-label="Kickoff">{{ plan.testing_timeline.kickoff|default:"—" }}</td>
-                                <td data-label="Sign-off">{{ plan.testing_timeline.signoff|default:"—" }}</td>
-                                <td data-label="Approver">{{ plan.approver|default:"—" }}</td>
+                                <td data-label="Modules">{{ plan.modules_count|default:plan.test_modules|length }}</td>
+                                <td data-label="Scenarios">{{ plan.scenarios_count|default:plan.scenarios|length }}</td>
                                 <td data-label="Actions">
                                     <div class="table-action-group">
-                                        <button type="button" class="action-button" data-action="view-plan" data-plan-id="{{ plan.id }}">View</button>
-                                        <button type="button" class="action-button" data-action="edit-plan" data-plan-id="{{ plan.id }}">Edit</button>
+                                        <button type="button" class="action-button" data-action="view-project" data-project-id="{{ plan.id }}">View</button>
+                                        <button type="button" class="action-button" data-action="edit-project" data-project-id="{{ plan.id }}">Edit</button>
                                     </div>
                                 </td>
                             </tr>
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="7" class="empty">No test plans yet. Create one to kick off your automation cycle.</td>
+                            <td colspan="4" class="empty">No projects yet. Create one to kick off your automation cycle.</td>
                         </tr>
                     {% endif %}
                 </tbody>
@@ -67,225 +58,40 @@
         </div>
     </section>
 
-    <div class="automation-modal" data-role="plan-modal" hidden>
-        <div class="automation-modal__backdrop" data-action="close-plan-modal"></div>
-        <div class="automation-modal__dialog" data-role="plan-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="automation-plan-modal-title">
+    <div class="automation-modal" data-role="project-modal" hidden>
+        <div class="automation-modal__backdrop" data-action="close-project-modal"></div>
+        <div class="automation-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="automation-project-modal-title">
             <header class="automation-modal__header">
-                <h2 id="automation-plan-modal-title">Create Test Plan</h2>
-                <button type="button" class="automation-modal__close" data-action="close-plan-modal" aria-label="Close create plan modal">&times;</button>
+                <h2 id="automation-project-modal-title">Create Project</h2>
+                <button type="button" class="automation-modal__close" data-action="close-project-modal" aria-label="Close project modal">&times;</button>
             </header>
-            <form id="automation-plan-form" class="automation-form" autocomplete="off">
+            <form id="project-form" class="automation-form" autocomplete="off">
+                <div class="form-alert" data-role="form-errors" hidden></div>
                 <fieldset>
-                    <legend class="sr-only">New test plan (multi-step)</legend>
-
-                    <!-- Step 1: Basic info -->
-                    <div class="plan-step" data-step="1">
-                        <div class="form-row">
-                            <label for="plan-name">Name<span aria-hidden="true">*</span></label>
-                            <input type="text" id="plan-name" name="name" required maxlength="150" placeholder="Release 1 Automation">
-                        </div>
-                        <div class="form-row">
-                            <label for="plan-description">Description</label>
-                            <textarea id="plan-description" name="description" rows="3" placeholder="Provide additional context about environments, risks, or scope."></textarea>
-                        </div>
+                    <legend class="sr-only">Project details</legend>
+                    <div class="form-row">
+                        <label for="project-name">Name<span aria-hidden="true">*</span></label>
+                        <input type="text" id="project-name" name="name" required maxlength="150" placeholder="Billing Automation">
                     </div>
-
-                    <!-- Step 2: Objective -->
-                    <div class="plan-step" data-step="2" hidden>
-                        <div class="form-row">
-                            <label id="plan-objective-label" for="plan-objective-editor">Objective<span aria-hidden="true">*</span></label>
-                            <div class="rich-text-field">
-                                <textarea id="plan-objective-editor" name="objective" class="tinymce-textarea" rows="8" placeholder="Outline the purpose of this automation cycle." data-placeholder="Outline the purpose of this automation cycle."></textarea>
-                            </div>
-                            <p class="form-hint">Use the toolbar to adjust fonts, headings, lists, and spacing.</p>
-                        </div>
+                    <div class="form-row">
+                        <label for="project-description">Description</label>
+                        <textarea id="project-description" name="description" rows="4" placeholder="Short summary for the team."></textarea>
                     </div>
-
-                    <!-- Step 3: Scope -->
-                    <div class="plan-step" data-step="3" hidden>
-                        <div class="form-row">
-                            <label for="plan-scope-in" id="plan-scope-label">Scope Definition</label>
-                            <div class="scope-grid" role="group" aria-labelledby="plan-scope-label">
-                                <div class="scope-column">
-                                    <label class="scope-column__title" for="plan-scope-in">In Scope</label>
-                                    <textarea id="plan-scope-in" name="scope_in" rows="5" placeholder="Core API flows&#10;Billing regression"></textarea>
-                                </div>
-                                <div class="scope-column">
-                                    <label class="scope-column__title" for="plan-scope-out">Out of Scope</label>
-                                    <textarea id="plan-scope-out" name="scope_out" rows="5" placeholder="Legacy UI tests&#10;Manual sign-off"></textarea>
-                                </div>
-                            </div>
-                            <p class="form-hint">Enter one item per line; entries populate the scope table for this plan.</p>
-                        </div>
-                    </div>
-
-                    <!-- Step 4: Risk & Mitigation -->
-                    <div class="plan-step" data-step="4" hidden>
-                        <div class="form-row">
-                            <section class="automation-panel data-card wide" data-entity="risk-mitigations" data-section="matrix" aria-labelledby="headline-risk-mitigation" id="section-matrix">
-                                <div class="panel-header">
-                                    <div>
-                                        <h3 id="headline-risk-mitigation">Risk &amp; Mitigation Matrix</h3>
-                                    </div>
-                                    <div class="panel-actions">
-                                        <button type="button" class="btn-primary" data-action="open-mapping-modal">Link Risk</button>
-                                    </div>
-                                </div>
-                                <div id="plan-risk-matrix" class="plan-risk-matrix"></div>
-                                <div class="card table-card automation-table-card" aria-live="polite">
-                                    <table class="table-modern automation-table" aria-label="Risk and mitigation mapping">
-                                        <thead>
-                                            <tr>
-                                                <th scope="col">#</th>
-                                                <th scope="col">Risk</th>
-                                                <th scope="col">Mitigation Plan</th>
-                                                <th scope="col">Impact</th>
-                                                <th scope="col">Linked</th>
-                                                <th scope="col">Updated</th>
-                                                <th scope="col">Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody data-role="mapping-list">
-                                            {% comment %}Render server-side fallback list prepared by the view.
-                                            This avoids putting lookup logic in the template and ensures the
-                                            mapping table shows rows immediately for the selected plan.
-                                            {% endcomment %}
-                                            {% if initial_risk_mitigations_for_render and initial_risk_mitigations_for_render|length %}
-                                                {% for m in initial_risk_mitigations_for_render %}
-                                                    <tr data-mapping-id="{{ m.id }}" data-source="server">
-                                                        <td data-label="#">{{ forloop.counter }}</td>
-                                                        <td data-label="Risk"><strong>{{ m.risk_title|default:"Untitled" }}</strong>{% if m.risk_description %}<div class="table-secondary">{{ m.risk_description }}</div>{% endif %}</td>
-                                                        <td data-label="Mitigation Plan"><strong>{{ m.mitigation_plan_title|default:"Untitled" }}</strong>{% if m.mitigation_plan_description %}<div class="table-secondary">{{ m.mitigation_plan_description }}</div>{% endif %}</td>
-                                                        <td data-label="Impact">{{ m.impact|default:"&mdash;" }}</td>
-                                                        <td data-label="Linked">&check;</td>
-                                                        <td data-label="Updated">{{ m.updated_at|default:"&mdash;" }}</td>
-                                                        <td data-label="Actions"><div class="table-action-group"><button type="button" class="action-button" data-action="view-mapping" data-id="{{ m.id }}">View</button></div></td>
-                                                    </tr>
-                                                {% endfor %}
-                                            {% else %}
-                                                <tr>
-                                                    <td colspan="7" class="empty">No risk to mitigation links found for the current filters.</td>
-                                                </tr>
-                                            {% endif %}
-                                        </tbody>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </section>
-                        </div>
-                    </div>
-
-                    <!-- Step 5: Other details -->
-                    <div class="plan-step" data-step="5" hidden>
-                        <div class="form-row inline">
-                            <div>
-                                <label for="plan-modules">Modules (comma separated)</label>
-                                <input type="text" id="plan-modules" name="modules" placeholder="Accounts,Billing,Inventory">
-                            </div>
-                            <div>
-                                <label for="plan-tools">Tools</label>
-                                <input type="text" id="plan-tools" name="tools" placeholder="Postman,Locust,PyTest">
-                            </div>
-                        </div>
-                        <div class="form-row inline">
-                            <div>
-                                <label for="plan-functional">Functional Testing</label>
-                                <input type="text" id="plan-functional" name="functional" placeholder="Regression,Smoke">
-                            </div>
-                            <div>
-                                <label for="plan-non-functional">Non-Functional Testing</label>
-                                <input type="text" id="plan-non-functional" name="non_functional" placeholder="Performance,Security">
-                            </div>
-                        </div>
-                        <div class="form-row inline">
-                            <div>
-                                <label for="plan-testers">Testers / Squad</label>
-                                <input type="text" id="plan-testers" name="testers" placeholder="qa@example.com,lead@example.com">
-                            </div>
-                            <div>
-                                <label for="plan-approver">Approver</label>
-                                <input type="text" id="plan-approver" name="approver" placeholder="qa-lead@example.com">
-                            </div>
-                        </div>
-                        <div class="form-row inline">
-                            <div>
-                                <label for="plan-kickoff">Kickoff</label>
-                                <input type="date" id="plan-kickoff" name="kickoff">
-                            </div>
-                            <div>
-                                <label for="plan-signoff">Target Sign-off</label>
-                                <input type="date" id="plan-signoff" name="signoff">
-                            </div>
-                        </div>
-                    </div>
-
                 </fieldset>
                 <div class="form-actions">
-                    <button type="button" class="btn-secondary" data-action="plan-prev" hidden>Back</button>
-                    <button type="submit" id="plan-submit" class="btn-primary">Next</button>
-                    <button type="reset" class="btn-secondary" data-action="reset-plan-form">Clear</button>
-                    <button type="button" class="btn-secondary" data-action="close-plan-modal">Cancel</button>
+                    <button type="submit" class="btn-primary" data-role="project-submit">Save</button>
+                    <button type="button" class="btn-secondary" data-action="close-project-modal">Cancel</button>
                 </div>
             </form>
         </div>
     </div>
 
-    <div class="automation-modal" data-role="mapping-modal" hidden>
-        <div class="automation-modal__backdrop" data-action="close-mapping-modal"></div>
-        <div class="automation-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="mapping-modal-title">
-            <header class="automation-modal__header">
-                <h2 id="mapping-modal-title">Link Risk to Mitigation</h2>
-                <button type="button" class="automation-modal__close" data-action="close-mapping-modal" aria-label="Close risk mapping modal">&times;</button>
-            </header>
-            <form id="mapping-form" class="automation-form" autocomplete="off">
-                <fieldset>
-                    <legend class="sr-only">Risk to mitigation linkage</legend>
-                    <div class="form-row">
-                        <label for="mapping-risk">Risk<span aria-hidden="true">*</span></label>
-                        <select id="mapping-risk" name="risk" required data-role="mapping-risk-select"></select>
-                    </div>
-                    <div class="form-row">
-                        <label for="mapping-mitigation">Mitigation Plan<span aria-hidden="true">*</span></label>
-                        <select id="mapping-mitigation" name="mitigation_plan" required data-role="mapping-mitigation-select"></select>
-                    </div>
-                    <div class="form-row">
-                        <label for="mapping-impact">Impact</label>
-                        <textarea id="mapping-impact" name="impact" rows="4" placeholder="Summarize the impact if the risk materializes."></textarea>
-                    </div>
-                </fieldset>
-                <div class="form-meta" data-role="mapping-meta" hidden>
-                    <div class="form-meta__entry">
-                        <span class="form-meta__label">Linked</span>
-                        <span class="form-meta__value"><time data-role="mapping-created">—</time></span>
-                    </div>
-                    <div class="form-meta__entry">
-                        <span class="form-meta__label">Updated</span>
-                        <span class="form-meta__value"><time data-role="mapping-updated">—</time></span>
-                    </div>
-                </div>
-                <div class="form-actions">
-                    <button type="submit" class="btn-primary" data-role="mapping-submit">Save</button>
-                    <button type="button" class="btn-secondary" data-action="close-mapping-modal">Close</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-     {# Inject the per-selected (authoritative) per-plan mappings and the by-plan map
-         so the browser can render any plan immediately without requiring an
-         authenticated API fetch. This avoids empty tables during unauthenticated
-         sessions while keeping payload sizes reasonable. #}
-     {{ initial_risk_mitigations_for_selected|json_script:"automation-initial-risk-mitigations-for-selected" }}
-     {{ initial_risk_mitigations_by_plan|json_script:"automation-initial-risk-mitigations-by-plan" }}
-    {{ initial_plans|json_script:"automation-initial-plans" }}
+    {{ initial_plans|json_script:"automation-initial-projects" }}
     {{ api_endpoints|json_script:"automation-api-endpoints" }}
 </div>
 {% endblock %}
 
 {% block body_js %}
     {{ block.super }}
-    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.3/dist/purify.min.js"></script>
-    <script src="{% static 'tinymce/tinymce.min.js' %}"></script>
-    <script src="{% static 'js/automation.js' %}"></script>
-    <script src="{% static 'js/data_management.js' %}"></script>
+    <script src="{% static 'js/project_module.js' %}"></script>
 {% endblock %}

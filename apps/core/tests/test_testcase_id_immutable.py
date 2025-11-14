@@ -7,17 +7,9 @@ from .. import models
 
 class TestCaseIdImmutableTest(APITestCase):
     def setUp(self):
-        # create a plan, scenario and initial testcase
-        from .test_testcase_id_generation import create_sample_plan_scenario  # reuse helper if present
-
-        try:
-            self.plan, self.scenario = create_sample_plan_scenario()
-        except Exception:
-            # fallback: create minimal objects inline
-            plan = models.TestPlan.objects.create(name='Test Plan (API)')
-            scenario = models.TestScenario.objects.create(plan=plan, title='Scenario X')
-            self.plan = plan
-            self.scenario = scenario
+        # create a project, scenario and initial testcase
+        project = models.Project.objects.create(name='Project (API)')
+        self.scenario = models.TestScenario.objects.create(project=project, title='Scenario X')
 
         self.testcase = models.TestCase.objects.create(scenario=self.scenario, description='orig')
 

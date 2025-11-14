@@ -409,51 +409,18 @@ class ApiRunViewSet(viewsets.ReadOnlyModelViewSet):
         return instance
 
 
-class TestPlanViewSet(viewsets.ModelViewSet):
-    serializer_class = serializers.TestPlanSerializer
+class ProjectViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.ProjectSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return selectors.test_plan_list()
+        return selectors.project_list()
 
     def get_object(self):
-        instance = selectors.test_plan_get(self.kwargs["pk"])
+        instance = selectors.project_get(self.kwargs["pk"])
         if instance is None:
             raise Http404
         return instance
-
-
-class TestPlanScopeViewSet(viewsets.ModelViewSet):
-    serializer_class = serializers.TestPlanScopeSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        queryset = models.TestPlanScope.objects.select_related("plan").order_by("plan", "category", "order", "id")
-        plan_id = self.request.query_params.get("plan")
-        if plan_id:
-            try:
-                queryset = queryset.filter(plan_id=int(plan_id))
-            except (TypeError, ValueError) as exc:
-                raise ValidationError({"plan": "Plan must be an integer."}) from exc
-        category = self.request.query_params.get("category")
-        if category:
-            queryset = queryset.filter(category=category)
-        return queryset
-
-
-class TestPlanMaintenanceViewSet(viewsets.ModelViewSet):
-    serializer_class = serializers.TestPlanMaintenanceSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        queryset = selectors.test_plan_maintenance_list()
-        plan_id = self.request.query_params.get("plan")
-        if plan_id:
-            try:
-                queryset = queryset.filter(plan_id=int(plan_id))
-            except (TypeError, ValueError) as exc:
-                raise ValidationError({"plan": "Plan must be an integer."}) from exc
-        return queryset
 
 
 class TestScenarioViewSet(viewsets.ModelViewSet):
@@ -462,12 +429,14 @@ class TestScenarioViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = selectors.test_scenario_list()
-        plan_id = self.request.query_params.get("plan")
-        if plan_id:
+        project_param = self.request.query_params.get("project")
+        if project_param in (None, ""):
+            project_param = self.request.query_params.get("plan")
+        if project_param not in (None, ""):
             try:
-                queryset = queryset.filter(plan_id=int(plan_id))
+                queryset = queryset.filter(project_id=int(project_param))
             except (TypeError, ValueError) as exc:
-                raise ValidationError({"plan": "Plan must be an integer."}) from exc
+                raise ValidationError({"project": "Project must be an integer."}) from exc
         module = self.request.query_params.get("module")
         if module:
             queryset = queryset.filter(module_id=module)
@@ -566,22 +535,27 @@ class TestCaseViewSet(viewsets.ModelViewSet):
             # if the search looks like an integer, allow searching by primary key too
             try:
                 if str(search).isdigit():
-                    q = q | Q(pk=int(search))
+                    q |= Q(pk=int(search))
             except Exception:
                 pass
             queryset = queryset.filter(q)
+
+        project_param = self.request.query_params.get("project")
+        if project_param in (None, ""):
+            project_param = self.request.query_params.get("plan")
+        if project_param not in (None, ""):
+            try:
+                queryset = queryset.filter(scenario__project_id=int(project_param))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"project": "Project must be an integer."}) from exc
+
         scenario_id = self.request.query_params.get("scenario")
         if scenario_id:
             try:
                 queryset = queryset.filter(scenario_id=int(scenario_id))
             except (TypeError, ValueError) as exc:
                 raise ValidationError({"scenario": "Scenario must be an integer."}) from exc
-        plan_id = self.request.query_params.get("plan")
-        if plan_id:
-            try:
-                queryset = queryset.filter(scenario__plan_id=int(plan_id))
-            except (TypeError, ValueError) as exc:
-                raise ValidationError({"plan": "Plan must be an integer."}) from exc
+
         return queryset
 
     def create(self, request, *args, **kwargs):
@@ -690,123 +664,50 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
 
-class RiskViewSet(viewsets.ModelViewSet):
-    serializer_class = serializers.RiskSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        queryset = selectors.risk_list()
-        search = self.request.query_params.get("search")
-        if search:
-            queryset = queryset.filter(Q(title__icontains=search) | Q(description__icontains=search))
-        return queryset
-
-
-class TestToolsViewSet(viewsets.ModelViewSet):
-    serializer_class = serializers.TestToolsSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        return models.TestTools.objects.order_by("title", "id")
-
-
 class TestModulesViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.TestModulesSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         queryset = models.TestModules.objects.order_by("title", "id")
-        plan_id = self.request.query_params.get("plan")
-        if plan_id not in (None, ""):
+        project_param = self.request.query_params.get("project")
+        if project_param in (None, ""):
+            project_param = self.request.query_params.get("plan")
+        if project_param not in (None, ""):
             try:
-                queryset = queryset.filter(plan_id=int(plan_id))
+                queryset = queryset.filter(project_id=int(project_param))
             except (TypeError, ValueError) as exc:
-                raise ValidationError({"plan": "Plan must be an integer."}) from exc
-        return queryset
-
-
-class MitigationPlanViewSet(viewsets.ModelViewSet):
-    serializer_class = serializers.MitigationPlanSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        queryset = selectors.mitigation_plan_list()
-        search = self.request.query_params.get("search")
-        if search:
-            queryset = queryset.filter(Q(title__icontains=search) | Q(description__icontains=search))
-        return queryset
-
-
-class RiskAndMitigationPlanViewSet(viewsets.ModelViewSet):
-    serializer_class = serializers.RiskAndMitigationPlanSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        plan_param = self.request.query_params.get("plan")
-        try:
-            # Log incoming plan param and authentication status for debugging
-            logger.debug('[core] RiskAndMitigationPlanViewSet.get_queryset called', extra={
-                'plan_param': plan_param,
-                'user_authenticated': getattr(self.request.user, 'is_authenticated', False),
-                'user': getattr(self.request.user, 'email', getattr(self.request.user, 'username', None)),
-            })
-        except Exception:
-            # protect logging from raising
-            logger.debug('[core] RiskAndMitigationPlanViewSet.get_queryset called (logging failed)')
-        queryset = selectors.risk_and_mitigation_list(plan_param if plan_param not in (None, "") else None)
-        risk_id = self.request.query_params.get("risk")
-        if risk_id not in (None, ""):
-            try:
-                queryset = queryset.filter(risk_id=int(risk_id))
-            except (TypeError, ValueError) as exc:
-                raise ValidationError({"risk": "Risk must be an integer."}) from exc
-        mitigation_plan_id = self.request.query_params.get("mitigation_plan")
-        if mitigation_plan_id not in (None, ""):
-            try:
-                queryset = queryset.filter(mitigation_plan_id=int(mitigation_plan_id))
-            except (TypeError, ValueError) as exc:
-                raise ValidationError({"mitigation_plan": "Mitigation plan must be an integer."}) from exc
-        search = self.request.query_params.get("search")
-        if search:
-            queryset = queryset.filter(
-                Q(risk__title__icontains=search)
-                | Q(risk__description__icontains=search)
-                | Q(mitigation_plan__title__icontains=search)
-                | Q(mitigation_plan__description__icontains=search)
-                | Q(impact__icontains=search)
-            )
+                raise ValidationError({"project": "Project must be an integer."}) from exc
         return queryset
 
 
 def _prepare_automation_data() -> dict[str, Any]:
-    plans_qs = selectors.test_plan_list()
-    plans_payload = serializers.TestPlanSerializer(plans_qs, many=True).data
+    projects_qs = selectors.project_list()
+    projects_payload = serializers.ProjectSerializer(projects_qs, many=True).data
     environments_qs = selectors.api_environment_list()
     environments_payload = serializers.ApiEnvironmentSerializer(environments_qs, many=True).data
-    risks_qs = selectors.risk_list()
-    risks_payload = serializers.RiskSerializer(risks_qs, many=True).data
-    mitigation_plans_qs = selectors.mitigation_plan_list()
-    mitigation_plans_payload = serializers.MitigationPlanSerializer(mitigation_plans_qs, many=True).data
-    risk_mitigations_qs = selectors.risk_and_mitigation_list()
-    risk_mitigations_payload = serializers.RiskAndMitigationPlanSerializer(risk_mitigations_qs, many=True).data
+    test_modules_qs = models.TestModules.objects.order_by("title", "id")
+    test_modules_payload = serializers.TestModulesSerializer(test_modules_qs, many=True).data
 
-    scenario_count = sum(len(plan.get("scenarios", [])) for plan in plans_payload)
+    scenario_count = sum(len(project.get("scenarios", [])) for project in projects_payload)
     case_count = sum(
         len(scenario.get("cases", []))
-        for plan in plans_payload
-        for scenario in plan.get("scenarios", [])
+        for project in projects_payload
+        for scenario in project.get("scenarios", [])
     )
 
     metrics = {
-        "plans": len(plans_payload),
+        "plans": len(projects_payload),
+        "projects": len(projects_payload),
         "scenarios": scenario_count,
         "cases": case_count,
+        "modules": len(test_modules_payload),
         "collections": models.ApiCollection.objects.count(),
         "runs": models.ApiRun.objects.count(),
         "environments": len(environments_payload),
-        "risks": len(risks_payload),
-        "mitigation_plans": len(mitigation_plans_payload),
-        "risk_mitigations": len(risk_mitigations_payload),
+        "risks": 0,
+        "mitigation_plans": 0,
+        "risk_mitigations": 0,
     }
 
     recent_runs = (
@@ -817,21 +718,21 @@ def _prepare_automation_data() -> dict[str, Any]:
 
     api_endpoints = {
         "plans": reverse("core:core-test-plans-list"),
-        "maintenances": reverse("core:core-test-plan-maintenances-list"),
+        "maintenances": "",
         "scenarios": reverse("core:core-test-scenarios-list"),
         "cases": reverse("core:core-test-cases-list"),
-        "scopes": reverse("core:core-test-plan-scopes-list"),
+        "scopes": "",
         "collections": reverse("core:core-collections-list"),
         "environments": reverse("core:core-environments-list"),
         "runs": reverse("core:core-runs-list"),
-        "risks": reverse("core:core-risks-list"),
-        "mitigation_plans": reverse("core:core-mitigation-plans-list"),
-        "risk_mitigations": reverse("core:core-risk-mitigation-plans-list"),
-        "test_tools": reverse("core:core-test-tools-list"),
+        "risks": "",
+        "mitigation_plans": "",
+        "risk_mitigations": "",
+        "test_tools": "",
         "test_modules": reverse("core:core-test-modules-list"),
     }
 
-    selected_plan = plans_payload[0] if plans_payload else None
+    selected_plan = projects_payload[0] if projects_payload else None
     selected_scenario = None
     if selected_plan:
         scenarios = selected_plan.get("scenarios", [])
@@ -839,7 +740,7 @@ def _prepare_automation_data() -> dict[str, Any]:
             selected_scenario = scenarios[0]
 
     return {
-        "plans": plans_payload,
+        "plans": projects_payload,
         "metrics": metrics,
         "recent_runs": recent_runs,
         "highlighted_collections": highlighted_collections,
@@ -847,11 +748,11 @@ def _prepare_automation_data() -> dict[str, Any]:
         "selected_plan": selected_plan,
         "selected_scenario": selected_scenario,
         "environments": environments_payload,
-        "risks": risks_payload,
-        "mitigation_plans": mitigation_plans_payload,
-    "risk_mitigations": risk_mitigations_payload,
-        "test_tools": serializers.TestToolsSerializer(models.TestTools.objects.order_by("title", "id"), many=True).data,
-        "test_modules": serializers.TestModulesSerializer(models.TestModules.objects.order_by("title", "id"), many=True).data,
+        "risks": [],
+        "mitigation_plans": [],
+        "risk_mitigations": [],
+        "test_tools": [],
+        "test_modules": test_modules_payload,
     }
 
 
@@ -875,32 +776,7 @@ def automation_test_plans(request):
         "initial_plans": data["plans"],
         "initial_metrics": data["metrics"],
         "api_endpoints": data["api_endpoints"],
-        "initial_selected_plan": data["selected_plan"],
-        "initial_selected_scenario": data["selected_scenario"],
-        "initial_risk_mitigations": data["risk_mitigations"],
-        # Build a small map of plan_id -> mappings to allow client to
-        # access per-plan mapping payload without filtering large arrays.
-        "initial_risk_mitigations_by_plan": {
-            str(plan.get("id")): [m for m in data["risk_mitigations"] if str(m.get("plan")) == str(plan.get("id"))]
-            for plan in data["plans"]
-        },
-        "initial_risk_mitigations_for_selected": [
-            m for m in data["risk_mitigations"]
-            if data.get("selected_plan") and str(m.get("plan")) == str(data["selected_plan"].get("id"))
-        ],
     }
-    # Determine a simple list to render server-side in the template. Prefer
-    # the per-selected list; otherwise fall back to the by-plan map for the
-    # selected plan id. This avoids putting complex lookup logic into the
-    # template and ensures a stable server-side fallback for unauthenticated
-    # browsers.
-    selected = context.get("initial_selected_plan")
-    by_map = context.get("initial_risk_mitigations_by_plan") or {}
-    render_list = context.get("initial_risk_mitigations_for_selected") or []
-    if not render_list and selected:
-        key = str(selected.get("id"))
-        render_list = by_map.get(key, []) if isinstance(by_map, dict) else []
-    context["initial_risk_mitigations_for_render"] = render_list
     return render(request, "core/automation_test_plans.html", context)
 
 
@@ -958,13 +834,13 @@ def automation_test_cases(request):
         selected_plan = plan_match or selected_plan
     elif plan_param not in (None, ""):
         try:
-            plan_id = int(plan_param)
+            project_id = int(plan_param)
         except (TypeError, ValueError):
-            plan_id = None
-        if plan_id is not None:
+            project_id = None
+        if project_id is not None:
             for plan in data.get("plans", []):
                 try:
-                    if int(plan.get("id")) == plan_id:
+                    if int(plan.get("id")) == project_id:
                         selected_plan = plan
                         scenarios = plan.get("scenarios", []) or []
                         selected_scenario = scenarios[0] if scenarios else None
