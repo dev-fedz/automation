@@ -80,6 +80,40 @@
         return date.toLocaleString();
     };
 
+    const showToast = (message, variant = 'success') => {
+        try {
+            let container = document.getElementById('automation-toast-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'automation-toast-container';
+                container.style.position = 'fixed';
+                container.style.right = '16px';
+                container.style.bottom = '16px';
+                container.style.zIndex = 99999;
+                document.body.appendChild(container);
+            }
+            const node = document.createElement('div');
+            node.className = `automation-toast automation-toast--${variant}`;
+            node.style.background = variant === 'error' ? 'rgba(208, 48, 48, 0.92)' : 'rgba(0, 0, 0, 0.85)';
+            node.style.color = '#fff';
+            node.style.padding = '9px 14px';
+            node.style.marginTop = '8px';
+            node.style.borderRadius = '4px';
+            node.style.fontSize = '13px';
+            node.textContent = message;
+            container.appendChild(node);
+            window.setTimeout(() => {
+                try {
+                    container.removeChild(node);
+                } catch (err) {
+                    /* ignore */
+                }
+            }, 3200);
+        } catch (err) {
+            /* ignore toast errors */
+        }
+    };
+
     const fallbackCoerceExpectedResultValue = (raw) => {
         if (raw === null || raw === undefined) {
             return "";
@@ -1070,6 +1104,22 @@
                     }
                 }
             } catch (e) { /* ignore */ }
+            const scenarioMode = state.moduleScenarioModalMode === 'edit' ? 'edit' : 'create';
+            const scenarioLabel = payload.title || 'this scenario';
+            let scenarioConfirmed = true;
+            try {
+                const message = scenarioMode === 'edit'
+                    ? `Are you sure you want to update the scenario "${scenarioLabel}"?`
+                    : `Are you sure you want to create the scenario "${scenarioLabel}"?`;
+                scenarioConfirmed = typeof window.confirm === 'function' ? window.confirm(message) : true;
+            } catch (e) {
+                scenarioConfirmed = true;
+            }
+            if (!scenarioConfirmed) {
+                state.moduleScenarioSubmitting = false;
+                if (saveBtn) saveBtn.disabled = false;
+                return;
+            }
             try {
                 setStatus('Saving scenario…', 'info');
                 try { console.info('[data-management] submitting scenario', { payloadPreview: { module: payload.module, title: payload.title, project: payload.project } }); } catch (e) { }
@@ -1104,7 +1154,9 @@
                     } catch (e) {
                         try { console.info('[data-management] error updating state after update', { error: e && (e.message || e) }); } catch (err) { }
                     }
+                    const displayName = updated && updated.title ? updated.title : scenarioLabel;
                     setStatus('Scenario updated.', 'success');
+                    showToast(`Scenario "${displayName}" updated successfully.`);
                 } else {
                     const created = await request(urlBase, { method: 'POST', body: JSON.stringify(payload) });
                     // insert scenario into module's sublist in state and DOM
@@ -1130,7 +1182,9 @@
                     } catch (e) {
                         try { console.info('[data-management] error in create flow', { error: e && (e.message || e) }); } catch (err) { }
                     }
+                    const displayName = created && created.title ? created.title : scenarioLabel;
                     setStatus('Scenario saved.', 'success');
+                    showToast(`Scenario "${displayName}" created successfully.`);
                 }
             } catch (error) {
                 const message = error instanceof Error ? error.message : 'Unable to save scenario.';
@@ -1166,6 +1220,7 @@
                     }
                 } else {
                     setStatus(message, 'error');
+                    showToast(message, 'error');
                 }
             } finally {
                 // clear submitting state and re-enable button
@@ -2122,7 +2177,9 @@
                     state.testModules.forEach((m) => {
                         if (Array.isArray(m.scenarios)) {
                             const s = m.scenarios.find((sc) => Number(sc.id) === Number(sid));
-                            if (s) found = { scenario: s, moduleId: m.id };
+                            if (s) {
+                                found = { scenario: s, moduleId: m.id };
+                            }
                         }
                     });
                     if (found) {
@@ -2190,9 +2247,12 @@
                         // keep parent module expanded if known
                         if (parentModuleId) ensureModuleExpanded(parentModuleId);
                         setStatus('Scenario deleted.', 'success');
+                        showToast('Scenario deleted.', 'success');
                         try { document.dispatchEvent(new CustomEvent('test-modules-changed', { detail: { moduleId: parentModuleId } })); } catch (e) { }
                     } catch (err) {
-                        setStatus(err instanceof Error ? err.message : 'Unable to delete scenario.', 'error');
+                        const message = err instanceof Error ? err.message : 'Unable to delete scenario.';
+                        setStatus(message, 'error');
+                        showToast(message, 'error');
                     }
                     break;
                 }
@@ -2276,9 +2336,12 @@
                     try {
                         await request(`${endpoints.testModules}${id}/`, { method: "DELETE" });
                         setStatus("Module deleted.", "success");
+                        showToast("Module deleted.", "success");
                         await loadTestModules();
                     } catch (error) {
-                        setStatus(error.message, "error");
+                        const message = error && error.message ? error.message : "Unable to delete module.";
+                        setStatus(message, "error");
+                        showToast(message, "error");
                     }
                     break;
                 }
@@ -2731,8 +2794,17 @@
                     description,
                     project: (els.testModulesProject && els.testModulesProject.value) ? Number(els.testModulesProject.value) : null,
                 };
+                const mode = (state.testModulesModalMode === 'edit' && state.testModulesCurrentId) ? 'edit' : 'create';
+                const moduleLabel = title || 'this module';
+                const confirmMessage = mode === 'edit'
+                    ? `Are you sure you want to update the module "${moduleLabel}"?`
+                    : `Are you sure you want to create the module "${moduleLabel}"?`;
+                const confirmResult = typeof window.confirm === 'function' ? window.confirm(confirmMessage) : true;
+                if (!confirmResult) {
+                    return;
+                }
                 try {
-                    if (state.testModulesModalMode === 'edit' && state.testModulesCurrentId) {
+                    if (mode === 'edit') {
                         const updated = await request(`${endpoints.testModules}${state.testModulesCurrentId}/`, { method: 'PATCH', body: JSON.stringify(payload) });
                         if (updated && typeof updated === 'object') {
                             const idx = state.testModules.findIndex((t) => Number(t.id) === Number(updated.id));
@@ -2742,11 +2814,15 @@
                                 state.testModules.unshift(updated);
                             }
                         }
+                        const displayName = updated && updated.title ? updated.title : moduleLabel;
                         setStatus('Module updated successfully.', 'success');
+                        showToast(`Module "${displayName}" updated successfully.`);
                     } else {
                         const created = await request(endpoints.testModules, { method: 'POST', body: JSON.stringify(payload) });
                         state.testModules.unshift(created);
+                        const displayName = created && created.title ? created.title : moduleLabel;
                         setStatus('Module created successfully.', 'success');
+                        showToast(`Module "${displayName}" created successfully.`);
                     }
                     closeTestModulesModal();
                     renderTestModulesList();

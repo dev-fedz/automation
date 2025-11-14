@@ -1586,6 +1586,35 @@
             return { html: sanitized, plain };
         };
 
+        // Normalize scenario shape returned by the API so client-side code can
+        // reliably compare module and plan ids. Some API responses include
+        // nested objects for `module` or `plan` which breaks equality checks.
+        const normalizeScenario = (s) => {
+            if (!s || typeof s !== 'object') return s;
+            const next = { ...s };
+            try {
+                if (next.module && typeof next.module === 'object') {
+                    next.module = next.module.id || next.module.pk || null;
+                }
+            } catch (e) { /* ignore */ }
+            try {
+                if (next.plan && typeof next.plan === 'object') {
+                    next.plan = next.plan.id || next.plan.pk || null;
+                }
+            } catch (e) { /* ignore */ }
+            try {
+                if ((next.module === undefined || next.module === null) && (next.module_id !== undefined)) {
+                    next.module = next.module_id;
+                }
+            } catch (e) { /* ignore */ }
+            try {
+                if ((next.plan === undefined || next.plan === null) && (next.plan_id !== undefined)) {
+                    next.plan = next.plan_id;
+                }
+            } catch (e) { /* ignore */ }
+            return next;
+        };
+
         const normalizePlan = (plan) => {
             if (!plan || typeof plan !== 'object') {
                 return plan;
@@ -1600,7 +1629,7 @@
                 next.objective_plain = '';
             }
             if (Array.isArray(next.scenarios)) {
-                next.scenarios = next.scenarios.map((scenario) => ({ ...scenario }));
+                next.scenarios = next.scenarios.map((scenario) => normalizeScenario({ ...scenario }));
             }
             if (Array.isArray(next.scopes)) {
                 next.scopes = next.scopes.map((scope) => ({ ...scope }));
@@ -1643,38 +1672,7 @@
             return next;
         };
 
-        // Normalize scenario shape returned by the API so client-side code can
-        // reliably compare module and plan ids. Some API responses include
-        // nested objects for `module` or `plan` (e.g. { module: { id: 1, title: '...' } })
-        // which breaks equality checks like `String(s.module) === moduleFilterVal`.
-        const normalizeScenario = (s) => {
-            if (!s || typeof s !== 'object') return s;
-            const next = { ...s };
-            try {
-                if (next.module && typeof next.module === 'object') {
-                    // prefer id, fallback to pk
-                    next.module = next.module.id || next.module.pk || null;
-                }
-            } catch (e) { /* ignore */ }
-            try {
-                if (next.plan && typeof next.plan === 'object') {
-                    next.plan = next.plan.id || next.plan.pk || null;
-                }
-            } catch (e) { /* ignore */ }
-            // Support APIs that return module_id / plan_id instead of module/plan
-            try {
-                if ((next.module === undefined || next.module === null) && (next.module_id !== undefined)) {
-                    next.module = next.module_id;
-                }
-            } catch (e) { /* ignore */ }
-            try {
-                if ((next.plan === undefined || next.plan === null) && (next.plan_id !== undefined)) {
-                    next.plan = next.plan_id;
-                }
-            } catch (e) { /* ignore */ }
-            return next;
-        };
-
+        // Normalize plans while preserving nested structures that the UI expects.
         const normalizePlans = (plans) => (Array.isArray(plans) ? plans.map(normalizePlan) : []);
 
         const initialModules = readScriptJson('automation-initial-modules') || [];
@@ -2227,7 +2225,7 @@
         }
 
         // Lightweight toast helper for transient messages
-        const showToast = (message, timeout = 3000) => {
+        const showToast = (message, variant = 'info', timeout = 3000) => {
             try {
                 let container = document.getElementById('automation-toast-container');
                 if (!container) {
@@ -2240,10 +2238,10 @@
                     document.body.appendChild(container);
                 }
                 const node = document.createElement('div');
-                node.className = 'automation-toast';
-                node.style.background = 'rgba(0,0,0,0.8)';
+                node.className = `automation-toast automation-toast--${variant}`;
+                node.style.background = variant === 'error' ? 'rgba(208, 48, 48, 0.92)' : variant === 'success' ? 'rgba(39, 124, 72, 0.92)' : 'rgba(33, 47, 60, 0.88)';
                 node.style.color = '#fff';
-                node.style.padding = '8px 12px';
+                node.style.padding = '9px 14px';
                 node.style.marginTop = '8px';
                 node.style.borderRadius = '4px';
                 node.style.fontSize = '13px';
@@ -3780,16 +3778,16 @@
                 const data = await response.json();
                 state.plans = normalizePlans(data);
 
-                let nextPlanId = typeof selectPlanId !== 'undefined' ? selectPlanId : state.selectedPlanId;
-                if (!state.plans.some((plan) => plan.id === nextPlanId)) {
-                    nextPlanId = state.plans.length ? state.plans[0].id : null;
+                let nextPlanId = typeof selectPlanId !== 'undefined' ? toNumericId(selectPlanId) : toNumericId(state.selectedPlanId);
+                if (!state.plans.some((plan) => Number(plan.id) === Number(nextPlanId))) {
+                    nextPlanId = state.plans.length ? toNumericId(state.plans[0].id) : null;
                 }
                 state.selectedPlanId = nextPlanId;
 
                 const currentPlan = getSelectedPlan();
-                let nextScenarioId = typeof selectScenarioId !== 'undefined' ? selectScenarioId : state.selectedScenarioId;
-                if (!currentPlan || !Array.isArray(currentPlan.scenarios) || !currentPlan.scenarios.some((scenario) => scenario.id === nextScenarioId)) {
-                    nextScenarioId = currentPlan && Array.isArray(currentPlan.scenarios) && currentPlan.scenarios.length ? currentPlan.scenarios[0].id : null;
+                let nextScenarioId = typeof selectScenarioId !== 'undefined' ? toNumericId(selectScenarioId) : toNumericId(state.selectedScenarioId);
+                if (!currentPlan || !Array.isArray(currentPlan.scenarios) || !currentPlan.scenarios.some((scenario) => Number(scenario.id) === Number(nextScenarioId))) {
+                    nextScenarioId = currentPlan && Array.isArray(currentPlan.scenarios) && currentPlan.scenarios.length ? toNumericId(currentPlan.scenarios[0].id) : null;
                 }
                 state.selectedScenarioId = nextScenarioId;
 
@@ -3890,13 +3888,25 @@
                         const resp = await fetch(delUrl, { method: 'DELETE', credentials: 'same-origin', headers: { 'X-CSRFToken': getCsrfToken() } });
                         if (resp && (resp.status === 204 || resp.ok)) {
                             setStatus('Scenario deleted.', 'success');
+                            showToast('Scenario deleted.', 'success');
                             // refresh plans to update UI
-                            await refreshPlans({ silent: true });
+                            const currentPlanId = state.selectedPlanId;
+                            const wasSelectedScenario = Number(state.selectedScenarioId) === Number(sid);
+                            if (wasSelectedScenario) {
+                                state.selectedScenarioId = null;
+                            }
+                            await refreshPlans({
+                                silent: true,
+                                selectPlanId: currentPlanId,
+                                selectScenarioId: state.selectedScenarioId,
+                            });
                         } else {
                             setStatus('Failed to delete scenario.', 'error');
+                            showToast('Failed to delete scenario.', 'error');
                         }
                     } catch (err) {
                         setStatus('Failed to delete scenario.', 'error');
+                        showToast('Failed to delete scenario.', 'error');
                     }
                 }
             });
