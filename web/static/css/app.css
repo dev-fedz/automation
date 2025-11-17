@@ -199,6 +199,7 @@ body.auth-layout { background:#f5f7fb; min-height:100dvh; display:flex; justify-
 .module-group {border:1px solid #eadfb8;border-radius:14px;padding:1rem 1rem 1.1rem;background:#fffef8;box-shadow:0 3px 8px -3px rgba(90,70,0,.25),0 1px 3px -1px rgba(90,70,0,.18);} 
 .module-group .group-head {display:flex;align-items:center;justify-content:space-between;margin:0 0 .65rem;}
 .module-group .group-head h4 {margin:0;font-size:.9rem;text-transform:uppercase;letter-spacing:.06em;font-weight:700;color:#6a5307;}
+.module-group .group-body {display:grid;gap:.75rem;}
 .group-toggle {background:#f2d36b;border:none;border-radius:6px;padding:.25rem .55rem;font-size:.8rem;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);} 
 .group-toggle:hover {background:#ffd34a;}
 .mod-item {border:1px dashed #e9dcb1;border-radius:10px;padding:.65rem .7rem .55rem;display:flex;flex-direction:column;gap:.4rem;background:#fff;} 
@@ -245,11 +246,7 @@ body.auth-layout { background:#f5f7fb; min-height:100dvh; display:flex; justify-
 .row-link {color:#2f4f9b;font-weight:600;text-decoration:none;}
 .row-link:hover {text-decoration:underline;color:#1e3873;}
 .table-modern tbody tr td:first-child {font-weight:600;color:#5e4705;}
-.role-form-card {width:50%;max-width:none;margin:0 auto;padding:1.75rem 1.9rem 2.1rem;}
-@media (max-width:1200px){.role-form-card{width:85%;}}
-@media (max-width:900px){.role-form-card{width:100%;}}
-.role-form-card .page-head {margin-top:0;}
-.role-form-card .role-form {margin-top:.5rem;}
+/* Deprecated .role-form-card styles removed in favor of automation panels */
 @media (max-width:760px){
 	.table-modern thead {display:none;}
 	.table-modern tbody td {display:flex;justify-content:space-between;gap:1rem;padding:.65rem .85rem;font-size:.72rem;}
@@ -258,6 +255,87 @@ body.auth-layout { background:#f5f7fb; min-height:100dvh; display:flex; justify-
 	.table-modern tbody tr:last-child {margin-bottom:0;}
 	.table-card {padding:.75rem .9rem;}
 }
+
+/* User & Role management */
+.user-management-dashboard,
+.role-management-dashboard {width:100%;}
+
+.user-management-panel .panel-actions .btn-primary,
+.role-management-panel .panel-actions .btn-primary {box-shadow:0 12px 24px -14px rgba(90,60,0,.45);transition:transform .16s ease,box-shadow .16s ease;}
+
+.user-management-panel .panel-actions .btn-primary:hover,
+.role-management-panel .panel-actions .btn-primary:hover {transform:translateY(-1px);box-shadow:0 18px 32px -16px rgba(90,60,0,.5);}
+
+.user-management-panel .panel-actions .btn-primary:focus-visible,
+.role-management-panel .panel-actions .btn-primary:focus-visible {outline:3px solid rgba(244,180,0,.35);outline-offset:3px;}
+
+.user-management-panel .panel-subtitle,
+.role-management-panel .panel-subtitle {max-width:32rem;}
+
+.user-management-panel .table-action-group,
+.role-management-panel .table-action-group {justify-content:flex-start;}
+
+.role-management-panel h3 {font-size:1rem;}
+
+.user-form-dashboard,
+.role-form-dashboard {max-width:960px;margin:0 auto;}
+
+.user-form-panel,
+.role-form-panel {padding-bottom:1.6rem;}
+
+.user-form-panel .automation-form,
+.role-form-panel .automation-form {padding:0;}
+
+.user-form-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1rem;margin:0 -.5rem;}
+
+.user-form-field {display:flex;flex-direction:column;gap:.4rem;font-weight:600;font-size:.85rem;color:#4f3b07;padding:0 .5rem;}
+
+.user-form-field input,
+.user-form-field select {width:100%;box-sizing:border-box;}
+
+.user-form-field input,
+.user-form-field select {padding:.65rem .75rem;border:1px solid rgba(209,144,0,.35);border-radius:10px;background:#fffdf5;transition:border-color .15s ease,box-shadow .15s ease,background .15s ease;}
+
+.user-form-field input:focus,
+.user-form-field select:focus {outline:none;border-color:rgba(209,144,0,.75);box-shadow:0 0 0 3px rgba(244,180,0,.18);background:#fff;}
+
+.user-form-field select {appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23b97c00' d='M1.41 0L6 4.59 10.59 0 12 1.41 6 7.41 0 1.41z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:calc(100% - .85rem) 52%;background-size:.6rem;padding-right:2.4rem;}
+
+.user-form-actions,
+.role-form-actions {display:flex;justify-content:flex-end;gap:.65rem;margin-top:.8rem;}
+
+.user-form-actions .btn-primary,
+.role-form-actions .btn-primary {min-width:160px;box-shadow:0 12px 26px -14px rgba(90,60,0,.48);}
+
+.user-form-actions .btn-primary:hover,
+.role-form-actions .btn-primary:hover {box-shadow:0 18px 30px -14px rgba(90,60,0,.52);}
+
+.user-form-actions .btn-primary:focus-visible,
+.role-form-actions .btn-primary:focus-visible {outline:3px solid rgba(244,180,0,.35);outline-offset:3px;}
+
+.role-form-actions .action-button[data-variant="danger"] {border-color:rgba(220,38,38,.35);color:#7f1d1d;background:rgba(220,38,38,.08);}
+.role-form-actions .action-button[data-variant="danger"]:hover {background:rgba(220,38,38,.14);border-color:rgba(220,38,38,.5);}
+
+@media (max-width:640px){
+	.user-management-panel .panel-actions,
+	.role-management-panel .panel-actions {width:100%;justify-content:flex-start;}
+	.user-management-panel .panel-actions .btn-primary,
+	.role-management-panel .panel-actions .btn-primary {width:100%;text-align:center;}
+}
+
+.role-modal-body-section {display:flex;flex-direction:column;gap:.75rem;font-size:.82rem;color:#3a2b00;}
+.role-modal-meta {margin:0;font-size:.78rem;color:var(--automation-text-muted);}
+.role-modal-meta span {font-weight:700;color:#2f1e00;margin-right:.35rem;}
+.role-modal-module {border:1px solid rgba(209,144,0,.28);border-radius:14px;padding:.75rem .85rem;background:#fffdf5;box-shadow:0 6px 18px -14px rgba(90,60,0,.35);}
+.role-modal-module + .role-modal-module {margin-top:.6rem;}
+.role-modal-module h3 {margin:0 0 .45rem;font-size:.85rem;letter-spacing:.05em;text-transform:uppercase;color:#5c4300;}
+.role-modal-perms {margin:.25rem 0 0;padding-left:1.15rem;font-size:.75rem;color:#4b3710;}
+.role-modal-perms li {margin-bottom:.18rem;}
+.role-modal-warning {margin:0 0 .75rem;font-size:.88rem;color:#5c2f00;font-weight:600;}
+.role-modal-error {margin:0 0 .75rem;font-size:.85rem;color:#b91c1c;font-weight:600;}
+.role-confirm-form {display:flex;flex-direction:column;}
+.role-confirm-actions {display:flex;justify-content:flex-end;gap:.65rem;margin-top:.85rem;}
+.role-confirm-actions .btn-secondary {border-radius:999px;padding:.55rem 1.25rem;}
 
 /* Form refinements */
 .login-welcome { margin:0 0 1.75rem; font-size:.85rem; color:#666; }

@@ -1,47 +1,67 @@
 {% extends 'base/base.html' %}
+{% load static %}
 {% block title %}{{ form_title }} User{% endblock %}
+
+{% block head_css %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'css/automation.css' %}">
+{% endblock %}
+
 {% block content %}
-<div class="card user-form-card" data-testid="user-form-card">
-  <div class="page-head"><h1 class="page-title">{{ form_title }} User</h1><a class="btn" href="/users/" data-testid="back-users">Back</a></div>
-  <form method="post" class="user-form" data-testid="user-form">
-    {% csrf_token %}
-    <div class="grid cols-2">
-      <label>First Name<input type="text" name="first_name" value="{{ user_obj.first_name|default:'' }}" required></label>
-      <label>Last Name<input type="text" name="last_name" value="{{ user_obj.last_name|default:'' }}" required></label>
-      <label>Username<input type="text" name="username" value="{{ user_obj.username|default:'' }}" required></label>
-      <label>Email<input type="email" name="email" value="{{ user_obj.email|default:'' }}" required></label>
-      <label>Mobile<input type="text" name="mobile_no" value="{{ user_obj.mobile_no|default:'' }}"></label>
-      <label>Employee #<input type="text" name="employee_no" value="{{ user_obj.employee_no|default:'' }}"></label>
-      <label>Role
-        <select name="role" required>
-          <option value="">-- Select Role --</option>
-          {% for r in roles %}
-            <option value="{{ r.id }}" {% if user_obj.id and r.id in user_groups %}selected{% endif %}>{{ r.name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      {% if mode == 'edit' %}
-      <label>Status
-        <select name="status">
-          <option value="U" {% if user_obj.status == 'U' %}selected{% endif %}>Unlocked</option>
-          <option value="L" {% if user_obj.status == 'L' %}selected{% endif %}>Locked</option>
-        </select>
-      </label>
-      {% endif %}
+<div class="automation-dashboard user-form-dashboard" id="user-form-app">
+  <section class="automation-panel user-form-panel" aria-labelledby="user-form-heading" data-testid="user-form-card">
+    <div class="panel-header">
+      <div>
+        <h2 id="user-form-heading">{{ form_title }} User</h2>
+        <p class="panel-subtitle">Update account details, assign roles, and control access status.</p>
+      </div>
+      <div class="panel-actions">
+        <a class="action-button" href="/users/" data-testid="back-users">Back to Users</a>
+      </div>
     </div>
-    <div class="form-actions">
-      <button class="btn btn-primary" type="submit" data-testid="user-save-btn">Save</button>
-      {% if mode == 'edit' %}<a class="btn btn-danger" href="/users/{{ user_obj.id }}/delete/" data-testid="user-delete-btn">Delete</a>{% endif %}
-    </div>
-  </form>
+    <form method="post" class="user-form automation-form" data-testid="user-form">
+      {% csrf_token %}
+      <fieldset class="user-form-grid">
+        <legend class="sr-only">User details</legend>
+        <label class="user-form-field">First Name
+          <input type="text" name="first_name" value="{{ user_obj.first_name|default:'' }}" required>
+        </label>
+        <label class="user-form-field">Last Name
+          <input type="text" name="last_name" value="{{ user_obj.last_name|default:'' }}" required>
+        </label>
+        <label class="user-form-field">Username
+          <input type="text" name="username" value="{{ user_obj.username|default:'' }}" required>
+        </label>
+        <label class="user-form-field">Email
+          <input type="email" name="email" value="{{ user_obj.email|default:'' }}" required>
+        </label>
+        <label class="user-form-field">Mobile
+          <input type="text" name="mobile_no" value="{{ user_obj.mobile_no|default:'' }}">
+        </label>
+        <label class="user-form-field">Employee #
+          <input type="text" name="employee_no" value="{{ user_obj.employee_no|default:'' }}">
+        </label>
+        <label class="user-form-field">Role
+          <select name="role" required>
+            <option value="">-- Select Role --</option>
+            {% for r in roles %}
+              <option value="{{ r.id }}" {% if user_obj.id and r.id in user_groups %}selected{% endif %}>{{ r.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        {% if mode == 'edit' %}
+        <label class="user-form-field">Status
+          <select name="status">
+            <option value="U" {% if user_obj.status == 'U' %}selected{% endif %}>Unlocked</option>
+            <option value="L" {% if user_obj.status == 'L' %}selected{% endif %}>Locked</option>
+          </select>
+        </label>
+        {% endif %}
+      </fieldset>
+      <div class="user-form-actions">
+        <button class="btn-primary" type="submit" data-testid="user-save-btn">Save</button>
+      </div>
+    </form>
+  </section>
 </div>
-<style>
-.user-form-card{width:50%;min-width:50%;max-width:1200px;margin:0 auto;}
-@media (max-width: 900px){
-  .user-form-card{width:100%;min-width:0;}
-}
-.user-form .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;}
-.user-form label{display:flex;flex-direction:column;font-weight:600;font-size:.9rem;gap:.35rem;}
-.user-form input,.user-form select{padding:.5rem .6rem;border:1px solid #ccc;border-radius:4px;}
-</style>
 {% endblock %}
