@@ -11,9 +11,34 @@
 {% block content %}
 <div class="automation-dashboard" id="automation-app">
 
-    <div class="automation-grid" {% if not initial_selected_scenario %}style="display:none;"{% endif %}>
-        <div id="test-cases-panel-container" style="display:none;">
+    <div class="automation-grid">
+        <div id="test-cases-panel-container">
         <section class="automation-panel data-card" data-panel="cases" aria-labelledby="headline-cases">
+            <div class="panel-header">
+                <h2 id="headline-cases">Test Cases</h2>
+                <div class="panel-controls case-controls">
+                    <div class="case-controls__filters">
+                        <div class="case-filter-group" role="group" aria-label="Filter test cases">
+                            <label for="case-filter-project" class="sr-only">Project</label>
+                            <select id="case-filter-project" class="case-filter-input">
+                                <option value="">Select project</option>
+                            </select>
+                            <label for="case-filter-module" class="sr-only">Module</label>
+                            <select id="case-filter-module" class="case-filter-input" disabled>
+                                <option value="">Select module</option>
+                            </select>
+                            <label for="case-filter-scenario" class="sr-only">Scenario</label>
+                            <select id="case-filter-scenario" class="case-filter-input" disabled>
+                                <option value="">Select scenario</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="case-controls__actions">
+                        <input type="search" id="case-search" class="automation-search" placeholder="Search cases" aria-label="Search cases">
+                        <button type="button" class="btn-primary" id="open-new-case">New Test Case</button>
+                    </div>
+                </div>
+            </div>
             <div class="card table-card automation-table-card" aria-live="polite">
             <div class="automation-list" data-role="case-list" aria-live="polite">
                 <button type="button" id="run-cases-btn" class="btn-primary" style="display:none;margin-bottom:12px;">Run Selected Case</button>
@@ -73,45 +98,6 @@
         </section>
     </div> {# end #test-cases-panel-container #}
     </div> {# end .automation-grid #}
-
-    <!-- Modal: Select Plan -> Module -> Scenario for creating a case -->
-    <!-- Note: aria-hidden is controlled by JS; the dialog container exposes role/aria-modal and is focusable. -->
-    <dialog class="automation-modal" data-role="case-selection-modal">
-        <!-- explicit overlay element (toggled by JS) -->
-        <div data-role="case-selection-overlay" hidden></div>
-        <div class="modal-dialog" data-role="case-selection-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="case-selection-title" tabindex="-1">
-            <header>
-                <h3 id="case-selection-title">Select Plan · Module · Scenario</h3>
-            </header>
-            <div class="modal-body">
-                <div class="form-row">
-                    <label for="modal-case-plan">Test Plan</label>
-                    <select id="modal-case-plan" data-role="modal-case-plan">
-                        <option value="">(select a plan)</option>
-                    </select>
-                </div>
-                <div class="form-row">
-                    <label for="modal-case-module">Test Module</label>
-                    <select id="modal-case-module" data-role="modal-case-module" disabled>
-                        <option value="">(select module)</option>
-                    </select>
-                </div>
-                <div class="form-row">
-                    <label for="modal-case-scenario">Test Scenario</label>
-                    <select id="modal-case-scenario" data-role="modal-case-scenario" disabled>
-                        <option value="">(select scenario)</option>
-                    </select>
-                </div>
-            </div>
-            <div class="modal-actions">
-                <button type="button" class="btn-secondary" id="case-selection-cancel">Cancel</button>
-                <button type="button" class="btn-primary" id="case-selection-continue">Continue</button>
-            </div>
-        </div>
-    </dialog>
-
-<!-- Hidden field used to set selected scenario id when modal continues -->
-<input type="hidden" id="case-selected-scenario-id" name="selected_scenario_id" value="">
 
     <!-- Add Test Case modal (copied from data management) -->
     <div class="automation-modal" data-role="module-add-case-modal" hidden>
