@@ -3739,7 +3739,6 @@
                                 <div class="table-action-group">
                                     <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>
                                     <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>
-                                    <button type="button" class="action-button" data-action="add-case" data-scenario-id="${scenario.id}">Add Case</button>
                                     <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>
                                 </div>
                             </td>
@@ -3816,7 +3815,6 @@
                                                     <div class="table-action-group">
                                                         <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>
                                                         <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>
-                                                        <button type="button" class="action-button" data-action="add-case" data-scenario-id="${scenario.id}">Add Case</button>
                                                         <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>
                                                     </div>
                                                 </td>
@@ -3850,7 +3848,6 @@
                                                 <div class="table-action-group">
                                                     <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>
                                                     <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>
-                                                    <button type="button" class="action-button" data-action="add-case" data-scenario-id="${scenario.id}">Add Case</button>
                                                     <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>
                                                 </div>
                                             </td>
