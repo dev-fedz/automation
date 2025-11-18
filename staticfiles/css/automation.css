@@ -1,3 +1,55 @@
+/* Partial overrides for multi-scenario header visuals — keep in sync with staticfiles/css/automation.css */
+
+/* parent scenario header layout */
+.multi-scenario-header {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.6rem;
+    padding: 0.8rem 1rem;
+}
+
+.multi-scenario-caret { margin-right: 0.6rem; }
+.multi-scenario-title { font-weight: 700; }
+.multi-scenario-status { margin-left: auto; margin-right: 0.2rem; white-space: nowrap; font-weight: 600; }
+
+/* state-specific colors */
+.multi-scenario[data-status="failed"] .multi-scenario-status { color: #b91c1c; }
+.multi-scenario[data-status="running"] .multi-scenario-status { color: #92400e; }
+.multi-scenario[data-status="passed"] .multi-scenario-status { color: #065f46; }
+
+/* compact counts label next to title */
+.multi-scenario-counts { margin-left: 0.5rem; display: inline-flex; gap: 0.6rem; align-items: center; color: var(--automation-text-muted); font-size: 0.85rem; }
+.multi-scenario-counts .count { display:inline-flex; gap:0.35rem; align-items:center; }
+.multi-scenario-counts .count strong { font-weight:700; }
+.multi-scenario-counts .count-passed { color: #065f46; }
+.multi-scenario-counts .count-failed { color: #b91c1c; }
+.multi-scenario-counts .count-blocked { color: #7f1d1d; }
+.multi-scenario-counts .count-skipped { color: #6b7280; }
+.multi-scenario-counts .count-queued { color: #374151; }
+.multi-scenario-counts .count-running { color: #92400e; }
+
+/* parent-level loading spinner next to status when scenario is running */
+.multi-scenario[data-status="running"] .multi-scenario-status {
+    /* use inline-flex so spinner and label align vertically and share height */
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    position: relative;
+    font-size: 0.9rem; /* ensure consistent sizing */
+}
+.multi-scenario[data-status="running"] .multi-scenario-status::before {
+    content: '';
+    display: inline-block;
+    /* use em so spinner scales to the label's font-size and matches its height */
+    width: 1em;
+    height: 1em;
+    border-radius: 50%;
+    border: 0.12em solid rgba(0,0,0,0.12);
+    border-top-color: #92400e;
+    margin-right: 0;
+    animation: automation-spinner 0.8s linear infinite;
+}
 /* Automation Run Styles */
 .automation-run__item-header {
     display: flex;

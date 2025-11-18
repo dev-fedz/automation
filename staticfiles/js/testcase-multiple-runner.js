@@ -56,7 +56,7 @@
         if (existing) existing.remove();
 
         const modal = document.createElement('div');
-        modal.className = 'modal';
+        modal.className = 'modal multi-run';
         modal.id = 'testcase-multi-response-modal';
         modal.setAttribute('aria-hidden', 'true');
         modal.tabIndex = -1;
@@ -1819,6 +1819,72 @@
         if (assertionsEl) assertionsEl.innerHTML = '';
         const preview = container.querySelector('.response-preview');
         if (preview) preview.hidden = true;
+        // Update the container dataset status if a clear mapping exists
+        if (statusText) {
+            const lower = String(statusText || '').toLowerCase();
+            if (lower.indexOf('failed') !== -1) container.dataset.status = 'failed';
+            else if (lower.indexOf('blocked') !== -1) container.dataset.status = 'blocked';
+            else if (lower.indexOf('skipped') !== -1) container.dataset.status = 'skipped';
+            else if (lower.indexOf('passed') !== -1) container.dataset.status = 'passed';
+            else if (lower.indexOf('running') !== -1 || lower.indexOf('loading') !== -1) container.dataset.status = 'running';
+        }
+
+        try {
+            const parent = container.closest && container.closest('.multi-scenario');
+            if (parent) {
+                updateScenarioStatus(parent);
+            }
+        } catch (_e) { /* ignore */ }
+    }
+
+    function updateScenarioStatus(parent) {
+        if (!parent) return;
+        try {
+            const statusEl = parent.querySelector && parent.querySelector('.multi-scenario-status');
+            const items = Array.from(parent.querySelectorAll('.multi-item'));
+            if (!items.length) {
+                if (statusEl) statusEl.textContent = '';
+                return;
+            }
+            const statuses = items.map(it => (it.dataset && it.dataset.status) ? String(it.dataset.status).toLowerCase() : 'queued');
+
+            const anyRunning = statuses.some(s => s === 'running' || s === 'loading');
+            const anyQueued = statuses.some(s => s === 'queued');
+            const anyFailed = statuses.some(s => s === 'failed');
+            const anyBlocked = statuses.some(s => s === 'blocked');
+            const anySkipped = statuses.some(s => s === 'skipped');
+            const anyPassed = statuses.some(s => s === 'passed');
+
+            let text = '';
+            if (anyRunning) text = 'Running';
+            else if (anyQueued && !anyPassed && !anyFailed && !anyBlocked && anyQueued) text = 'Queued';
+            else if (anyFailed) text = 'Failed';
+            else if (anyBlocked) text = 'Blocked';
+            else if (anySkipped && !anyPassed) text = 'Skipped';
+            else if (anyPassed) text = 'Passed';
+            else text = '';
+
+            if (statusEl) statusEl.textContent = text;
+            try { parent.dataset.status = (text || '').toLowerCase(); } catch (_e) { }
+
+            // compute counts per state and render a compact counts label
+            try {
+                const countsEl = parent.querySelector && parent.querySelector('.multi-scenario-counts');
+                if (countsEl) {
+                    const counts = statuses.reduce((acc, s) => { acc[s] = (acc[s] || 0) + 1; return acc; }, {});
+                    const order = ['passed', 'failed', 'blocked', 'skipped', 'queued', 'running'];
+                    const parts = [];
+                    order.forEach((key) => {
+                        const n = counts[key] || 0;
+                        // Always show 'passed' and 'failed' counts even if they are zero. Show other statuses only when non-zero.
+                        if (key === 'passed' || key === 'failed' || n > 0) {
+                            parts.push(`<span class="count count-${key}"><strong>${n}</strong> ${key}</span>`);
+                        }
+                    });
+                    countsEl.innerHTML = parts.join(' ');
+                }
+            } catch (_e) { /* ignore counts render errors */ }
+        } catch (_e) { /* ignore update errors */ }
     }
 
     function markCaseFailed(container, reason, bodyText) {
@@ -1943,6 +2009,11 @@
         }
 
         if (statusEl) statusEl.textContent = 'Loading request details…';
+        try { container.dataset.status = 'running'; } catch (_e) { }
+        try {
+            const parent = container && container.closest ? container.closest('.multi-scenario') : null;
+            if (parent) updateScenarioStatus(parent);
+        } catch (_e) { /* ignore */ }
         if (loadingEl) loadingEl.hidden = false;
         if (contentEl) contentEl.hidden = true;
 
@@ -1962,6 +2033,11 @@
         }
 
         if (statusEl) statusEl.textContent = 'Running…';
+        try { container.dataset.status = 'running'; } catch (_e) { }
+        try {
+            const parent = container && container.closest ? container.closest('.multi-scenario') : null;
+            if (parent) updateScenarioStatus(parent);
+        } catch (_e) { /* ignore */ }
 
         const payload = { request_id: requestId };
         if (envId !== undefined && envId !== null && String(envId).trim() !== '') {
@@ -2735,6 +2811,140 @@
         };
         // mark initialized flag
         window.__automationMultiRunner._initialized = true;
+    }
+    // Provide a scenario-grouped runner which shows a parent accordion per scenario
+    if (!window.__automationMultiRunner.runScenarioBatch || typeof window.__automationMultiRunner.runScenarioBatch !== 'function') {
+        window.__automationMultiRunner.runScenarioBatch = function runScenarioBatch(scenarios, options) {
+            return new Promise((resolve, reject) => {
+                try {
+                    if (!Array.isArray(scenarios) || !scenarios.length) {
+                        resolve(null);
+                        return;
+                    }
+
+                    // create a dedicated modal for scenarios
+                    // remove existing if present
+                    const existing = document.getElementById('scenario-multi-response-modal');
+                    if (existing) existing.remove();
+
+                    const modal = document.createElement('div');
+                    modal.className = 'modal multi-run';
+                    modal.id = 'scenario-multi-response-modal';
+                    modal.setAttribute('aria-hidden', 'true');
+                    modal.tabIndex = -1;
+                    const title = options && options.title ? options.title : 'Run Scenarios';
+                    modal.innerHTML = `
+                        <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="scenario-multi-response-title">
+                            <div class="modal-header">
+                                <h3 id="scenario-multi-response-title">${escapeHtml(title)}</h3>
+                                <button type="button" id="scenario-multi-response-close" class="modal-close" aria-label="Close">×</button>
+                            </div>
+                            <div class="modal-body">
+                                <div id="scenario-multi-list" class="multi-list"></div>
+                            </div>
+                        </div>
+                    `;
+                    document.body.appendChild(modal);
+
+                    // Ensure the scenario modal is at least 70% width and centered — use inline styles to override cached CSS
+                    try {
+                        const dialogEl = modal.querySelector('.modal-dialog');
+                        if (dialogEl) {
+                            dialogEl.style.cssText = 'position:relative;margin:1.5rem auto;width:70vw;max-width:1200px;border-radius:10px;box-shadow:var(--automation-shadow);';
+                        }
+                        const bodyEl = modal.querySelector('.modal-body');
+                        if (bodyEl) {
+                            bodyEl.style.cssText = 'max-height:70vh;overflow:auto;';
+                        }
+                    } catch (e) { /* ignore */ }
+
+                    const list = modal.querySelector('#scenario-multi-list');
+                    const allCases = [];
+                    let globalIndex = 0;
+                    const caseInfoByKey = new Map();
+
+                    scenarios.forEach((scenario, sIdx) => {
+                        const scenarioId = scenario && (scenario.id || scenario.scenarioId || scenario.scenario_id) ? String(scenario.id || scenario.scenarioId || scenario.scenario_id) : `scenario-${sIdx}`;
+                        const scenarioTitle = scenario && (scenario.title || scenario.name) ? String(scenario.title || scenario.name) : `Scenario ${scenarioId}`;
+
+                        // parent container
+                        const parent = document.createElement('div');
+                        parent.className = 'multi-scenario';
+                        const headerId = `scenario-${scenarioId}-header`;
+                        const bodyId = `scenario-${scenarioId}-body`;
+                        parent.innerHTML = `
+                            <div class="multi-scenario-header" id="${headerId}" role="button" aria-expanded="false" tabindex="0">
+                                <span class="multi-scenario-caret">▶</span>
+                                <span class="multi-scenario-title">${escapeHtml(scenarioTitle)}</span>
+                                <span class="multi-scenario-counts" aria-hidden="true"></span>
+                                <span class="multi-scenario-status" aria-hidden="true"></span>
+                            </div>
+                            <div class="multi-scenario-body" id="${bodyId}" hidden>
+                                <div class="multi-list scenario-case-list"></div>
+                            </div>
+                        `;
+                        const header = parent.querySelector('.multi-scenario-header');
+                        const body = parent.querySelector('.multi-scenario-body');
+                        const childList = parent.querySelector('.scenario-case-list');
+                        // toggle with expanded class for visual state
+                        header.addEventListener('click', () => {
+                            const expanded = header.getAttribute('aria-expanded') === 'true';
+                            header.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+                            body.hidden = expanded ? true : false;
+                            try { header.classList.toggle('is-expanded', !expanded); } catch (_e) { }
+                        });
+                        header.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); header.click(); } });
+
+                        // append cases for this scenario
+                        const cases = Array.isArray(scenario.cases) ? scenario.cases : [];
+                        cases.forEach((caseInfo) => {
+                            const domId = caseInfo.caseId || caseInfo.caseKey || `case-${globalIndex}-${globalIndex}`;
+                            const item = makeAccordionItem(domId, caseInfo.title || caseInfo.name || `Case ${domId}`);
+                            item.dataset.status = 'queued';
+                            if (caseInfo.caseId) item.dataset.caseId = String(caseInfo.caseId);
+                            if (caseInfo.caseKey) item.dataset.caseKey = String(caseInfo.caseKey);
+                            if (caseInfo.requestId) item.dataset.requestId = String(caseInfo.requestId);
+                            if (caseInfo.envId !== undefined && caseInfo.envId !== null && caseInfo.envId !== '') item.dataset.environmentId = String(caseInfo.envId);
+
+                            // store mapping so after ordering we can reference the container
+                            const key = caseInfo.caseId || (`__idx_${globalIndex}`);
+                            const infoCopy = Object.assign({}, caseInfo, { originalIndex: globalIndex, container: item });
+                            allCases.push(infoCopy);
+                            caseInfoByKey.set(key, infoCopy);
+                            childList.appendChild(item);
+                            globalIndex += 1;
+                        });
+
+                        list.appendChild(parent);
+                    });
+
+                    // close handler
+                    const close = modal.querySelector('#scenario-multi-response-close');
+                    if (close) close.addEventListener('click', () => { closeModal(modal); setTimeout(() => modal.remove(), 250); });
+                    modal.addEventListener('click', (ev2) => { if (ev2.target === modal) { closeModal(modal); setTimeout(() => modal.remove(), 250); } });
+
+                    openModal(modal);
+
+                    // Flatten and order by dependency then run sequentially
+                    const ordered = orderCasesByDependency(allCases.slice());
+                    const caseInfoById = new Map();
+                    ordered.forEach((ci) => { if (ci.caseId) caseInfoById.set(ci.caseId, ci); });
+
+                    const autoClose = options && typeof options.autoCloseOnFinish === 'boolean' ? options.autoCloseOnFinish : false;
+                    runSelectedCasesSequentially(ordered, caseInfoById)
+                        .then(() => {
+                            try { if (autoClose) { closeModal(modal); setTimeout(() => modal.remove(), 250); } } catch (_e) { }
+                            resolve(true);
+                        })
+                        .catch((err) => {
+                            try { if (autoClose) { closeModal(modal); setTimeout(() => modal.remove(), 250); } } catch (_e) { }
+                            reject(err);
+                        });
+                } catch (err) {
+                    reject(err);
+                }
+            });
+        };
     }
     function init() {
         // Delegated controls for view/mode/toggle inside the multi modal

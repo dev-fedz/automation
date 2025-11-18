@@ -424,16 +424,19 @@
             const scenarioId = stringId(scenario.id);
             const isActive = scenarioId && scenarioId === state.activeScenarioId;
             const isChecked = state.selectedScenarios.has(scenarioId);
+            const hasCases = Array.isArray(scenario.cases) && scenario.cases.length > 0;
+            const disabledAttr = hasCases ? '' : ' disabled aria-disabled="true" title="No test cases for this scenario"';
+            const checkboxDisabledAttr = hasCases ? '' : ' disabled aria-disabled="true" title="No test cases for this scenario"';
             return (
                 `<div class="automation-item${isActive ? ' is-active' : ''}" data-scenario-id="${escapeHtml(scenarioId || '')}">` +
                 '<div class="automation-run__item-header">' +
                 `<label class="automation-run__checkbox-group" for="automation-scenario-${escapeHtml(scenarioId || '')}">` +
-                `<input type="checkbox" id="automation-scenario-${escapeHtml(scenarioId || '')}" data-action="scenario-checkbox" data-scenario-id="${escapeHtml(scenarioId || '')}" aria-label="Select scenario ${escapeHtml(scenario.title || 'Untitled scenario')}" ${isChecked ? 'checked' : ''}>` +
+                `<input type="checkbox" id="automation-scenario-${escapeHtml(scenarioId || '')}" data-action="scenario-checkbox" data-scenario-id="${escapeHtml(scenarioId || '')}" aria-label="Select scenario ${escapeHtml(scenario.title || 'Untitled scenario')}" ${isChecked ? 'checked' : ''}${checkboxDisabledAttr}>` +
                 '</label>' +
                 `<button type="button" class="automation-run__item-select" data-action="scenario-select" data-scenario-id="${escapeHtml(scenarioId || '')}">` +
                 `<strong>${escapeHtml(scenario.title || 'Untitled scenario')}</strong>` +
                 '</button>' +
-                `<button type="button" class="action-button" data-action="scenario-play" data-scenario-id="${escapeHtml(scenarioId || '')}">Run</button>` +
+                `<button type="button" class="action-button" data-action="scenario-play" data-scenario-id="${escapeHtml(scenarioId || '')}"${disabledAttr}>Run</button>` +
                 '</div>' +
                 '</div>'
             );
@@ -985,6 +988,13 @@
         const scenario = getScenarioById(project, scenarioId);
         const label = scenario ? scenario.title || scenarioId : scenarioId;
         const cases = collectScenarioCases(project, [scenarioId]);
+        try {
+            if (window.__automationMultiRunner && typeof window.__automationMultiRunner.runScenarioBatch === 'function') {
+                const scenarioObj = { id: scenarioId, title: label, cases };
+                window.__automationMultiRunner.runScenarioBatch([scenarioObj], { title: `Run Scenario: ${label}` });
+                return;
+            }
+        } catch (e) { /* ignore and fallback */ }
         runCaseBatchWithModal(cases, { title: `Run Scenario: ${label}` });
     };
 
@@ -1004,6 +1014,18 @@
             return;
         }
         const ids = Array.from(state.selectedScenarios);
+        try {
+            if (window.__automationMultiRunner && typeof window.__automationMultiRunner.runScenarioBatch === 'function') {
+                const scenarioObjs = ids.map((id) => {
+                    const scenario = getScenarioById(project, id);
+                    const title = scenario ? scenario.title || id : id;
+                    const cases = collectScenarioCases(project, [id]);
+                    return { id, title, cases };
+                });
+                window.__automationMultiRunner.runScenarioBatch(scenarioObjs, { title: 'Run Selected Scenarios' });
+                return;
+            }
+        } catch (e) { /* ignore and fallback */ }
         const cases = collectScenarioCases(project, ids);
         runCaseBatchWithModal(cases, { title: 'Run Selected Scenarios' });
     };
