@@ -1,4 +1,5 @@
 // Single-file testcase runner implementation
+// Single-file testcase runner implementation
 (function () {
     'use strict';
 
@@ -861,7 +862,7 @@
                     if (value === undefined) {
                         return;
                     }
-                    const patternSource = String.raw`\{\{\s*${escapeRegex(ref.key)}\s*\}\}`;
+                    const patternSource = String.raw`\\{\\{\\s*${escapeRegex(ref.key)}\\s*\\}\\}`;
                     const pattern = new RegExp(patternSource, 'g');
                     try {
                         payload.body = payload.body.replace(pattern, typeof value === 'string' ? value : String(value));
@@ -1580,6 +1581,36 @@
         }
     }
 
+    // Sanitize HTML that will be written into the preview iframe.
+    // Removes script tags and preload/modulepreload links and injects
+    // a restrictive inline Content-Security-Policy meta tag where possible.
+    function sanitizeHtmlForPreview(html) {
+        if (!html) return html;
+        try {
+            let s = String(html);
+            // Strip <script>...</script> blocks
+            s = s.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+            // Remove preload/modulepreload links that may pull SPA chunks
+            s = s.replace(/<link\b[^>]*rel=["']?(?:modulepreload|preload)["']?[^>]*>/gi, '');
+
+            // Do NOT inject a CSP meta tag here — injecting restrictive CSPs can
+            // block inline styles and images in legitimate preview documents and
+            // lead to confusing errors. Stripping scripts and preload links is
+            // sufficient to prevent the preview from attempting to load Next.js
+            // client chunks.
+            if (/\<\s*head[^>]*>/i.test(s)) {
+                return s;
+            }
+            if (/\<\s*html[^>]*>/i.test(s)) {
+                return s;
+            }
+            // wrap in minimal document if no html/head present
+            return '<!doctype html><html><head></head><body>' + s + '</body></html>';
+        } catch (e) {
+            return html;
+        }
+    }
+
     function setBody(bodyText, jsonObj) {
         const el = document.getElementById('testcase-response-body');
         const preview = document.getElementById('testcase-response-preview');
@@ -1607,7 +1638,13 @@
                 preview.hidden = false;
                 if (preview.contentDocument) {
                     preview.contentDocument.open();
-                    preview.contentDocument.write(bodyText || '');
+                    try {
+                        const safeHtml = sanitizeHtmlForPreview(bodyText || '');
+                        preview.contentDocument.write(safeHtml);
+                    } catch (writeErr) {
+                        // Fallback: write raw body if sanitizer or write fails
+                        preview.contentDocument.write(bodyText || '');
+                    }
                     preview.contentDocument.close();
                 }
                 el.textContent = (bodyText || '').slice(0, 20000);
@@ -1762,7 +1799,12 @@
                             preview.hidden = false;
                             if (preview.contentDocument) {
                                 preview.contentDocument.open();
-                                preview.contentDocument.write(_lastResponse.text || '');
+                                try {
+                                    const safeHtml = sanitizeHtmlForPreview(_lastResponse.text || '');
+                                    preview.contentDocument.write(safeHtml);
+                                } catch (writeErr) {
+                                    preview.contentDocument.write(_lastResponse.text || '');
+                                }
                                 preview.contentDocument.close();
                             }
                         } catch (e) {
@@ -1790,7 +1832,12 @@
                         preview.hidden = false;
                         if (preview.contentDocument) {
                             preview.contentDocument.open();
-                            preview.contentDocument.write(_lastResponse.text || '');
+                            try {
+                                const safeHtml = sanitizeHtmlForPreview(_lastResponse.text || '');
+                                preview.contentDocument.write(safeHtml);
+                            } catch (writeErr) {
+                                preview.contentDocument.write(_lastResponse.text || '');
+                            }
                             preview.contentDocument.close();
                         }
                     } catch (e) {
@@ -1880,7 +1927,7 @@
 
             const resolveTemplate = (v, vars) => {
                 if (!v || typeof v !== 'string') return v;
-                const m = v.match(/^\{\{\s*([\w\.\-]+)\s*\}\}$/);
+                const m = v.match(/^\{\{\s*([\w\.]\-]+)\s*\}\}$/);
                 if (!m) return v;
                 const key = m[1];
                 if (vars && Object.prototype.hasOwnProperty.call(vars, key)) return vars[key];
@@ -2381,7 +2428,37 @@
 
         _currentCaseOptions = { responseEncrypted };
         _currentExpectedResults = normalizeExpectedResultsEntries(expectedRaw || []);
-        runRequest(requestId);
+        // Prevent duplicate runs when the same button's click is handled both inline
+        // (onclick attribute) and via delegated event listeners. Use a short
+        // re-entrancy guard on the element's dataset.
+        try {
+            const ds = buttonElement.dataset || {};
+            if (ds.automationRunning === '1') {
+                // Already running — ignore duplicate invocation
+                return;
+            }
+            if (ds) ds.automationRunning = '1';
+        } catch (_e) {
+            /* ignore dataset issues */
+        }
+        // Clear the guard when the runRequest promise settles.
+        try {
+            const p = runRequest(requestId);
+            if (p && typeof p.finally === 'function') {
+                p.finally(() => {
+                    try {
+                        if (buttonElement && buttonElement.dataset) delete buttonElement.dataset.automationRunning;
+                    } catch (_err) { /* ignore */ }
+                });
+            } else {
+                // Fallback: clear after short delay
+                setTimeout(() => {
+                    try { if (buttonElement && buttonElement.dataset) delete buttonElement.dataset.automationRunning; } catch (_err) { }
+                }, 1500);
+            }
+        } catch (_e) {
+            try { if (buttonElement && buttonElement.dataset) delete buttonElement.dataset.automationRunning; } catch (_err) { }
+        }
     }
 
     function toggleSectionVisibility(targetId) {

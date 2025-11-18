@@ -1376,13 +1376,17 @@ body.automation-modal-open {
     background: #fff;
     border-radius: 3px;
 }
-.case-checkbox-label input[type="checkbox"] { /* visually hide native but keep in DOM */
+.case-checkbox-label input[type="checkbox"] { /* visually hide native but keep in DOM and interactive */
     position: absolute !important;
     opacity: 0 !important;
-    width: 1px !important;
-    height: 1px !important;
+    /* cover the fake-checkbox area so clicks on the label still toggle the input */
+    width: 100% !important;
+    height: 100% !important;
+    left: 0 !important;
+    top: 0 !important;
     margin: 0 !important;
-    pointer-events: none !important;
+    pointer-events: auto !important;
+    cursor: pointer !important;
 }
 .case-checkbox-label input[type="checkbox"]:checked + .fake-checkbox {
     background: linear-gradient(180deg,#fff4c7,#fff9e0);

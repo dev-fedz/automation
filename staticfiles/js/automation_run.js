@@ -603,6 +603,152 @@
         window.setTimeout(hideRunCasesButton, 0);
     };
 
+    // ----- Case checkbox helper functions (borrowed from Projects > Test Case page) -----
+    function getRunBtn() { return elements.runCasesButton || document.getElementById('run-cases-btn'); }
+
+    function getSelectAll() { return document.getElementById('select-all-cases'); }
+
+    function getRowCheckboxes() {
+        const container = elements.caseTableContainer;
+        if (!container) return [];
+        const table = container.querySelector('table');
+        if (!table) return [];
+        return Array.from(table.querySelectorAll('input.case-checkbox'));
+    }
+
+    function debounce(fn, wait) {
+        let timer = null;
+        return function debounced() {
+            const ctx = this;
+            const args = arguments;
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(function () {
+                timer = null;
+                try { fn.apply(ctx, args); } catch (e) { /* ignore */ }
+            }, wait);
+        };
+    }
+
+    function ensureRunBtn() {
+        let btn = getRunBtn();
+        if (btn) return btn;
+        const list = elements.caseList || (elements.caseTableContainer ? elements.caseTableContainer : document.body);
+        if (!list) return null;
+        btn = document.createElement('button');
+        btn.type = 'button';
+        btn.id = 'run-cases-btn';
+        btn.className = 'btn-primary';
+        btn.textContent = 'Run Selected Case';
+        try { btn.style.setProperty('display', 'none', 'important'); btn.style.setProperty('margin-bottom', '12px', 'important'); } catch (e) { btn.style.display = 'none'; btn.style.marginBottom = '12px'; }
+        const table = list.querySelector('table');
+        if (table && table.parentNode) table.parentNode.insertBefore(btn, table);
+        else list.insertBefore(btn, list.firstChild);
+        // update elements reference
+        elements.runCasesButton = btn;
+        return btn;
+    }
+
+    function setRunBtnVisible(visible) {
+        const btn = getRunBtn();
+        if (!btn) return;
+        try {
+            if (visible) {
+                btn.style.setProperty('display', 'inline-flex', 'important');
+                btn.removeAttribute('aria-hidden');
+            } else {
+                btn.style.setProperty('display', 'none', 'important');
+                btn.setAttribute('aria-hidden', 'true');
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    function updateSelectAllState() {
+        try { ensureRunBtn(); } catch (e) { /* ignore */ }
+        const selectAll = getSelectAll();
+        const boxes = getRowCheckboxes();
+        if (!selectAll && boxes.length === 0) {
+            setRunBtnVisible(false);
+            return;
+        }
+        if (boxes.length === 0) {
+            if (selectAll) {
+                selectAll.checked = false;
+                selectAll.indeterminate = false;
+                selectAll.disabled = true;
+            }
+            setRunBtnVisible(false);
+            return;
+        }
+        if (selectAll) selectAll.disabled = false;
+        const checked = boxes.filter(b => b.checked).length;
+        if (selectAll) {
+            selectAll.checked = (checked === boxes.length);
+            selectAll.indeterminate = (checked > 0 && checked < boxes.length);
+            try {
+                const headerFake = selectAll.parentElement && selectAll.parentElement.querySelector('.fake-checkbox');
+                if (headerFake) {
+                    headerFake.classList.toggle('header-indeterminate', selectAll.indeterminate === true);
+                    headerFake.classList.toggle('checked', selectAll.checked === true);
+                }
+            } catch (e) { /* ignore */ }
+        }
+        setRunBtnVisible(checked > 0);
+    }
+
+    const debouncedUpdateSelectAllState = debounce(updateSelectAllState, 40);
+
+    // Initial sync
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', updateSelectAllState);
+    } else {
+        updateSelectAllState();
+    }
+
+    // Expose for other scripts
+    try {
+        window.syncCaseSelectionState = updateSelectAllState;
+        window.scheduleCaseSelectionState = debouncedUpdateSelectAllState;
+    } catch (e) { /* ignore */ }
+
+    // Listen for clicks on fake-checkbox/labels to schedule state update
+    document.addEventListener('click', function (ev) {
+        const t = ev.target;
+        if (!t) return;
+        if (t.matches('.fake-checkbox') || t.closest('.case-checkbox-label')) {
+            // If the visible fake-checkbox was clicked, ensure the underlying native
+            // input toggles reliably across browsers by explicitly toggling it here.
+            try {
+                const label = t.closest('.case-checkbox-label');
+                if (label) {
+                    const input = label.querySelector('input[type="checkbox"]');
+                    if (input && input instanceof HTMLInputElement) {
+                        // If the input wasn't the original click target, toggle it here
+                        // and dispatch a change event. Prevent double toggles by
+                        // stopping propagation of the click when we handle it.
+                        if (ev.target !== input) {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            input.checked = !input.checked;
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    }
+                }
+            } catch (err) { /* ignore */ }
+            try { debouncedUpdateSelectAllState(); } catch (e) { setTimeout(updateSelectAllState, 0); }
+        }
+    });
+
+    // NOTE: header select-all is handled by the central `root.addEventListener('change', ...)`
+    // above. Avoid duplicating that logic here to prevent conflicting toggles.
+
+    // Observe changes to the case table container and re-run state update
+    if (elements.caseTableContainer) {
+        try {
+            const mo = new MutationObserver(function () { try { debouncedUpdateSelectAllState(); } catch (e) { setTimeout(updateSelectAllState, 0); } });
+            mo.observe(elements.caseTableContainer, { childList: true, subtree: true, attributes: true });
+        } catch (e) { /* ignore */ }
+    }
+
     const renderAll = () => {
         renderProjects();
         renderModules();
@@ -1042,18 +1188,69 @@
 
         // Case table: header select-all
         if (target.matches('#select-all-cases')) {
+            // If another script initialized case-checkbox handling on this page
+            // (marked by data-case-checkbox-init), delegate to that script and
+            // avoid duplicating the header toggle logic which causes race
+            // conditions when both handlers run.
+            try {
+                if (target.dataset && target.dataset.caseCheckboxInit === '1') {
+                    console.debug('[automation-run] header init detected elsewhere; skipping header handler');
+                    return;
+                }
+            } catch (e) { /* ignore */ }
+            console.debug('[automation-run] root change handler: header toggled', { checked: !!target.checked });
             try {
                 const table = elements.caseTableContainer ? elements.caseTableContainer.querySelector('table') : null;
-                if (!table) return;
-                const checkboxes = table.querySelectorAll('input.case-checkbox');
+                const checkboxes = table ? table.querySelectorAll('input.case-checkbox') : document.querySelectorAll('input.case-checkbox');
+
+                // Debug probes: attach a short-lived capturing change listener and a
+                // MutationObserver while we toggle rows so we can see if another
+                // script reacts during our loop and mutates the DOM or checkbox state.
+                const probeEvents = [];
+                const changeProbe = function (ev) {
+                    try {
+                        probeEvents.push({ when: Date.now(), target: ev.target, checked: ev.target && ev.target.checked, type: 'change' });
+                        console.warn('[automation-run][probe] change event during header loop', { target: ev.target, checked: ev.target && ev.target.checked });
+                        console.trace();
+                    } catch (err) { /* ignore */ }
+                };
+
+                let mo = null;
+                try {
+                    if (elements.caseTableContainer) {
+                        mo = new MutationObserver(function (mutations) {
+                            try {
+                                console.warn('[automation-run][probe] mutation during header loop', { mutations });
+                                console.trace();
+                            } catch (err) { /* ignore */ }
+                        });
+                        mo.observe(elements.caseTableContainer, { childList: true, subtree: true, attributes: true });
+                    }
+                } catch (err) { /* ignore */ }
+
+                document.addEventListener('change', changeProbe, true);
+
                 checkboxes.forEach((cb) => {
                     if (!(cb instanceof HTMLInputElement)) return;
+                    console.debug('[automation-run] root toggling row', { before: cb.checked, node: cb });
                     cb.checked = target.checked;
-                    // dispatch change event so other handlers run
-                    cb.dispatchEvent(new Event('change', { bubbles: true }));
+                    // Avoid dispatching native change events here: other global listeners
+                    // react to those and can revert state during our loop. Instead, update
+                    // application state once after the loop completes.
+                    console.debug('[automation-run] root toggled row (no event)', { after: cb.checked, node: cb });
                 });
+
+                // After we've updated DOM properties for all rows, run the debounced
+                // state updater so the rest of the UI (header indeterminate, run
+                // button visibility) refreshes. This avoids per-row change handlers
+                // re-entering while we're mid-loop.
+                try { debouncedUpdateSelectAllState(); } catch (e) { setTimeout(updateSelectAllState, 0); }
+
+                // cleanup probes
+                try { document.removeEventListener('change', changeProbe, true); } catch (e) { }
+                try { if (mo) mo.disconnect(); } catch (e) { }
             } catch (e) {
-                /* ignore */
+                console.error('[automation-run] root handler error toggling rows', e);
             }
             return;
         }
@@ -1088,10 +1285,21 @@
     if (elements.runCasesButton) {
         elements.runCasesButton.addEventListener('click', (ev) => {
             ev.preventDefault();
+            try {
+                // Prevent duplicate rapid clicks from invoking multiple runs
+                const ds = elements.runCasesButton.dataset || {};
+                if (ds.batchRunning === '1') return;
+                if (ds) ds.batchRunning = '1';
+            } catch (_e) { /* ignore dataset issues */ }
+
             const table = elements.caseTableContainer ? elements.caseTableContainer.querySelector('table') : null;
-            if (!table) return;
+            if (!table) {
+                try { if (elements.runCasesButton && elements.runCasesButton.dataset) delete elements.runCasesButton.dataset.batchRunning; } catch (_e) { }
+                return;
+            }
             const checked = Array.from(table.querySelectorAll('input.case-checkbox:checked'));
             if (!checked.length) {
+                try { if (elements.runCasesButton && elements.runCasesButton.dataset) delete elements.runCasesButton.dataset.batchRunning; } catch (_e) { }
                 window.alert('No test cases selected.');
                 return;
             }
@@ -1106,10 +1314,25 @@
                 }
             });
             if (!cases.length) {
+                try { if (elements.runCasesButton && elements.runCasesButton.dataset) delete elements.runCasesButton.dataset.batchRunning; } catch (_e) { }
                 window.alert('No runnable test cases were found for this selection.');
                 return;
             }
-            runCaseBatchWithModal(cases, { title: 'Run Selected Cases' });
+
+            // runCaseBatchWithModal may return a promise — clear guard when settled
+            try {
+                const p = runCaseBatchWithModal(cases, { title: 'Run Selected Cases' });
+                if (p && typeof p.finally === 'function') {
+                    p.finally(() => {
+                        try { if (elements.runCasesButton && elements.runCasesButton.dataset) delete elements.runCasesButton.dataset.batchRunning; } catch (_e) { }
+                    });
+                } else {
+                    // fallback clear after delay
+                    setTimeout(() => { try { if (elements.runCasesButton && elements.runCasesButton.dataset) delete elements.runCasesButton.dataset.batchRunning; } catch (_e) { } }, 2000);
+                }
+            } catch (err) {
+                try { if (elements.runCasesButton && elements.runCasesButton.dataset) delete elements.runCasesButton.dataset.batchRunning; } catch (_e) { }
+            }
         });
     }
 

@@ -2669,58 +2669,59 @@
         }
     }
 
-    function init() {
-        document.addEventListener('click', function (ev) {
-            const t = ev.target;
-            if (!t) return;
-            const btn = t.closest && t.closest('#run-cases-btn');
-            if (!btn) return;
-
-            ev.preventDefault();
-            const selected = collectSelectedCases();
-            if (!selected.length) return;
-
-            const modal = createModal();
-            const list = modal.querySelector('#testcase-multi-list');
-            const ordered = orderCasesByDependency(selected);
-            const caseInfoById = new Map();
-            ordered.forEach((caseInfo, idx) => {
-                const domId = caseInfo.caseId || caseInfo.caseKey || `case-${caseInfo.originalIndex}-${idx}`;
-                const item = makeAccordionItem(domId, caseInfo.title || 'Untitled');
-                item.dataset.status = 'queued';
-                if (caseInfo.caseId) item.dataset.caseId = String(caseInfo.caseId);
-                if (caseInfo.caseKey) item.dataset.caseKey = String(caseInfo.caseKey);
-                if (caseInfo.requestId) item.dataset.requestId = String(caseInfo.requestId);
-                if (caseInfo.envId !== undefined && caseInfo.envId !== null && caseInfo.envId !== '') {
-                    item.dataset.environmentId = String(caseInfo.envId);
-                }
-                caseInfo.container = item;
-                list.appendChild(item);
-                if (caseInfo.caseId) {
-                    caseInfoById.set(caseInfo.caseId, caseInfo);
-                }
-            });
-
-            // close handler
-            const close = modal.querySelector('#testcase-multi-response-close');
-            if (close) close.addEventListener('click', () => { closeModal(modal); setTimeout(() => modal.remove(), 250); });
-
-            // clicking backdrop closes
-            modal.addEventListener('click', (ev2) => { if (ev2.target === modal) { closeModal(modal); setTimeout(() => modal.remove(), 250); } });
-
-            openModal(modal);
-
-            runSelectedCasesSequentially(ordered, caseInfoById).catch((err) => {
-                mirrorAutomationLog('error', '[automation][multi-runner] failed to execute cases', err);
-                ordered.forEach((caseInfo) => {
-                    if (!caseInfo || !caseInfo.container) return;
-                    if (!caseInfo.container.dataset.status || caseInfo.container.dataset.status === 'queued') {
-                        markCaseFailed(caseInfo.container, 'Unexpected execution error.', String(err || 'Execution aborted.'));
+    // Expose a programmatic multi-runner so other scripts can trigger the
+    // multi-case modal and execution without wiring duplicate DOM listeners.
+    if (!window.__automationMultiRunner) window.__automationMultiRunner = {};
+    if (!window.__automationMultiRunner.runCaseBatch || typeof window.__automationMultiRunner.runCaseBatch !== 'function') {
+        window.__automationMultiRunner.runCaseBatch = function runCaseBatch(cases, options) {
+            return new Promise((resolve, reject) => {
+                try {
+                    if (!Array.isArray(cases) || !cases.length) {
+                        resolve(null);
+                        return;
                     }
-                });
-            });
-        });
+                    const modal = createModal();
+                    const list = modal.querySelector('#testcase-multi-list');
+                    const ordered = orderCasesByDependency(cases.slice());
+                    const caseInfoById = new Map();
+                    ordered.forEach((caseInfo, idx) => {
+                        const domId = caseInfo.caseId || caseInfo.caseKey || `case-${caseInfo.originalIndex || idx}-${idx}`;
+                        const item = makeAccordionItem(domId, caseInfo.title || 'Untitled');
+                        item.dataset.status = 'queued';
+                        if (caseInfo.caseId) item.dataset.caseId = String(caseInfo.caseId);
+                        if (caseInfo.caseKey) item.dataset.caseKey = String(caseInfo.caseKey);
+                        if (caseInfo.requestId) item.dataset.requestId = String(caseInfo.requestId);
+                        if (caseInfo.envId !== undefined && caseInfo.envId !== null && caseInfo.envId !== '') {
+                            item.dataset.environmentId = String(caseInfo.envId);
+                        }
+                        caseInfo.container = item;
+                        list.appendChild(item);
+                        if (caseInfo.caseId) {
+                            caseInfoById.set(caseInfo.caseId, caseInfo);
+                        }
+                    });
 
+                    // close handler
+                    const close = modal.querySelector('#testcase-multi-response-close');
+                    if (close) close.addEventListener('click', () => { closeModal(modal); setTimeout(() => modal.remove(), 250); });
+
+                    // clicking backdrop closes
+                    modal.addEventListener('click', (ev2) => { if (ev2.target === modal) { closeModal(modal); setTimeout(() => modal.remove(), 250); } });
+
+                    openModal(modal);
+
+                    runSelectedCasesSequentially(ordered, caseInfoById)
+                        .then(() => { try { closeModal(modal); setTimeout(() => modal.remove(), 250); } catch (_e) { }; resolve(true); })
+                        .catch((err) => { try { closeModal(modal); setTimeout(() => modal.remove(), 250); } catch (_e) { }; reject(err); });
+                } catch (err) {
+                    reject(err);
+                }
+            });
+        };
+        // mark initialized flag
+        window.__automationMultiRunner._initialized = true;
+    }
+    function init() {
         // Delegated controls for view/mode/toggle inside the multi modal
         document.addEventListener('click', function (ev) {
             const t = ev.target;
