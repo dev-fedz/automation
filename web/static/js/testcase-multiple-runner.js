@@ -2710,9 +2710,24 @@
 
                     openModal(modal);
 
+                    // Respect an explicit option to auto-close the modal when the
+                    // run completes. Default behavior is to leave the modal open so
+                    // users can inspect results and avoid unexpected closures.
+                    const autoClose = options && typeof options.autoCloseOnFinish === 'boolean' ? options.autoCloseOnFinish : false;
+
                     runSelectedCasesSequentially(ordered, caseInfoById)
-                        .then(() => { try { closeModal(modal); setTimeout(() => modal.remove(), 250); } catch (_e) { }; resolve(true); })
-                        .catch((err) => { try { closeModal(modal); setTimeout(() => modal.remove(), 250); } catch (_e) { }; reject(err); });
+                        .then(() => {
+                            try {
+                                if (autoClose) { closeModal(modal); setTimeout(() => modal.remove(), 250); }
+                            } catch (_e) { /* ignore */ }
+                            resolve(true);
+                        })
+                        .catch((err) => {
+                            try {
+                                if (autoClose) { closeModal(modal); setTimeout(() => modal.remove(), 250); }
+                            } catch (_e) { /* ignore */ }
+                            reject(err);
+                        });
                 } catch (err) {
                     reject(err);
                 }

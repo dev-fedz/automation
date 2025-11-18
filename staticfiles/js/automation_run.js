@@ -1198,7 +1198,7 @@
                     return;
                 }
             } catch (e) { /* ignore */ }
-            console.debug('[automation-run] root change handler: header toggled', { checked: !!target.checked });
+            // header toggle: intentionally silent to avoid console noise
             try {
                 const table = elements.caseTableContainer ? elements.caseTableContainer.querySelector('table') : null;
                 const checkboxes = table ? table.querySelectorAll('input.case-checkbox') : document.querySelectorAll('input.case-checkbox');
@@ -1218,12 +1218,7 @@
                 let mo = null;
                 try {
                     if (elements.caseTableContainer) {
-                        mo = new MutationObserver(function (mutations) {
-                            try {
-                                console.warn('[automation-run][probe] mutation during header loop', { mutations });
-                                console.trace();
-                            } catch (err) { /* ignore */ }
-                        });
+                        mo = new MutationObserver(function () { /* intentionally silent during bulk toggle */ });
                         mo.observe(elements.caseTableContainer, { childList: true, subtree: true, attributes: true });
                     }
                 } catch (err) { /* ignore */ }
@@ -1232,12 +1227,10 @@
 
                 checkboxes.forEach((cb) => {
                     if (!(cb instanceof HTMLInputElement)) return;
-                    console.debug('[automation-run] root toggling row', { before: cb.checked, node: cb });
                     cb.checked = target.checked;
                     // Avoid dispatching native change events here: other global listeners
                     // react to those and can revert state during our loop. Instead, update
                     // application state once after the loop completes.
-                    console.debug('[automation-run] root toggled row (no event)', { after: cb.checked, node: cb });
                 });
 
                 // After we've updated DOM properties for all rows, run the debounced
