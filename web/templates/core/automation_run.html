@@ -1,0 +1,24 @@
+{% extends "base/base.html" %}
+{% load static %}
+
+{% block title %}Automation · Run{% endblock %}
+
+{% block head_css %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'css/automation.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="automation-dashboard" id="automation-run">
+    <section class="automation-panel" aria-label="Automation run workspace">
+        <div class="panel-header">
+            <h2>Automation Run Workspace</h2>
+        </div>
+        <div class="automation-panel-body" data-role="automation-run-body"></div>
+    </section>
+</div>
+{% endblock %}
+
+{% block body_js %}
+    {{ block.super }}
+{% endblock %}

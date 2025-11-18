@@ -770,6 +770,13 @@ def automation_overview(request):
 
 
 @login_required
+def automation_run(request):
+    """Render a placeholder Automation run workspace."""
+
+    return render(request, "core/automation_run.html")
+
+
+@login_required
 def automation_test_plans(request):
     data = _prepare_automation_data()
     context = {
