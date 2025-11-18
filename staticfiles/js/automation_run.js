@@ -87,6 +87,18 @@
         runCasesButton: root.querySelector('#run-cases-btn'),
     };
 
+    // Sequential run delay (ms) for fallback batch runs. Can be overridden by
+    // setting `window.__automationRunOptions = { sequentialDelay: 400 }` before
+    // this script runs. Also exposed via `window.__automationRunControls` below.
+    let sequentialRunDelay = 600;
+    try {
+        if (typeof window !== 'undefined' && window.__automationRunOptions && typeof window.__automationRunOptions.sequentialDelay === 'number') {
+            sequentialRunDelay = Number(window.__automationRunOptions.sequentialDelay) || sequentialRunDelay;
+        }
+    } catch (_e) {
+        /* ignore */
+    }
+
     const getProjectById = (projectId) => {
         if (!projectId) {
             return null;
@@ -294,6 +306,20 @@
         } catch (error) {
             button.style.display = 'none';
             button.setAttribute('aria-hidden', 'true');
+        }
+    };
+
+    const showRunCasesButton = () => {
+        const button = elements.runCasesButton;
+        if (!button) return;
+        try {
+            button.style.setProperty('display', 'inline-flex', 'important');
+            button.removeAttribute('aria-hidden');
+            button.disabled = false;
+        } catch (e) {
+            button.style.display = 'inline-flex';
+            button.removeAttribute('aria-hidden');
+            button.disabled = false;
         }
     };
 
@@ -633,6 +659,77 @@
             window.alert('No runnable test cases were found for this selection.');
             return Promise.resolve(null);
         }
+        // Prefer the dedicated multi-runner helper if present
+        try {
+            if (window.__automationMultiRunner && typeof window.__automationMultiRunner.runCaseBatch === 'function') {
+                return Promise.resolve(window.__automationMultiRunner.runCaseBatch(cases, options || {}));
+            }
+        } catch (e) {
+            /* ignore and fallback */
+        }
+
+        // Fallback: if testcase controls expose a runRequest helper, run requests sequentially
+        if (window.__automationTestcaseControls && typeof window.__automationTestcaseControls.runRequest === 'function') {
+            const runnableRequests = cases.map((c) => c.requestId).filter((r) => r);
+            if (!runnableRequests.length) {
+                window.alert('Selected cases do not have linked API requests to run.');
+                return Promise.resolve(null);
+            }
+            // Run sequentially with a small delay so modal can reuse UI
+            return new Promise((resolve) => {
+                let i = 0;
+                const total = runnableRequests.length;
+                const runButton = elements.runCasesButton;
+                const originalText = runButton ? runButton.textContent : null;
+                const setRunningState = (index) => {
+                    if (!runButton) return;
+                    runButton.disabled = true;
+                    runButton.classList.add('is-running');
+                    runButton.textContent = `Running (${index}/${total})`;
+                };
+                const clearRunningState = () => {
+                    if (!runButton) return;
+                    runButton.disabled = false;
+                    runButton.classList.remove('is-running');
+                    try {
+                        runButton.textContent = originalText || 'Run Selected';
+                    } catch (_e) {
+                        /* ignore */
+                    }
+                };
+
+                const runNext = () => {
+                    if (i >= total) {
+                        clearRunningState();
+                        resolve(true);
+                        return;
+                    }
+                    setRunningState(i + 1);
+                    try {
+                        window.__automationTestcaseControls.runRequest(runnableRequests[i]);
+                        // Immediately close the single-request modal so batch runner's modal
+                        // (if any) remains the primary UI. Small delay lets runRequest begin.
+                        setTimeout(() => {
+                            try {
+                                if (window.__automationTestcaseControls && typeof window.__automationTestcaseControls.closeModal === 'function') {
+                                    window.__automationTestcaseControls.closeModal();
+                                }
+                            } catch (_err) {
+                                /* ignore */
+                            }
+                        }, 120);
+                    } catch (err) {
+                        console.error('[automation-run] Error running request', runnableRequests[i], err);
+                    }
+                    i += 1;
+                    // allow UI to update between runs
+                    setTimeout(runNext, sequentialRunDelay);
+                };
+                runNext();
+            });
+        }
+
+        // As a last resort, try to initialize the multi-runner (may be loaded asynchronously)
         return ensureMultiRunner()
             .then((runner) => runner.runCaseBatch(cases, options || {}))
             .catch((error) => {
@@ -940,9 +1037,94 @@
                 state.selectedScenarios.delete(scenarioId);
             }
             syncScenarioBulkAction();
+            return;
+        }
+
+        // Case table: header select-all
+        if (target.matches('#select-all-cases')) {
+            try {
+                const table = elements.caseTableContainer ? elements.caseTableContainer.querySelector('table') : null;
+                if (!table) return;
+                const checkboxes = table.querySelectorAll('input.case-checkbox');
+                checkboxes.forEach((cb) => {
+                    if (!(cb instanceof HTMLInputElement)) return;
+                    cb.checked = target.checked;
+                    // dispatch change event so other handlers run
+                    cb.dispatchEvent(new Event('change', { bubbles: true }));
+                });
+            } catch (e) {
+                /* ignore */
+            }
+            return;
+        }
+
+        // Individual case checkboxes
+        if (target.matches('input.case-checkbox')) {
+            try {
+                // Update header checkbox state
+                const table = elements.caseTableContainer ? elements.caseTableContainer.querySelector('table') : null;
+                if (!table) return;
+                const all = Array.from(table.querySelectorAll('input.case-checkbox'));
+                const checked = all.filter((n) => n.checked);
+                const header = table.querySelector('#select-all-cases');
+                if (header instanceof HTMLInputElement) {
+                    header.checked = checked.length === all.length && all.length > 0;
+                    header.indeterminate = checked.length > 0 && checked.length < all.length;
+                }
+                // Show or hide run selected
+                if (checked.length > 0) {
+                    showRunCasesButton();
+                } else {
+                    hideRunCasesButton();
+                }
+            } catch (e) {
+                /* ignore */
+            }
+            return;
         }
     });
 
+    // Wire Run Selected button
+    if (elements.runCasesButton) {
+        elements.runCasesButton.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            const table = elements.caseTableContainer ? elements.caseTableContainer.querySelector('table') : null;
+            if (!table) return;
+            const checked = Array.from(table.querySelectorAll('input.case-checkbox:checked'));
+            if (!checked.length) {
+                window.alert('No test cases selected.');
+                return;
+            }
+            const cases = [];
+            checked.forEach((cb) => {
+                try {
+                    const row = cb.closest('tr');
+                    const descriptor = collectCaseDescriptorFromRow(row);
+                    if (descriptor) cases.push(descriptor);
+                } catch (e) {
+                    /* ignore individual errors */
+                }
+            });
+            if (!cases.length) {
+                window.alert('No runnable test cases were found for this selection.');
+                return;
+            }
+            runCaseBatchWithModal(cases, { title: 'Run Selected Cases' });
+        });
+    }
+
     initializeSelection();
     renderAll();
+    // Expose control to adjust sequential run delay at runtime
+    try {
+        if (typeof window !== 'undefined') {
+            window.__automationRunControls = window.__automationRunControls || {};
+            window.__automationRunControls.setSequentialRunDelay = function (ms) {
+                const n = Number(ms) || 0;
+                if (n > 0) sequentialRunDelay = n;
+            };
+        }
+    } catch (_e) {
+        /* ignore exposure errors */
+    }
 })();

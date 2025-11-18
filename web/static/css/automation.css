@@ -890,6 +890,28 @@
     background: #b97c00;
 }
 
+/* Small spinner indicator when a primary button is in a running state */
+.btn-primary.is-running {
+    position: relative;
+}
+.btn-primary.is-running::after {
+    content: '';
+    position: absolute;
+    right: 0.7rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0.9rem;
+    height: 0.9rem;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.35);
+    border-top-color: rgba(255,255,255,0.95);
+    animation: automation-spinner 0.8s linear infinite;
+}
+@keyframes automation-spinner {
+    from { transform: translateY(-50%) rotate(0deg); }
+    to { transform: translateY(-50%) rotate(360deg); }
+}
+
 .btn-secondary {
     background: transparent;
     border: 1px solid rgba(209, 144, 0, 0.4);
@@ -1055,28 +1077,41 @@ body.automation-modal-open {
 
 /* Make the Test Case response modal wider: at least 75% of the viewport width,
    but cap it to 95% to avoid edge overflow on small screens. Center it. */
-#testcase-response-modal .modal-dialog,
-#testcase-response-modal .modal-dialog .modal-content {
-    min-width: 75vw !important;
-    width: auto !important;
-    max-width: 95vw !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-}
-
-#testcase-response-modal .modal-dialog {
-    /* allow dialog content to scroll when response sections are very tall */
-    max-height: 95vh !important;
-    overflow-y: auto !important;
-}
-
-#testcase-response-modal .modal-header {
+/* Ensure modal headers stay on a single row with the title truncating if necessary
+   and the close control pinned to the right. This keeps a consistent header layout
+   for both single-request and multi-request modals. */
+.modal-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 0.5rem;
     padding: 1rem 1.25rem;
     border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+    /* force single row */
+    flex-wrap: nowrap;
+}
+
+.modal-header h3 {
+    margin: 0;
+    /* allow title to take remaining space but not overflow the header */
+    flex: 1 1 auto;
+    min-width: 0; /* allow text-overflow to work inside flex */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.modal-header .modal-close {
+    border: none;
+    background: transparent;
+    color: rgba(48, 41, 16, 0.75);
+    font-size: 1.5rem;
+    line-height: 1;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 999px;
+    /* ensure it sits to the far right */
+    margin-left: auto;
+    flex: 0 0 auto;
 }
 
 #testcase-response-modal .modal-header h3 {
@@ -1394,7 +1429,25 @@ body.automation-modal-open {
     border-radius: 10px;
 }
 
+/* Make the single-request Test Case response modal match the width of the
+   multi-run modal so both "Request Response" dialogs have a consistent size */
+.modal#testcase-response-modal .modal-dialog {
+    width: 75vw;
+    max-width: 1200px;
+    margin: 1.5rem auto;
+    box-shadow: var(--automation-shadow);
+    border-radius: 10px;
+}
+
 .modal#testcase-multi-response-modal .modal-body {
+    max-height: 70vh;
+    overflow: auto;
+}
+
+/* Make the single-run Request Response modal body scrollable so users can
+   scroll inside the modal when content is taller than the viewport. Matches
+   the multi-run modal behavior. */
+.modal#testcase-response-modal .modal-body {
     max-height: 70vh;
     overflow: auto;
 }

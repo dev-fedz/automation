@@ -65,7 +65,7 @@
             <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="testcase-multi-response-title">
                 <div class="modal-header">
                     <h3 id="testcase-multi-response-title">Run Selected Test Cases</h3>
-                    <button type="button" id="testcase-multi-response-close" class="btn btn-tertiary">Close</button>
+                    <button type="button" id="testcase-multi-response-close" class="modal-close" aria-label="Close">×</button>
                 </div>
                 <div class="modal-body">
                     <div id="testcase-multi-list" class="multi-list"></div>
@@ -79,12 +79,55 @@
 
     function openModal(modal) {
         if (!modal) return;
+        // Save the element that had focus so we can restore it when the modal closes
+        try {
+            modal.__previouslyFocused = document.activeElement;
+        } catch (e) {
+            modal.__previouslyFocused = null;
+        }
         modal.hidden = false;
         modal.setAttribute('aria-hidden', 'false');
+
+        // Move focus into the modal. Prefer an element with autofocus, then the close button,
+        // then the first focusable control. If none found, focus the modal container.
+        try {
+            const focusable = modal.querySelector('[autofocus]')
+                || modal.querySelector('.modal-close')
+                || modal.querySelector('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+            if (focusable && typeof focusable.focus === 'function') {
+                focusable.focus();
+            } else if (typeof modal.focus === 'function') {
+                modal.focus();
+            }
+        } catch (err) {
+            /* ignore focus errors */
+        }
     }
 
     function closeModal(modal) {
         if (!modal) return;
+        // Before hiding the modal (which sets aria-hidden), move focus away from any element
+        // inside the modal to avoid the accessibility issue where a hidden ancestor contains
+        // the currently focused element. Prefer restoring the previous focus; otherwise blur
+        // the active element as a fallback.
+        try {
+            // If the currently focused element is inside the modal, blur it first.
+            const active = document.activeElement;
+            if (active && modal.contains(active) && typeof active.blur === 'function') {
+                active.blur();
+            }
+
+            // Restore focus to the previously focused element if available.
+            if (modal.__previouslyFocused && typeof modal.__previouslyFocused.focus === 'function') {
+                modal.__previouslyFocused.focus();
+            } else if (typeof document.body.focus === 'function') {
+                // As a safe fallback, move focus to the document body.
+                document.body.focus();
+            }
+        } catch (err) {
+            /* ignore focus/blur errors */
+        }
+
         modal.hidden = true;
         modal.setAttribute('aria-hidden', 'true');
     }
@@ -2624,113 +2667,6 @@
                 resultsByCaseId.set(caseIdKey, runResult);
             }
         }
-    }
-
-    function normalizeCaseBatchInput(rawCases) {
-        if (!Array.isArray(rawCases)) {
-            return [];
-        }
-        return rawCases.map((item, index) => {
-            const rawId = item && (item.caseId !== undefined ? item.caseId : (item.id !== undefined ? item.id : (item.testcase_id !== undefined ? item.testcase_id : item.rawCaseId)));
-            const caseId = normalizeCaseId(rawId);
-            const title = item && (item.title !== undefined ? item.title : (item.name !== undefined ? item.name : (caseId ? `Case ${caseId}` : 'Untitled case')));
-            const requestIdRaw = item && (item.requestId !== undefined ? item.requestId : item.related_api_request);
-            const envRaw = item && (item.envId !== undefined ? item.envId : (item.environmentId !== undefined ? item.environmentId : item.environment_id));
-            const scenarioRaw = item && (item.scenarioId !== undefined ? item.scenarioId : item.scenario_id);
-            const dependencyRaw = item && (item.dependencyCaseId !== undefined ? item.dependencyCaseId : (item.dependency_case_id !== undefined ? item.dependency_case_id : item.test_case_dependency));
-            const dependencyKeyRaw = item && (item.dependencyKey !== undefined ? item.dependencyKey : item.dependency_response_key);
-            const expectedRaw = item && (item.expectedResults !== undefined ? item.expectedResults : item.expected_results);
-            const requiresDependency = Boolean(item && (item.requiresDependency !== undefined ? item.requiresDependency : item.requires_dependency));
-            const responseEncrypted = Boolean(item && (item.responseEncrypted !== undefined ? item.responseEncrypted : item.is_response_encrypted));
-
-            const normalizedExpected = normalizeExpectedResultsEntries(expectedRaw || []);
-            return {
-                caseId,
-                rawCaseId: rawId !== undefined && rawId !== null ? String(rawId) : null,
-                title: title || 'Untitled case',
-                requestId: requestIdRaw !== undefined && requestIdRaw !== null ? String(requestIdRaw) : null,
-                envId: envRaw !== undefined && envRaw !== null && envRaw !== '' ? String(envRaw) : null,
-                scenarioId: normalizeCaseId(scenarioRaw),
-                requiresDependency,
-                dependencyCaseId: normalizeCaseId(dependencyRaw),
-                dependencyKey: dependencyKeyRaw ? String(dependencyKeyRaw) : '',
-                expectedResults: normalizedExpected,
-                responseEncrypted,
-                originalIndex: index,
-            };
-        });
-    }
-
-    function runCaseBatch(rawCases, options) {
-        const normalized = normalizeCaseBatchInput(rawCases);
-        if (!normalized.length) {
-            return Promise.resolve(null);
-        }
-        const settings = options && typeof options === 'object' ? options : {};
-        const modal = createModal();
-        if (settings.title) {
-            const titleNode = modal.querySelector('#testcase-multi-response-title');
-            if (titleNode) {
-                titleNode.textContent = settings.title;
-            }
-        }
-        const list = modal.querySelector('#testcase-multi-list');
-        const ordered = orderCasesByDependency(normalized);
-        const caseInfoById = new Map();
-        ordered.forEach((caseInfo, idx) => {
-            const domId = caseInfo.caseId || caseInfo.caseKey || `case-${caseInfo.originalIndex}-${idx}`;
-            const item = makeAccordionItem(domId, caseInfo.title || 'Untitled');
-            item.dataset.status = 'queued';
-            if (caseInfo.caseId) {
-                item.dataset.caseId = String(caseInfo.caseId);
-                caseInfoById.set(caseInfo.caseId, caseInfo);
-            }
-            if (caseInfo.caseKey) {
-                item.dataset.caseKey = String(caseInfo.caseKey);
-            }
-            if (caseInfo.requestId) {
-                item.dataset.requestId = String(caseInfo.requestId);
-            }
-            if (caseInfo.envId !== null && caseInfo.envId !== undefined && caseInfo.envId !== '') {
-                item.dataset.environmentId = String(caseInfo.envId);
-            }
-            caseInfo.container = item;
-            list.appendChild(item);
-        });
-
-        const closeBtn = modal.querySelector('#testcase-multi-response-close');
-        if (closeBtn) {
-            closeBtn.addEventListener('click', () => {
-                closeModal(modal);
-                setTimeout(() => modal.remove(), 250);
-            });
-        }
-        modal.addEventListener('click', (ev) => {
-            if (ev.target === modal) {
-                closeModal(modal);
-                setTimeout(() => modal.remove(), 250);
-            }
-        });
-
-        openModal(modal);
-
-        return runSelectedCasesSequentially(ordered, caseInfoById).catch((err) => {
-            mirrorAutomationLog('error', '[automation][multi-runner] failed to execute cases', err);
-            ordered.forEach((caseInfo) => {
-                if (!caseInfo || !caseInfo.container) {
-                    return;
-                }
-                if (!caseInfo.container.dataset.status || caseInfo.container.dataset.status === 'queued') {
-                    markCaseFailed(caseInfo.container, 'Unexpected execution error.', String(err || 'Execution aborted.'));
-                }
-            });
-            throw err;
-        });
-    }
-
-    if (typeof window !== 'undefined') {
-        window.__automationMultiRunner = window.__automationMultiRunner || {};
-        window.__automationMultiRunner.runCaseBatch = runCaseBatch;
     }
 
     function init() {

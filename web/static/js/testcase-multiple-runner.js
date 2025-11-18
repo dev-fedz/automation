@@ -65,7 +65,7 @@
             <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="testcase-multi-response-title">
                 <div class="modal-header">
                     <h3 id="testcase-multi-response-title">Run Selected Test Cases</h3>
-                    <button type="button" id="testcase-multi-response-close" class="btn btn-tertiary">Close</button>
+                    <button type="button" id="testcase-multi-response-close" class="modal-close" aria-label="Close">×</button>
                 </div>
                 <div class="modal-body">
                     <div id="testcase-multi-list" class="multi-list"></div>
@@ -79,12 +79,55 @@
 
     function openModal(modal) {
         if (!modal) return;
+        // Save the element that had focus so we can restore it when the modal closes
+        try {
+            modal.__previouslyFocused = document.activeElement;
+        } catch (e) {
+            modal.__previouslyFocused = null;
+        }
         modal.hidden = false;
         modal.setAttribute('aria-hidden', 'false');
+
+        // Move focus into the modal. Prefer an element with autofocus, then the close button,
+        // then the first focusable control. If none found, focus the modal container.
+        try {
+            const focusable = modal.querySelector('[autofocus]')
+                || modal.querySelector('.modal-close')
+                || modal.querySelector('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+            if (focusable && typeof focusable.focus === 'function') {
+                focusable.focus();
+            } else if (typeof modal.focus === 'function') {
+                modal.focus();
+            }
+        } catch (err) {
+            /* ignore focus errors */
+        }
     }
 
     function closeModal(modal) {
         if (!modal) return;
+        // Before hiding the modal (which sets aria-hidden), move focus away from any element
+        // inside the modal to avoid the accessibility issue where a hidden ancestor contains
+        // the currently focused element. Prefer restoring the previous focus; otherwise blur
+        // the active element as a fallback.
+        try {
+            // If the currently focused element is inside the modal, blur it first.
+            const active = document.activeElement;
+            if (active && modal.contains(active) && typeof active.blur === 'function') {
+                active.blur();
+            }
+
+            // Restore focus to the previously focused element if available.
+            if (modal.__previouslyFocused && typeof modal.__previouslyFocused.focus === 'function') {
+                modal.__previouslyFocused.focus();
+            } else if (typeof document.body.focus === 'function') {
+                // As a safe fallback, move focus to the document body.
+                document.body.focus();
+            }
+        } catch (err) {
+            /* ignore focus/blur errors */
+        }
+
         modal.hidden = true;
         modal.setAttribute('aria-hidden', 'true');
     }
