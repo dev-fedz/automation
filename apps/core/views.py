@@ -771,9 +771,15 @@ def automation_overview(request):
 
 @login_required
 def automation_run(request):
-    """Render a placeholder Automation run workspace."""
+    """Render the Automation run workspace with initial hierarchy data."""
 
-    return render(request, "core/automation_run.html")
+    data = _prepare_automation_data()
+    context = {
+        "initial_projects": data["plans"],
+        "api_endpoints": data["api_endpoints"],
+        "initial_environments": data["environments"],
+    }
+    return render(request, "core/automation_run.html", context)
 
 
 @login_required

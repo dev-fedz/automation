@@ -1,3 +1,46 @@
+/* Automation Run Styles */
+.automation-run__item-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+}
+@media (max-width: 720px) {
+    .automation-run__item-header {
+        gap: 0.6rem;
+    }
+}
+.automation-run__item-header .action-button {
+    margin-left: auto;
+}
+
+.automation-run__item-select {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.automation-run__item-select:hover,
+.automation-run__item-select:active {
+    color: inherit;
+    background: transparent;
+}
+
+.automation-run__item-select:focus-visible {
+    outline: 2px solid rgba(244, 180, 0, 0.6);
+    outline-offset: 3px;
+    border-radius: 10px;
+}
 /* Automation Metrics Widgets */
 .automation-metrics-widgets {
     display: grid;
@@ -42,6 +85,46 @@
     --automation-text-muted: rgba(60, 43, 0, 0.7);
     --automation-success: #22c55e;
     --automation-info: #2563eb;
+}
+.automation-run-grid {
+    display: grid;
+    gap: 1.5rem;
+    width: 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.automation-run__card {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    margin: 0.75rem 0;
+}
+
+.automation-run__list {
+    margin-top: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.automation-run__card--bottom {
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 1200px) {
+    .automation-run-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .automation-run__card--top:last-of-type {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 760px) {
+    .automation-run-grid {
+        grid-template-columns: 1fr;
+    }
 }
 :root {
     --automation-bg: #fffef5;
@@ -968,67 +1051,6 @@
 
 body.automation-modal-open {
     overflow: hidden;
-}
-
-/* Case selection modal: remove backdrop, border and shadow */
-[data-role="case-selection-modal"] {
-    /* keep positioning but no backdrop color */
-    background: transparent;
-}
-
-/* Gray overlay when modal is visible */
-[data-role="case-selection-modal"]:not([hidden]) {
-    position: fixed;
-}
-[data-role="case-selection-modal"] [data-role="case-selection-overlay"] {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.16);
-    z-index: 1998;
-}
-
-[data-role="case-selection-modal"] [data-role="case-selection-modal-dialog"] {
-    position: relative;
-    z-index: 1999; /* above the overlay */
-}
-
-[data-role="case-selection-modal"] .automation-modal__backdrop,
-[data-role="case-selection-modal"] .modal-backdrop {
-    display: none !important;
-}
-
-[data-role="case-selection-modal-dialog"],
-[data-role="case-selection-modal-dialog"].modal-dialog {
-    /* white surface with a subtle shadow, no dark border line */
-    background: #ffffff !important;
-    box-shadow: 0 8px 20px rgba(0,0,0,0.08) !important;
-    border: none !important;
-    border-radius: 10px !important;
-    padding: 0.5rem !important;
-}
-
-/* inner container: keep transparent so children control spacing and background */
-[data-role="case-selection-modal-dialog"] > * {
-    background: transparent;
-    border-radius: 0;
-    padding: 0.25rem 0.5rem;
-}
-
-/* Remove default dialog border/outline that some browsers render as a black frame */
-[data-role="case-selection-modal"] {
-    outline: none !important;
-}
-[data-role="case-selection-modal"]::-webkit-backdrop {
-    background: transparent !important;
-}
-[data-role="case-selection-modal"]::backdrop {
-    background: transparent !important;
-}
-[data-role="case-selection-modal"] {
-    -webkit-appearance: none;
-    appearance: none;
-    border: none !important;
-    box-shadow: none !important;
 }
 
 /* Make the Test Case response modal wider: at least 75% of the viewport width,

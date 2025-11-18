@@ -10,15 +10,137 @@
 
 {% block content %}
 <div class="automation-dashboard" id="automation-run">
-    <section class="automation-panel" aria-label="Automation run workspace">
-        <div class="panel-header">
-            <h2>Automation Run Workspace</h2>
+    <div class="automation-run-grid" data-role="automation-run-grid">
+        <section class="automation-panel automation-run__card automation-run__card--top" data-panel="projects" aria-labelledby="automation-run-projects-title">
+            <div class="panel-header">
+                <h2 id="automation-run-projects-title">Projects</h2>
+            </div>
+            <div class="automation-card-body">
+                <div class="automation-run__list" data-role="project-list" aria-live="polite" aria-label="Projects"></div>
+            </div>
+        </section>
+
+    <section class="automation-panel automation-run__card automation-run__card--top" data-panel="modules" aria-labelledby="automation-run-modules-title">
+            <div class="panel-header">
+                <div>
+                    <h2 id="automation-run-modules-title">Modules</h2>
+                    <p class="panel-subtitle" data-role="module-subtitle"></p>
+                </div>
+                <div class="panel-actions">
+                    <button type="button" class="btn-primary automation-run__bulk-action" data-action="module-run-all" data-role="module-run-all" style="display:none;">Run All</button>
+                </div>
+            </div>
+            <div class="automation-card-body">
+                <div class="automation-run__list" data-role="module-list" aria-live="polite" aria-label="Modules"></div>
+            </div>
+        </section>
+
+    <section class="automation-panel automation-run__card automation-run__card--top" data-panel="scenarios" aria-labelledby="automation-run-scenarios-title">
+            <div class="panel-header">
+                <div>
+                    <h2 id="automation-run-scenarios-title">Scenarios</h2>
+                    <p class="panel-subtitle" data-role="scenario-subtitle"></p>
+                </div>
+                <div class="panel-actions">
+                    <button type="button" class="btn-primary automation-run__bulk-action" data-action="scenario-run-all" data-role="scenario-run-all" style="display:none;">Run All</button>
+                </div>
+            </div>
+            <div class="automation-card-body">
+                <div class="automation-run__list" data-role="scenario-list" aria-live="polite" aria-label="Scenarios"></div>
+            </div>
+        </section>
+
+    <section class="automation-panel automation-run__card automation-run__card--bottom" data-panel="cases" aria-labelledby="automation-run-cases-title">
+            <div class="panel-header">
+                <div>
+                    <h2 id="automation-run-cases-title">Test Cases</h2>
+                    <p class="panel-subtitle" data-role="case-subtitle"></p>
+                </div>
+            </div>
+            <div class="automation-card-body">
+                <div class="automation-list" data-role="case-list" aria-live="polite">
+                    <button type="button" id="run-cases-btn" class="btn-primary automation-run__bulk-action" style="display:none;margin-bottom:12px;">Run Selected</button>
+                    <div data-role="case-table"></div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    {{ initial_projects|json_script:"automation-run-projects" }}
+    {{ api_endpoints|json_script:"automation-api-endpoints" }}
+    {{ initial_environments|json_script:"automation-run-environments" }}
+</div>
+
+<!-- Shared response modal copied from Projects · Test Case view -->
+<div class="modal" id="testcase-response-modal" hidden aria-hidden="true" tabindex="-1">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="testcase-response-title">
+        <div class="modal-header">
+            <h3 id="testcase-response-title">Request Response</h3>
+            <button type="button" id="testcase-response-close" class="modal-close" aria-label="Close">×</button>
         </div>
-        <div class="automation-panel-body" data-role="automation-run-body"></div>
-    </section>
+        <div class="modal-body">
+            <div id="testcase-response-loading" class="response-loading">Running request…</div>
+            <div id="testcase-response-content" hidden>
+                <div id="testcase-response-summary" class="response-summary">No request executed yet.</div>
+                <div class="response-section">
+                    <h4>Headers</h4>
+                    <div class="response-section-controls">
+                        <button type="button" class="action-button" data-action="toggle-section" data-target="testcase-response-headers">Toggle</button>
+                    </div>
+                    <pre id="testcase-response-headers" class="response-pre expandable" data-min-height="80">{}</pre>
+                </div>
+                <div class="response-section">
+                    <div class="response-section__header">
+                        <h4>Body</h4>
+                        <div class="response-body__controls" role="group" aria-label="Response body view options">
+                            <div class="response-body__views" role="group" aria-label="Format type">
+                                <button type="button" class="response-body__view-button is-active" data-response-body-view="json" aria-pressed="true">JSON</button>
+                                <button type="button" class="response-body__view-button" data-response-body-view="xml" aria-pressed="false">XML</button>
+                                <button type="button" class="response-body__view-button" data-response-body-view="html" aria-pressed="false">HTML</button>
+                            </div>
+                            <div class="response-body__modes" role="group" aria-label="Display mode">
+                                <button type="button" class="response-body__mode-button is-active" data-response-body-mode="pretty" aria-pressed="true">Pretty</button>
+                                <button type="button" class="response-body__mode-button" data-response-body-mode="preview" aria-pressed="false">Preview</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="response-body__content">
+                        <pre id="testcase-response-body" class="response-pre expandable" data-min-height="100">{}</pre>
+                        <div class="resizer" data-resize-target="testcase-response-body" title="Drag to resize"></div>
+                        <iframe id="testcase-response-preview" class="response-preview" title="Response preview" hidden></iframe>
+                    </div>
+                </div>
+                <div class="response-section">
+                    <h4>Assertions</h4>
+                    <div id="testcase-response-assertions" class="assertions-list"></div>
+                </div>
+                <div class="response-section">
+                    <div class="response-section__header">
+                        <h4>Pre-request Console</h4>
+                        <div class="response-section-controls">
+                            <button type="button" class="action-button" data-action="toggle-section" data-target="testcase-pre-request-logs">Toggle</button>
+                        </div>
+                    </div>
+                    <pre id="testcase-pre-request-logs" class="response-pre expandable" data-min-height="60">No pre-request console output.</pre>
+                </div>
+                <div class="response-section">
+                    <div class="response-section__header">
+                        <h4>Post-request Console</h4>
+                        <div class="response-section-controls">
+                            <button type="button" class="action-button" data-action="toggle-section" data-target="testcase-post-request-logs">Toggle</button>
+                        </div>
+                    </div>
+                    <pre id="testcase-post-request-logs" class="response-pre expandable" data-min-height="60">No post-request console output.</pre>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
 {% block body_js %}
     {{ block.super }}
+    <script src="{% static 'js/testcase-runner.js' %}"></script>
+    <script src="{% static 'js/testcase-multiple-runner.js' %}"></script>
+    <script src="{% static 'js/automation_run.js' %}"></script>
 {% endblock %}
