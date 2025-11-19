@@ -782,6 +782,23 @@ def automation_run(request):
     return render(request, "core/automation_run.html", context)
 
 
+
+@login_required
+def automation_reports(request):
+    """Render a simple Automation reports page (placeholder).
+
+    This page currently provides a landing area for future reports and basic
+    metrics context so frontend code can attach charts or tables.
+    """
+
+    data = _prepare_automation_data()
+    context = {
+        "initial_metrics": data.get("metrics", {}),
+        "recent_runs": data.get("recent_runs", []),
+    }
+    return render(request, "core/automation_reports.html", context)
+
+
 @login_required
 def automation_test_plans(request):
     data = _prepare_automation_data()

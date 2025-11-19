@@ -73,6 +73,7 @@ def build_breadcrumbs(request):
     generic_map = {
         'automation-overview': ('Automation',),
         'automation-run': ('Automation', 'Run'),
+    'automation-reports': ('Automation', 'Reports'),
     'automation-test-plans': ('Projects', 'Project'),
     'data-management-test-modules': ('Projects', 'Modules'),
         'automation-test-scenarios': ('Projects', 'Scenarios'),

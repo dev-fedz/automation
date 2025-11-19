@@ -1,0 +1,23 @@
+{% extends "base/base.html" %}
+{% load static %}
+
+{% block title %}Automation Reports{% endblock %}
+
+{% block head_css %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'css/automation.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="automation-reports" id="automation-reports">
+    <section class="automation-panel" aria-labelledby="headline-reports">
+        <div class="panel-header">
+            <h2 id="headline-reports">REPORTS</h2>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block body_js %}
+    {{ block.super }}
+{% endblock %}
