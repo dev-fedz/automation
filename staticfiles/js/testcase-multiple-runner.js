@@ -1939,6 +1939,59 @@
                 }
             } catch (_e) { /* ignore counts render errors */ }
         } catch (_e) { /* ignore */ }
+        // propagate to project level if present
+        try {
+            const projectParent = moduleEl && moduleEl.closest ? moduleEl.closest('.multi-project') : null;
+            if (projectParent) updateProjectStatus(projectParent);
+        } catch (_e) { /* ignore */ }
+    }
+
+    function updateProjectStatus(projectEl) {
+        if (!projectEl) return;
+        try {
+            const statusEl = projectEl.querySelector && projectEl.querySelector('.multi-project-status');
+            const modules = Array.from(projectEl.querySelectorAll('.multi-module'));
+            if (!modules.length) {
+                if (statusEl) statusEl.textContent = '';
+                try { projectEl.dataset.status = ''; } catch (_e) { }
+                return;
+            }
+            const statuses = modules.map(m => (m.dataset && m.dataset.status) ? String(m.dataset.status).toLowerCase() : 'queued');
+            const anyRunning = statuses.some(s => s === 'running' || s === 'loading');
+            const anyQueued = statuses.some(s => s === 'queued');
+            const anyFailed = statuses.some(s => s === 'failed');
+            const anyBlocked = statuses.some(s => s === 'blocked');
+            const anySkipped = statuses.some(s => s === 'skipped');
+            const anyPassed = statuses.some(s => s === 'passed');
+
+            let text = '';
+            if (anyRunning) text = 'Running';
+            else if (anyQueued && !anyPassed && !anyFailed && !anyBlocked && anyQueued) text = 'Queued';
+            else if (anyFailed) text = 'Failed';
+            else if (anyBlocked) text = 'Blocked';
+            else if (anySkipped && !anyPassed) text = 'Skipped';
+            else if (anyPassed) text = 'Passed';
+            else text = '';
+
+            if (statusEl) statusEl.textContent = text;
+            try { projectEl.dataset.status = (text || '').toLowerCase(); } catch (_e) { }
+
+            try {
+                const countsEl = projectEl.querySelector && projectEl.querySelector('.multi-project-counts');
+                if (countsEl) {
+                    const counts = statuses.reduce((acc, s) => { acc[s] = (acc[s] || 0) + 1; return acc; }, {});
+                    const order = ['passed', 'failed', 'blocked', 'skipped', 'queued', 'running'];
+                    const parts = [];
+                    order.forEach((key) => {
+                        const n = counts[key] || 0;
+                        if (key === 'passed' || key === 'failed' || n > 0) {
+                            parts.push(`<span class="count count-${key}"><strong>${n}</strong> ${key}</span>`);
+                        }
+                    });
+                    countsEl.innerHTML = parts.join(' ');
+                }
+            } catch (_e) { /* ignore */ }
+        } catch (_e) { /* ignore */ }
     }
 
     function markCaseFailed(container, reason, bodyText) {

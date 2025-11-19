@@ -966,7 +966,43 @@
             return;
         }
         const cases = collectProjectCases(project);
+        try {
+            if (window.__automationMultiRunner && typeof window.__automationMultiRunner.runProjectBatch === 'function') {
+                // build project -> modules -> scenarios -> cases payload
+                const modules = getProjectModules(project).map((m) => ({ id: m.id, title: m.title || m.name || m.id, scenarios: getScenariosForModule(project, m.id).map((s) => ({ id: s.id, title: s.title || s.name || s.id, cases: collectScenarioCases(project, [s.id]) })) }));
+                const projectObj = { id: projectId, title: project.name || projectId, modules };
+                window.__automationMultiRunner.runProjectBatch([projectObj], { title: `Run Project: ${project.name || projectId}` });
+                return;
+            }
+        } catch (e) { /* ignore and fallback */ }
         runCaseBatchWithModal(cases, { title: `Run Project: ${project.name || projectId}` });
+    };
+
+    const handleProjectRunAll = () => {
+        const project = getProjectById(state.activeProjectId);
+        if (!project || !state.selectedProjects || !state.selectedProjects.size) {
+            return;
+        }
+        const ids = Array.from(state.selectedProjects);
+        try {
+            if (window.__automationMultiRunner && typeof window.__automationMultiRunner.runProjectBatch === 'function') {
+                const projectObjs = ids.map((id) => {
+                    const proj = getProjectById(id);
+                    const title = proj ? proj.name || id : id;
+                    const modules = proj ? getProjectModules(proj).map((m) => ({ id: m.id, title: m.title || m.name || m.id, scenarios: getScenariosForModule(proj, m.id).map((s) => ({ id: s.id, title: s.title || s.name || s.id, cases: collectScenarioCases(proj, [s.id]) })) })) : [];
+                    return { id, title, modules };
+                });
+                window.__automationMultiRunner.runProjectBatch(projectObjs, { title: 'Run Selected Projects' });
+                return;
+            }
+        } catch (e) { /* ignore and fallback */ }
+        // fallback: collect all cases across selected projects
+        const allCases = [];
+        ids.forEach((id) => {
+            const proj = getProjectById(id);
+            if (proj) allCases.push(...collectProjectCases(proj));
+        });
+        runCaseBatchWithModal(allCases, { title: 'Run Selected Projects' });
     };
 
     const handleModulePlay = (moduleId) => {
