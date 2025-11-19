@@ -28,9 +28,6 @@
         <a href="#" data-testid="menu-data-management">Data Management</a>
         <ul class="submenu">
             <li class="menu-item" data-menu="data-management-environments"><a href="{% url 'data-management-environments' %}" data-testid="menu-data-environments">API Environment</a></li>
-            <li class="menu-item" data-menu="data-management-risks"><a href="{% url 'data-management-risks' %}" data-testid="menu-data-risks">Risk Register</a></li>
-            <li class="menu-item" data-menu="data-management-mitigation"><a href="{% url 'data-management-mitigation' %}" data-testid="menu-data-mitigation">Mitigation Plans</a></li>
-            <li class="menu-item" data-menu="data-management-test-tools"><a href="{% url 'data-management-test-tools' %}" data-testid="menu-data-test-tools">Test Tools</a></li>
         </ul>
     </li>
 
@@ -84,6 +81,73 @@ document.addEventListener('DOMContentLoaded', function(){
                 items.forEach(li=>li.classList.remove('active'));
                 const li = this.closest('.menu-item');
                 if(li){ li.classList.add('active'); }
+            });
+        });
+        // update breadcrumb in header based on active menu
+        function updateBreadcrumb(){
+            const breadcrumbNav = document.querySelector('.dash-header .breadcrumb');
+            // don't override server-rendered breadcrumbs
+            if(breadcrumbNav && breadcrumbNav.getAttribute('data-server-breadcrumbs') === '1') return;
+            if(!breadcrumbNav) return;
+            let activeItem = document.querySelector('.sidebar-menu .menu-item.active');
+            const sep = ' <span class="sep">›</span> ';
+            // detect actions for users and roles (map to exact labels required)
+            const path = window.location.pathname.replace(/\/$/, '');
+            let actionText = '';
+            // Users
+            if(path === '/users/create') actionText = 'Create';
+            if(/^\/users\/\d+\/edit$/.test(path)) actionText = 'Update';
+            if(/^\/users\/\d+$/.test(path)) actionText = 'View';
+            // Roles
+            if(path === '/roles/create') actionText = 'Create';
+            if(/^\/roles\/\d+\/edit$/.test(path)) actionText = 'Edit';
+            if(/^\/roles\/\d+$/.test(path)) actionText = 'View';
+
+            // if no exact active menu item found (common when viewing a detail page like /users/123/),
+            // try to find the best prefix match among sidebar links so breadcrumbs show the parent menu.
+            if(!activeItem){
+                const menuItems = Array.from(document.querySelectorAll('.sidebar-menu .menu-item'));
+                let best = null;
+                let bestLen = 0;
+                menuItems.forEach(function(li){
+                    const link = li.querySelector('a');
+                    if(!link) return;
+                    const rawHref = link.getAttribute('href') || '';
+                    const hrefPath = rawHref.split('#')[0] ? rawHref.split('#')[0].replace(/\/$/, '') : '';
+                    if(hrefPath && path.startsWith(hrefPath) && hrefPath.length > bestLen){
+                        best = li; bestLen = hrefPath.length;
+                    }
+                });
+                if(best) activeItem = best;
+            }
+
+            if(activeItem){
+                const link = activeItem.querySelector('a');
+                const childText = link ? link.textContent.trim() : '';
+                const parentSub = activeItem.closest('.has-submenu');
+                if(parentSub){
+                    const parentLink = parentSub.querySelector('a');
+                    const parentText = parentLink ? parentLink.textContent.trim() : '';
+                    let html = '<span>Home</span>' + sep + '<span>' + parentText + '</span>' + sep + '<span>' + childText + '</span>';
+                    if(actionText) html += sep + '<span>' + actionText + '</span>';
+                    breadcrumbNav.innerHTML = html;
+                } else {
+                    let html = '<span>Home</span>' + sep + '<span>' + childText + '</span>';
+                    if(actionText) html += sep + '<span>' + actionText + '</span>';
+                    breadcrumbNav.innerHTML = html;
+                }
+                return;
+            }
+            // fallback
+            breadcrumbNav.innerHTML = '<span>Home</span>' + sep + '<span>Dashboard</span>';
+        }
+
+        // initial breadcrumb update and also update on menu clicks
+        updateBreadcrumb();
+        document.querySelectorAll('.sidebar-menu a[href]').forEach(function(a){
+            a.addEventListener('click', function(){
+                // slight delay to allow active class logic above to run
+                setTimeout(updateBreadcrumb, 10);
             });
         });
 });

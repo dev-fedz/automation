@@ -23,7 +23,23 @@
             <header class="dash-header">
                 <div class="nav-left">
             <button class="menu-toggle" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="true">☰</button>
-                    <nav class="breadcrumb"><span>Home</span> <span class="sep">›</span> <span>Dashboard</span></nav>
+                    <nav class="breadcrumb" {% if BREADCRUMBS %}data-server-breadcrumbs="1"{% endif %}>
+                        {% if BREADCRUMBS %}
+                            {# Render server-side breadcrumb list; last item is plain text #}
+                            {% for seg in BREADCRUMBS %}
+                                {% if not forloop.first %}
+                                    <span class="sep">›</span>
+                                {% endif %}
+                                {% if seg.url and not forloop.last %}
+                                    <a href="{{ seg.url }}">{{ seg.label }}</a>
+                                {% else %}
+                                    <span>{{ seg.label }}</span>
+                                {% endif %}
+                            {% endfor %}
+                        {% else %}
+                            <span>Home</span> <span class="sep">›</span> <span>Dashboard</span>
+                        {% endif %}
+                    </nav>
                 </div>
                 <div class="brand"></div>
                 <div class="nav-right">
