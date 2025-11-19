@@ -1885,6 +1885,60 @@
                 }
             } catch (_e) { /* ignore counts render errors */ }
         } catch (_e) { /* ignore update errors */ }
+        // If this scenario is contained within a module container, update the module aggregate
+        try {
+            const moduleParent = parent && parent.closest ? parent.closest('.multi-module') : null;
+            if (moduleParent) updateModuleStatus(moduleParent);
+        } catch (_e) { /* ignore */ }
+    }
+
+    function updateModuleStatus(moduleEl) {
+        if (!moduleEl) return;
+        try {
+            const statusEl = moduleEl.querySelector && moduleEl.querySelector('.multi-module-status');
+            const scenarios = Array.from(moduleEl.querySelectorAll('.multi-scenario'));
+            if (!scenarios.length) {
+                if (statusEl) statusEl.textContent = '';
+                try { moduleEl.dataset.status = ''; } catch (_e) { }
+                return;
+            }
+            const statuses = scenarios.map(s => (s.dataset && s.dataset.status) ? String(s.dataset.status).toLowerCase() : 'queued');
+            const anyRunning = statuses.some(s => s === 'running' || s === 'loading');
+            const anyQueued = statuses.some(s => s === 'queued');
+            const anyFailed = statuses.some(s => s === 'failed');
+            const anyBlocked = statuses.some(s => s === 'blocked');
+            const anySkipped = statuses.some(s => s === 'skipped');
+            const anyPassed = statuses.some(s => s === 'passed');
+
+            let text = '';
+            if (anyRunning) text = 'Running';
+            else if (anyQueued && !anyPassed && !anyFailed && !anyBlocked && anyQueued) text = 'Queued';
+            else if (anyFailed) text = 'Failed';
+            else if (anyBlocked) text = 'Blocked';
+            else if (anySkipped && !anyPassed) text = 'Skipped';
+            else if (anyPassed) text = 'Passed';
+            else text = '';
+
+            if (statusEl) statusEl.textContent = text;
+            try { moduleEl.dataset.status = (text || '').toLowerCase(); } catch (_e) { }
+
+            // render counts per scenario status
+            try {
+                const countsEl = moduleEl.querySelector && moduleEl.querySelector('.multi-module-counts');
+                if (countsEl) {
+                    const counts = statuses.reduce((acc, s) => { acc[s] = (acc[s] || 0) + 1; return acc; }, {});
+                    const order = ['passed', 'failed', 'blocked', 'skipped', 'queued', 'running'];
+                    const parts = [];
+                    order.forEach((key) => {
+                        const n = counts[key] || 0;
+                        if (key === 'passed' || key === 'failed' || n > 0) {
+                            parts.push(`<span class="count count-${key}"><strong>${n}</strong> ${key}</span>`);
+                        }
+                    });
+                    countsEl.innerHTML = parts.join(' ');
+                }
+            } catch (_e) { /* ignore counts render errors */ }
+        } catch (_e) { /* ignore */ }
     }
 
     function markCaseFailed(container, reason, bodyText) {

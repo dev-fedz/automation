@@ -50,6 +50,53 @@
     margin-right: 0;
     animation: automation-spinner 0.8s linear infinite;
 }
+/* Module-level visuals: reuse the same colors, counts and spinner placement as scenarios */
+.multi-module-header {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.6rem;
+    padding: 0.8rem 1rem;
+}
+.multi-module-caret { margin-right: 0.6rem; }
+.multi-module-title { font-weight: 700; }
+.multi-module-status { margin-left: auto; margin-right: 0.2rem; white-space: nowrap; font-weight: 600; }
+
+/* state-specific colors (copy from scenario labels) */
+.multi-module[data-status="failed"] .multi-module-status { color: #b91c1c; }
+.multi-module[data-status="running"] .multi-module-status { color: #92400e; }
+.multi-module[data-status="passed"] .multi-module-status { color: #065f46; }
+
+/* compact counts label next to module title */
+.multi-module-counts { margin-left: 0.5rem; display: inline-flex; gap: 0.6rem; align-items: center; color: var(--automation-text-muted); font-size: 0.85rem; }
+.multi-module-counts .count { display:inline-flex; gap:0.35rem; align-items:center; }
+.multi-module-counts .count strong { font-weight:700; }
+.multi-module-counts .count-passed { color: #065f46; }
+.multi-module-counts .count-failed { color: #b91c1c; }
+.multi-module-counts .count-blocked { color: #7f1d1d; }
+.multi-module-counts .count-skipped { color: #6b7280; }
+.multi-module-counts .count-queued { color: #374151; }
+.multi-module-counts .count-running { color: #92400e; }
+
+/* module-level loading spinner next to status when any nested scenario is running */
+.multi-module[data-status="running"] .multi-module-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    position: relative;
+    font-size: 0.9rem;
+}
+.multi-module[data-status="running"] .multi-module-status::before {
+    content: '';
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+    border-radius: 50%;
+    border: 0.12em solid rgba(0,0,0,0.12);
+    border-top-color: #92400e;
+    margin-right: 0;
+    animation: automation-spinner 0.8s linear infinite;
+}
 /* Automation Run Styles */
 .automation-run__item-header {
     display: flex;

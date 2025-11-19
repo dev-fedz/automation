@@ -977,6 +977,15 @@
         const module = getProjectModules(project).find((item) => String(item.id) === String(moduleId));
         const label = module ? module.title || moduleId : moduleId;
         const cases = collectModuleCases(project, [moduleId]);
+        try {
+            if (window.__automationMultiRunner && typeof window.__automationMultiRunner.runModuleBatch === 'function') {
+                // build hierarchical module -> scenarios -> cases payload
+                const scenarios = getScenariosForModule(project, moduleId).map((s) => ({ id: s.id, title: s.title || s.name || s.id, cases: collectScenarioCases(project, [s.id]) }));
+                const moduleObj = { id: moduleId, title: label, scenarios };
+                window.__automationMultiRunner.runModuleBatch([moduleObj], { title: `Run Module: ${label}` });
+                return;
+            }
+        } catch (e) { /* ignore and fallback */ }
         runCaseBatchWithModal(cases, { title: `Run Module: ${label}` });
     };
 
@@ -1004,6 +1013,18 @@
             return;
         }
         const ids = Array.from(state.selectedModules);
+        try {
+            if (window.__automationMultiRunner && typeof window.__automationMultiRunner.runModuleBatch === 'function') {
+                const moduleObjs = ids.map((id) => {
+                    const mod = getProjectModules(project).find((m) => String(m.id) === String(id));
+                    const title = mod ? mod.title || id : id;
+                    const scenarios = getScenariosForModule(project, id).map((s) => ({ id: s.id, title: s.title || s.name || s.id, cases: collectScenarioCases(project, [s.id]) }));
+                    return { id, title, scenarios };
+                });
+                window.__automationMultiRunner.runModuleBatch(moduleObjs, { title: 'Run Selected Modules' });
+                return;
+            }
+        } catch (e) { /* ignore and fallback */ }
         const cases = collectModuleCases(project, ids);
         runCaseBatchWithModal(cases, { title: 'Run Selected Modules' });
     };

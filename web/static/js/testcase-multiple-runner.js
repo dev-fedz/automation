@@ -1887,6 +1887,60 @@
                 }
             } catch (_e) { /* ignore counts render errors */ }
         } catch (_e) { /* ignore update errors */ }
+        // If this scenario is contained within a module container, update the module aggregate
+        try {
+            const moduleParent = parent && parent.closest ? parent.closest('.multi-module') : null;
+            if (moduleParent) updateModuleStatus(moduleParent);
+        } catch (_e) { /* ignore */ }
+    }
+
+    function updateModuleStatus(moduleEl) {
+        if (!moduleEl) return;
+        try {
+            const statusEl = moduleEl.querySelector && moduleEl.querySelector('.multi-module-status');
+            const scenarios = Array.from(moduleEl.querySelectorAll('.multi-scenario'));
+            if (!scenarios.length) {
+                if (statusEl) statusEl.textContent = '';
+                try { moduleEl.dataset.status = ''; } catch (_e) { }
+                return;
+            }
+            const statuses = scenarios.map(s => (s.dataset && s.dataset.status) ? String(s.dataset.status).toLowerCase() : 'queued');
+            const anyRunning = statuses.some(s => s === 'running' || s === 'loading');
+            const anyQueued = statuses.some(s => s === 'queued');
+            const anyFailed = statuses.some(s => s === 'failed');
+            const anyBlocked = statuses.some(s => s === 'blocked');
+            const anySkipped = statuses.some(s => s === 'skipped');
+            const anyPassed = statuses.some(s => s === 'passed');
+
+            let text = '';
+            if (anyRunning) text = 'Running';
+            else if (anyQueued && !anyPassed && !anyFailed && !anyBlocked && anyQueued) text = 'Queued';
+            else if (anyFailed) text = 'Failed';
+            else if (anyBlocked) text = 'Blocked';
+            else if (anySkipped && !anyPassed) text = 'Skipped';
+            else if (anyPassed) text = 'Passed';
+            else text = '';
+
+            if (statusEl) statusEl.textContent = text;
+            try { moduleEl.dataset.status = (text || '').toLowerCase(); } catch (_e) { }
+
+            // render counts per scenario status
+            try {
+                const countsEl = moduleEl.querySelector && moduleEl.querySelector('.multi-module-counts');
+                if (countsEl) {
+                    const counts = statuses.reduce((acc, s) => { acc[s] = (acc[s] || 0) + 1; return acc; }, {});
+                    const order = ['passed', 'failed', 'blocked', 'skipped', 'queued', 'running'];
+                    const parts = [];
+                    order.forEach((key) => {
+                        const n = counts[key] || 0;
+                        if (key === 'passed' || key === 'failed' || n > 0) {
+                            parts.push(`<span class="count count-${key}"><strong>${n}</strong> ${key}</span>`);
+                        }
+                    });
+                    countsEl.innerHTML = parts.join(' ');
+                }
+            } catch (_e) { /* ignore counts render errors */ }
+        } catch (_e) { /* ignore */ }
     }
 
     function markCaseFailed(container, reason, bodyText) {
@@ -2944,6 +2998,162 @@
                             resolve(true);
                         })
                         .catch((err) => {
+                            try { if (autoClose) { closeModal(modal); setTimeout(() => modal.remove(), 250); } } catch (_e) { }
+                            reject(err);
+                        });
+                } catch (err) {
+                    reject(err);
+                }
+            });
+        };
+    }
+    // Provide a module-grouped runner which shows a parent accordion per module,
+    // scenarios nested inside, and cases under each scenario.
+    if (!window.__automationMultiRunner.runModuleBatch || typeof window.__automationMultiRunner.runModuleBatch !== 'function') {
+        window.__automationMultiRunner.runModuleBatch = function runModuleBatch(modules, options) {
+            return new Promise((resolve, reject) => {
+                try {
+                    if (!Array.isArray(modules) || !modules.length) {
+                        resolve(null);
+                        return;
+                    }
+
+                    const existing = document.getElementById('module-multi-response-modal');
+                    if (existing) existing.remove();
+
+                    const modal = document.createElement('div');
+                    modal.className = 'modal multi-run';
+                    modal.id = 'module-multi-response-modal';
+                    modal.setAttribute('aria-hidden', 'true');
+                    modal.tabIndex = -1;
+                    const title = options && options.title ? options.title : 'Run Modules';
+                    modal.innerHTML = `
+                        <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="module-multi-response-title">
+                            <div class="modal-header">
+                                <h3 id="module-multi-response-title">${escapeHtml(title)}</h3>
+                                <button type="button" id="module-multi-response-close" class="modal-close" aria-label="Close">×</button>
+                            </div>
+                            <div class="modal-body">
+                                <div id="module-multi-list" class="multi-list"></div>
+                            </div>
+                        </div>
+                    `;
+                    document.body.appendChild(modal);
+
+                    try {
+                        const dialogEl = modal.querySelector('.modal-dialog');
+                        if (dialogEl) {
+                            dialogEl.style.cssText = 'position:relative;margin:1.5rem auto;width:70vw;max-width:1200px;border-radius:10px;box-shadow:var(--automation-shadow);';
+                        }
+                        const bodyEl = modal.querySelector('.modal-body');
+                        if (bodyEl) {
+                            bodyEl.style.cssText = 'max-height:70vh;overflow:auto;';
+                        }
+                    } catch (e) { /* ignore */ }
+
+                    const list = modal.querySelector('#module-multi-list');
+                    const allCases = [];
+                    let globalIndex = 0;
+
+                    modules.forEach((moduleObj, mIdx) => {
+                        const moduleId = moduleObj && (moduleObj.id || moduleObj.moduleId || moduleObj.module_id) ? String(moduleObj.id || moduleObj.moduleId || moduleObj.module_id) : `module-${mIdx}`;
+                        const moduleTitle = moduleObj && (moduleObj.title || moduleObj.name) ? String(moduleObj.title || moduleObj.name) : `Module ${moduleId}`;
+
+                        const moduleContainer = document.createElement('div');
+                        moduleContainer.className = 'multi-module';
+                        const headerId = `module-${moduleId}-header`;
+                        const bodyId = `module-${moduleId}-body`;
+                        moduleContainer.innerHTML = `
+                            <div class="multi-module-header" id="${headerId}" role="button" aria-expanded="false" tabindex="0">
+                                <span class="multi-module-caret">▶</span><span class="multi-module-title">${escapeHtml(moduleTitle)}</span><span class="multi-module-counts" aria-hidden="true"></span><span class="multi-module-status" aria-hidden="true"></span>
+                            </div>
+                            <div class="multi-module-body" id="${bodyId}" hidden>
+                                <div class="multi-list module-scenario-list"></div>
+                            </div>
+                        `;
+                        const moduleHeader = moduleContainer.querySelector('.multi-module-header');
+                        const moduleBody = moduleContainer.querySelector('.multi-module-body');
+                        const scenariosList = moduleContainer.querySelector('.module-scenario-list');
+
+                        // toggle
+                        moduleHeader.addEventListener('click', () => {
+                            const expanded = moduleHeader.getAttribute('aria-expanded') === 'true';
+                            moduleHeader.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+                            moduleBody.hidden = expanded ? true : false;
+                            try { moduleHeader.classList.toggle('is-expanded', !expanded); } catch (_e) { }
+                        });
+                        moduleHeader.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); moduleHeader.click(); } });
+
+                        // append scenarios
+                        const scenarios = Array.isArray(moduleObj.scenarios) ? moduleObj.scenarios : [];
+                        scenarios.forEach((scenario, sIdx) => {
+                            const scenarioId = scenario && (scenario.id || scenario.scenarioId || scenario.scenario_id) ? String(scenario.id || scenario.scenarioId || scenario.scenario_id) : `m${mIdx}-s${sIdx}`;
+                            const scenarioTitle = scenario && (scenario.title || scenario.name) ? String(scenario.title || scenario.name) : `Scenario ${scenarioId}`;
+
+                            const parent = document.createElement('div');
+                            parent.className = 'multi-scenario';
+                            const sHeaderId = `scenario-${scenarioId}-header`;
+                            const sBodyId = `scenario-${scenarioId}-body`;
+                            parent.innerHTML = `
+                                <div class="multi-scenario-header" id="${sHeaderId}" role="button" aria-expanded="false" tabindex="0">
+                                    <span class="multi-scenario-caret">▶</span><span class="multi-scenario-title">${escapeHtml(scenarioTitle)}</span><span class="multi-scenario-counts" aria-hidden="true"></span><span class="multi-scenario-status" aria-hidden="true"></span>
+                                </div>
+                                <div class="multi-scenario-body" id="${sBodyId}" hidden>
+                                    <div class="multi-list scenario-case-list"></div>
+                                </div>
+                            `;
+                            const sHeader = parent.querySelector('.multi-scenario-header');
+                            const sBody = parent.querySelector('.multi-scenario-body');
+                            const childList = parent.querySelector('.scenario-case-list');
+                            sHeader.addEventListener('click', () => {
+                                const expanded = sHeader.getAttribute('aria-expanded') === 'true';
+                                sHeader.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+                                sBody.hidden = expanded ? true : false;
+                                try { sHeader.classList.toggle('is-expanded', !expanded); } catch (_e) { }
+                            });
+                            sHeader.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); sHeader.click(); } });
+
+                            const cases = Array.isArray(scenario.cases) ? scenario.cases : [];
+                            cases.forEach((caseInfo) => {
+                                const domId = caseInfo.caseId || caseInfo.caseKey || `case-${globalIndex}-${globalIndex}`;
+                                const item = makeAccordionItem(domId, caseInfo.title || caseInfo.name || `Case ${domId}`);
+                                item.dataset.status = 'queued';
+                                if (caseInfo.caseId) item.dataset.caseId = String(caseInfo.caseId);
+                                if (caseInfo.caseKey) item.dataset.caseKey = String(caseInfo.caseKey);
+                                if (caseInfo.requestId) item.dataset.requestId = String(caseInfo.requestId);
+                                if (caseInfo.envId !== undefined && caseInfo.envId !== null && caseInfo.envId !== '') item.dataset.environmentId = String(caseInfo.envId);
+
+                                const key = caseInfo.caseId || (`__idx_${globalIndex}`);
+                                const infoCopy = Object.assign({}, caseInfo, { originalIndex: globalIndex, container: item });
+                                allCases.push(infoCopy);
+                                childList.appendChild(item);
+                                globalIndex += 1;
+                            });
+
+                            scenariosList.appendChild(parent);
+                        });
+
+                        list.appendChild(moduleContainer);
+                    });
+
+                    // close handlers
+                    const close = modal.querySelector('#module-multi-response-close');
+                    if (close) close.addEventListener('click', () => { closeModal(modal); setTimeout(() => modal.remove(), 250); });
+                    modal.addEventListener('click', (ev2) => { if (ev2.target === modal) { closeModal(modal); setTimeout(() => modal.remove(), 250); } });
+
+                    openModal(modal);
+
+                    // Flatten and order by dependency then run sequentially
+                    const ordered = orderCasesByDependency(allCases.slice());
+                    const caseInfoById = new Map();
+                    ordered.forEach((ci) => { if (ci.caseId) caseInfoById.set(ci.caseId, ci); });
+
+                    const autoClose = options && typeof options.autoCloseOnFinish === 'boolean' ? options.autoCloseOnFinish : false;
+                    runSelectedCasesSequentially(ordered, caseInfoById)
+                        .then(() => {
+                            try { if (autoClose) { closeModal(modal); setTimeout(() => modal.remove(), 250); } } catch (_e) { }
+                            resolve(true);
+                        }).catch((err) => {
                             try { if (autoClose) { closeModal(modal); setTimeout(() => modal.remove(), 250); } } catch (_e) { }
                             reject(err);
                         });
