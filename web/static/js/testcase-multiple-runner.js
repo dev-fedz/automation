@@ -1858,7 +1858,7 @@
             const anyPassed = statuses.some(s => s === 'passed');
 
             let text = '';
-            if (anyRunning) text = 'Running';
+            if (anyRunning) text = 'Running…';
             else if (anyQueued && !anyPassed && !anyFailed && !anyBlocked && anyQueued) text = 'Queued';
             else if (anyFailed) text = 'Failed';
             else if (anyBlocked) text = 'Blocked';
