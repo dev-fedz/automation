@@ -100,48 +100,123 @@
 
             if (typeof window.__automationFinalizeReport !== 'function') {
                 window.__automationFinalizeReport = async function (reportId, totals) {
-                    try {
-                        const id = reportId || (window.__lastAutomationReportId ? Number(window.__lastAutomationReportId) : null);
-                        if (!id) {
-                            try { console.warn('[automation] __automationFinalizeReport: no report id'); } catch (_e) { }
-                            return null;
-                        }
-                        const payloadTotals = (totals && typeof totals === 'object') ? totals : null;
-                        let computed = payloadTotals;
-                        if (!computed) {
-                            try {
-                                const modal = document.getElementById('testcase-multi-response-modal');
-                                const res = (modal && window.collectAllScenarioTotals) ? collectAllScenarioTotals(modal) : null;
-                                computed = res && res.totals ? res.totals : { passed: 0, failed: 0, blocked: 0 };
-                            } catch (_e) { computed = { passed: 0, failed: 0, blocked: 0 }; }
-                        }
-                        const name = 'csrftoken';
-                        let csrftoken = null;
-                        try {
-                            const cparts = document.cookie.split(';').map(s => s.trim()).filter(Boolean);
-                            for (const p of cparts) { if (p.startsWith(name + '=')) { csrftoken = decodeURIComponent(p.split('=')[1]); break; } }
-                        } catch (e) { csrftoken = null; }
-                        const detailUrl = `/api/core/automation-report/${id}/`;
-                        try { console.log('[automation] __automationFinalizeReport PATCH', detailUrl, computed); } catch (_e) { }
-                        const resp = await fetch(detailUrl, {
-                            method: 'PATCH',
-                            credentials: 'include',
-                            headers: { 'Content-Type': 'application/json', ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {}) },
-                            body: JSON.stringify({ total_passed: Number(computed.passed || 0), total_failed: Number(computed.failed || 0), total_blocked: Number(computed.blocked || 0), finished: (new Date()).toISOString() }),
-                        });
-                        if (!resp) return null;
-                        if (resp.status === 401) {
-                            try { console.warn('[automation] __automationFinalizeReport unauthorized (401)'); } catch (_e) { }
-                            return null;
-                        }
-                        let body = null;
-                        try { body = await resp.json(); } catch (_e) { body = null; }
-                        try { console.log('[automation] __automationFinalizeReport response', resp.status, body); } catch (_e) { }
-                        return body;
-                    } catch (err) {
-                        try { console.warn('[automation] __automationFinalizeReport error', err); } catch (_e) { }
+                    const id = reportId || (window.__lastAutomationReportId ? Number(window.__lastAutomationReportId) : null);
+                    if (!id) {
+                        try { console.warn('[automation] __automationFinalizeReport: no report id'); } catch (_e) { }
                         return null;
                     }
+
+                    const payloadTotals = (totals && typeof totals === 'object') ? totals : null;
+                    let computed = payloadTotals;
+                    if (!computed) {
+                        try {
+                            const modal = document.getElementById('testcase-multi-response-modal');
+                            const res = (modal && window.collectAllScenarioTotals) ? collectAllScenarioTotals(modal) : null;
+                            computed = res && res.totals ? res.totals : { passed: 0, failed: 0, blocked: 0 };
+                        } catch (_e) { computed = { passed: 0, failed: 0, blocked: 0 }; }
+                    }
+
+                    // Build patch body
+                    const patchBody = { total_passed: Number(computed.passed || 0), total_failed: Number(computed.failed || 0), total_blocked: Number(computed.blocked || 0), finished: (new Date()).toISOString() };
+                    const detailUrl = `/api/core/automation-report/${id}/`;
+
+                    // extract csrf token and cookies for diagnostics
+                    const name = 'csrftoken';
+                    let csrftoken = null;
+                    try {
+                        const cparts = document.cookie.split(';').map(s => s.trim()).filter(Boolean);
+                        for (const p of cparts) { if (p.startsWith(name + '=')) { csrftoken = decodeURIComponent(p.split('=')[1]); break; } }
+                    } catch (e) { csrftoken = null; }
+
+                    try { console.log('[automation] __automationFinalizeReport PATCH', detailUrl, patchBody); } catch (_e) { }
+
+                    // retry logic
+                    const maxAttempts = 3;
+                    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+                        try {
+                            const resp = await fetch(detailUrl, {
+                                method: 'PATCH',
+                                credentials: 'include',
+                                headers: { 'Content-Type': 'application/json', ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {}) },
+                                body: JSON.stringify(patchBody),
+                            });
+
+                            if (!resp) {
+                                try { console.warn('[automation] __automationFinalizeReport no response on attempt', attempt); } catch (_e) { }
+                                // wait before retrying
+                                await new Promise(r => setTimeout(r, 300 * attempt));
+                                continue;
+                            }
+
+                            // Log common diagnostics
+                            try { console.log('[automation] __automationFinalizeReport attempt', attempt, 'status', resp.status); } catch (_e) { }
+
+                            if (resp.status === 401) {
+                                try { console.warn('[automation] __automationFinalizeReport unauthorized (401) — session/csrf issue'); } catch (_e) { }
+                                try { console.log('[automation] document.cookie (truncated)', (document.cookie || '').slice(0, 200)); } catch (_e) { }
+                                try { console.log('[automation] csrftoken present?', Boolean(csrftoken)); } catch (_e) { }
+                                return null;
+                            }
+
+                            // Attempt to parse JSON body, but fall back to text for diagnostics
+                            let body = null;
+                            try { body = await resp.json(); } catch (_e) {
+                                try { const txt = await resp.text(); body = txt; } catch (_e2) { body = null; }
+                            }
+
+                            try { console.log('[automation] __automationFinalizeReport response', resp.status, body); } catch (_e) { }
+
+                            if (resp.ok) {
+                                try {
+                                    // update global id first
+                                    try { window.__lastAutomationReportId = Number(id); } catch (_e) { }
+                                    // Fetch the canonical report from server to ensure UI matches persisted state
+                                    try {
+                                        const detailResp = await fetch(detailUrl, { method: 'GET', credentials: 'include', headers: { Accept: 'application/json' } });
+                                        let canonical = null;
+                                        try { canonical = await detailResp.json(); } catch (_e) { canonical = body || null; }
+                                        // Update modal/badge using canonical data when available
+                                        try {
+                                            const modal = document.getElementById('testcase-multi-response-modal') || document.getElementById('project-multi-response-modal');
+                                            if (modal) {
+                                                try { modal.dataset.automationReportId = String(id); } catch (_e) { }
+                                                try { modal.__automation_report_id = Number(id); } catch (_e) { }
+                                                const badge = modal.querySelector && modal.querySelector('#automation-report-badge');
+                                                if (badge) {
+                                                    try {
+                                                        const p = Number((canonical && canonical.total_passed) || 0);
+                                                        const f = Number((canonical && canonical.total_failed) || 0);
+                                                        const b = Number((canonical && canonical.total_blocked) || 0);
+                                                        badge.textContent = `Report: ${String(id)} (P:${p} F:${f} B:${b})`;
+                                                    } catch (_e) { badge.textContent = `Report: ${String(id)}`; }
+                                                }
+                                            } else {
+                                                const globalBadge = document.getElementById('automation-report-badge');
+                                                if (globalBadge) {
+                                                    try { globalBadge.textContent = `Report: ${String(id)}`; } catch (_e) { }
+                                                }
+                                            }
+                                        } catch (_e) { /* ignore UI update errors */ }
+                                        return canonical || body;
+                                    } catch (_e) {
+                                        // if fetch fails, fall back to original body
+                                        try { console.warn('[automation] __automationFinalizeReport: failed to fetch canonical report', _e); } catch (_e2) { }
+                                        return body;
+                                    }
+                                } catch (_e) { /* ignore */ }
+                            }
+
+                            // Non-ok, retry a few times
+                            try { console.warn('[automation] __automationFinalizeReport unexpected status', resp.status, 'attempt', attempt); } catch (_e) { }
+                            await new Promise(r => setTimeout(r, 300 * attempt));
+                        } catch (err) {
+                            try { console.warn('[automation] __automationFinalizeReport fetch error on attempt', attempt, err); } catch (_e) { }
+                            await new Promise(r => setTimeout(r, 300 * attempt));
+                        }
+                    }
+
+                    try { console.warn('[automation] __automationFinalizeReport failed after retries'); } catch (_e) { }
+                    return null;
                 };
             }
         }
@@ -2166,6 +2241,18 @@
                         }
                     });
                     countsEl.innerHTML = parts.join(' ');
+                    try {
+                        // expose numeric counts as data attributes on the module element
+                        moduleEl.dataset.passed = String(counts.passed || 0);
+                        moduleEl.dataset.failed = String(counts.failed || 0);
+                        moduleEl.dataset.blocked = String(counts.blocked || 0);
+                        // Also log module totals for visibility in DevTools
+                        try {
+                            const titleEl = moduleEl.querySelector && moduleEl.querySelector('.multi-module-title');
+                            const title = titleEl ? (titleEl.textContent || '').trim() : '';
+                            console.log('[automation] module totals', { module: title, passed: Number(moduleEl.dataset.passed || 0), failed: Number(moduleEl.dataset.failed || 0), blocked: Number(moduleEl.dataset.blocked || 0) });
+                        } catch (_e) { /* ignore logging errors */ }
+                    } catch (_e) { /* ignore attribute set errors */ }
                 }
             } catch (_e) { /* ignore counts render errors */ }
         } catch (_e) { /* ignore */ }
@@ -3296,64 +3383,55 @@
                             try {
                                 const reportId = modal && modal.__automation_report_id ? modal.__automation_report_id : null;
                                 if (reportId) {
-                                    (async () => {
-                                        try {
-                                            let csrftoken = null;
-                                            try {
-                                                const name = 'csrftoken';
-                                                const cparts = document.cookie.split(';').map(s => s.trim()).filter(Boolean);
-                                                for (const p of cparts) { if (p.startsWith(name + '=')) { csrftoken = decodeURIComponent(p.split('=')[1]); break; } }
-                                            } catch (e) { csrftoken = null; }
-                                            // small debounce: allow UI totals to settle before sending finalize
-                                            await new Promise((res) => setTimeout(res, 350));
-                                            // include client-side computed totals so server can persist blocked/skipped cases
-                                            const totalsPayload = collectAllScenarioTotals(modal).totals || { passed: 0, failed: 0, blocked: 0, total: 0 };
-                                            // PATCH the report detail to persist totals and finished timestamp
-                                            const detailUrl = `/api/core/automation-report/${reportId}/`;
-                                            const patchBody = {
-                                                total_passed: Number(totalsPayload.passed || 0),
-                                                total_failed: Number(totalsPayload.failed || 0),
-                                                total_blocked: Number(totalsPayload.blocked || 0),
-                                                finished: (new Date()).toISOString(),
-                                            };
-                                            // Debugging: log attempt so developer can confirm PATCH is sent
-                                            try { console.log('[automation] PATCH automation report', detailUrl, patchBody); } catch (_e) { }
-                                            try { console.log('[automation] finalize PATCH attempt origin', window.location ? window.location.origin : 'unknown', 'url', detailUrl); } catch (_e) { }
-                                            try { console.log('[automation] csrftoken present?', Boolean(csrftoken)); } catch (_e) { }
-                                            const resp = await fetch(detailUrl, {
-                                                method: 'PATCH',
-                                                credentials: 'include',
-                                                headers: { 'Content-Type': 'application/json', ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {}) },
-                                                body: JSON.stringify(patchBody),
-                                            });
-                                            if (resp.status === 401) {
-                                                try { console.warn('[automation] finalize PATCH returned 401 Unauthorized; cookies or session may be missing'); } catch (_e) { }
-                                                try { console.warn('[automation] document.cookie (truncated)', (document.cookie || '').slice(0, 200)); } catch (_e) { }
-                                                try { alert('Finalize failed: you appear to be unauthenticated. Please sign in and retry.'); } catch (_e) { }
-                                            }
-                                            try {
-                                                const body = await resp.json();
-                                                console.log('[automation] finalize report response', body);
-                                                // If server returned totals that don't match client totals, retry once
+                                    // Prefer the robust, shared finalize helper used by the
+                                    // project modal and fallback runner. It has retries,
+                                    // CSRF diagnostics, and re-fetches canonical state.
+                                    try {
+                                        const totalsPayload = collectAllScenarioTotals(modal).totals || { passed: 0, failed: 0, blocked: 0, total: 0 };
+                                        if (typeof window !== 'undefined' && typeof window.__automationFinalizeReport === 'function') {
+                                            // run finalize in an async IIFE so we can await inside
+                                            (async () => {
                                                 try {
-                                                    const serverBlocked = Number(body && (body.total_blocked || body.totalBlocked || body.blocked) || 0);
-                                                    const clientBlocked = Number(totalsPayload.blocked || 0);
-                                                    if (resp.ok && serverBlocked !== clientBlocked) {
-                                                        try { console.warn('[automation] finalize mismatch, retrying PATCH to persist client totals', { serverBlocked, clientBlocked }); } catch (_e) { }
-                                                        const retryResp = await fetch(detailUrl, {
-                                                            method: 'PATCH',
-                                                            credentials: 'same-origin',
-                                                            headers: { 'Content-Type': 'application/json', ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {}) },
-                                                            body: JSON.stringify(patchBody),
-                                                        });
-                                                        try { const retryBody = await retryResp.json(); console.log('[automation] finalize retry response', retryBody); } catch (_e) { }
-                                                    }
-                                                } catch (_e) { /* ignore comparison errors */ }
-                                            } catch (_e) { /* ignore parse errors */ }
-                                        } catch (err) {
-                                            console.warn('[automation] failed to finalize automation report', err);
+                                                    // give UI a short moment to settle before finalizing
+                                                    await new Promise((res) => setTimeout(res, 350));
+                                                    await window.__automationFinalizeReport(Number(reportId), totalsPayload);
+                                                } catch (_e) {
+                                                    try { console.warn('[automation] runCaseBatch: __automationFinalizeReport failed', _e); } catch (_e2) { }
+                                                }
+                                            })();
+                                        } else {
+                                            // Fallback to the legacy inline finalize logic when the
+                                            // shared helper isn't available (keeps backwards compatibility).
+                                            (async () => {
+                                                try {
+                                                    let csrftoken = null;
+                                                    try {
+                                                        const name = 'csrftoken';
+                                                        const cparts = document.cookie.split(';').map(s => s.trim()).filter(Boolean);
+                                                        for (const p of cparts) { if (p.startsWith(name + '=')) { csrftoken = decodeURIComponent(p.split('=')[1]); break; } }
+                                                    } catch (e) { csrftoken = null; }
+                                                    await new Promise((res) => setTimeout(res, 350));
+                                                    const detailUrl = `/api/core/automation-report/${reportId}/`;
+                                                    const patchBody = {
+                                                        total_passed: Number(totalsPayload.passed || 0),
+                                                        total_failed: Number(totalsPayload.failed || 0),
+                                                        total_blocked: Number(totalsPayload.blocked || 0),
+                                                        finished: (new Date()).toISOString(),
+                                                    };
+                                                    try { console.log('[automation] PATCH automation report (fallback)', detailUrl, patchBody); } catch (_e) { }
+                                                    const resp = await fetch(detailUrl, {
+                                                        method: 'PATCH',
+                                                        credentials: 'include',
+                                                        headers: { 'Content-Type': 'application/json', ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {}) },
+                                                        body: JSON.stringify(patchBody),
+                                                    });
+                                                    try { const body = await resp.json(); console.log('[automation] finalize report response (fallback)', body); } catch (_e) { }
+                                                } catch (err) {
+                                                    console.warn('[automation] failed to finalize automation report (fallback)', err);
+                                                }
+                                            })();
                                         }
-                                    })();
+                                    } catch (_e) { /* ignore finalize errors */ }
                                 }
                             } catch (_e) { /* ignore finalize errors */ }
                             resolve(true);
@@ -3589,31 +3667,41 @@
                                 if (reportId) {
                                     (async () => {
                                         try {
-                                            let csrftoken = null;
-                                            try {
-                                                const name = 'csrftoken';
-                                                const cparts = document.cookie.split(';').map(s => s.trim()).filter(Boolean);
-                                                for (const p of cparts) { if (p.startsWith(name + '=')) { csrftoken = decodeURIComponent(p.split('=')[1]); break; } }
-                                            } catch (e) { csrftoken = null; }
                                             const totalsPayload = collectAllScenarioTotals(modal).totals || { passed: 0, failed: 0, blocked: 0, total: 0 };
-                                            const detailUrl = `/api/core/automation-report/${reportId}/`;
-                                            const patchBody = {
-                                                total_passed: Number(totalsPayload.passed || 0),
-                                                total_failed: Number(totalsPayload.failed || 0),
-                                                total_blocked: Number(totalsPayload.blocked || 0),
-                                                finished: (new Date()).toISOString(),
-                                            };
-                                            try { console.log('[automation] PATCH automation report', detailUrl, patchBody); } catch (_e) { }
-                                            const resp = await fetch(detailUrl, {
-                                                method: 'PATCH',
-                                                credentials: 'same-origin',
-                                                headers: { 'Content-Type': 'application/json', ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {}) },
-                                                body: JSON.stringify(patchBody),
-                                            });
-                                            try {
-                                                const body = await resp.json();
-                                                console.log('[automation] finalize report response', body);
-                                            } catch (_e) { /* ignore parse errors */ }
+                                            if (typeof window !== 'undefined' && typeof window.__automationFinalizeReport === 'function') {
+                                                try {
+                                                    await window.__automationFinalizeReport(Number(reportId), totalsPayload);
+                                                } catch (_e) {
+                                                    try { console.warn('[automation] runScenarioBatch: __automationFinalizeReport failed', _e); } catch (_e2) { }
+                                                }
+                                            } else {
+                                                // fallback inline finalize
+                                                try {
+                                                    let csrftoken = null;
+                                                    try {
+                                                        const name = 'csrftoken';
+                                                        const cparts = document.cookie.split(';').map(s => s.trim()).filter(Boolean);
+                                                        for (const p of cparts) { if (p.startsWith(name + '=')) { csrftoken = decodeURIComponent(p.split('=')[1]); break; } }
+                                                    } catch (e) { csrftoken = null; }
+                                                    const detailUrl = `/api/core/automation-report/${reportId}/`;
+                                                    const patchBody = {
+                                                        total_passed: Number(totalsPayload.passed || 0),
+                                                        total_failed: Number(totalsPayload.failed || 0),
+                                                        total_blocked: Number(totalsPayload.blocked || 0),
+                                                        finished: (new Date()).toISOString(),
+                                                    };
+                                                    try { console.log('[automation] PATCH automation report (fallback)', detailUrl, patchBody); } catch (_e) { }
+                                                    const resp = await fetch(detailUrl, {
+                                                        method: 'PATCH',
+                                                        credentials: 'same-origin',
+                                                        headers: { 'Content-Type': 'application/json', ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {}) },
+                                                        body: JSON.stringify(patchBody),
+                                                    });
+                                                    try { const body = await resp.json(); console.log('[automation] finalize report response (fallback)', body); } catch (_e) { }
+                                                } catch (err) {
+                                                    console.warn('[automation] failed to finalize automation report (fallback)', err);
+                                                }
+                                            }
                                         } catch (err) {
                                             console.warn('[automation] failed to finalize automation report', err);
                                         }
@@ -3810,6 +3898,51 @@
                             try { refreshScenarioCounts(modal); } catch (_e) { }
                             try { updateModalTotals(modal); } catch (_e) { }
                             try { console.log('[automation] scenario totals', collectAllScenarioTotals(modal)); } catch (_e) { }
+                            // Persist final totals server-side if we observed an automation_report
+                            try {
+                                const reportId = modal && modal.__automation_report_id ? modal.__automation_report_id : (window.__lastAutomationReportId || null);
+                                if (reportId) {
+                                    (async () => {
+                                        try {
+                                            const totalsPayload = collectAllScenarioTotals(modal).totals || { passed: 0, failed: 0, blocked: 0, total: 0 };
+                                            if (typeof window !== 'undefined' && typeof window.__automationFinalizeReport === 'function') {
+                                                try {
+                                                    await window.__automationFinalizeReport(Number(reportId), totalsPayload);
+                                                } catch (_e) { try { console.warn('[automation] runModuleBatch: __automationFinalizeReport failed', _e); } catch (_e2) { } }
+                                            } else {
+                                                // fallback inline finalize
+                                                try {
+                                                    let csrftoken = null;
+                                                    try {
+                                                        const name = 'csrftoken';
+                                                        const cparts = document.cookie.split(';').map(s => s.trim()).filter(Boolean);
+                                                        for (const p of cparts) { if (p.startsWith(name + '=')) { csrftoken = decodeURIComponent(p.split('=')[1]); break; } }
+                                                    } catch (e) { csrftoken = null; }
+                                                    const detailUrl = `/api/core/automation-report/${reportId}/`;
+                                                    const patchBody = {
+                                                        total_passed: Number(totalsPayload.passed || 0),
+                                                        total_failed: Number(totalsPayload.failed || 0),
+                                                        total_blocked: Number(totalsPayload.blocked || 0),
+                                                        finished: (new Date()).toISOString(),
+                                                    };
+                                                    try { console.log('[automation] PATCH automation report (fallback)', detailUrl, patchBody); } catch (_e) { }
+                                                    const resp = await fetch(detailUrl, {
+                                                        method: 'PATCH',
+                                                        credentials: 'same-origin',
+                                                        headers: { 'Content-Type': 'application/json', ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {}) },
+                                                        body: JSON.stringify(patchBody),
+                                                    });
+                                                    try { const body = await resp.json(); console.log('[automation] finalize report response (fallback)', body); } catch (_e) { }
+                                                } catch (err) {
+                                                    console.warn('[automation] failed to finalize automation report (fallback)', err);
+                                                }
+                                            }
+                                        } catch (err) { try { console.warn('[automation] failed to finalize automation report', err); } catch (_e) { } }
+                                    })();
+                                } else {
+                                    try { console.log('[automation] no automation_report id observed; skipping finalize'); } catch (_e) { }
+                                }
+                            } catch (_e) { /* ignore finalize errors */ }
                             resolve(true);
                         }).catch((err) => {
                             try { if (autoClose) { closeModal(modal); setTimeout(() => modal.remove(), 250); } } catch (_e) { }

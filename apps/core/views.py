@@ -1747,6 +1747,19 @@ class AutomationReportDetailView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
+    def get(self, request, pk=None, *args, **kwargs):
+        """Return serialized AutomationReport for the given pk.
+
+        This allows clients to refresh canonical totals after a finalize.
+        """
+        try:
+            report = models.AutomationReport.objects.get(pk=int(pk))
+        except (ValueError, models.AutomationReport.DoesNotExist):
+            raise NotFound("AutomationReport not found")
+
+        serializer = serializers.AutomationReportSerializer(report, context={})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
     def patch(self, request, pk=None, *args, **kwargs):
         try:
             report = models.AutomationReport.objects.get(pk=int(pk))
