@@ -213,6 +213,80 @@ class ApiRunResult(TimeStampedModel):
         return f"Result {self.pk} ({self.status})"
 
 
+class ApiRunResultReport(TimeStampedModel):
+    """Report table mirroring ApiRunResult with an extra testcase id field."""
+
+    class Status(models.TextChoices):
+        PASSED = "passed", "Passed"
+        FAILED = "failed", "Failed"
+        ERROR = "error", "Error"
+
+    run = models.ForeignKey(ApiRun, on_delete=models.CASCADE, related_name="result_reports")
+    request = models.ForeignKey(ApiRequest, on_delete=models.SET_NULL, null=True, related_name="result_reports")
+    order = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=10, choices=Status.choices)
+    response_status = models.IntegerField(null=True, blank=True)
+    response_headers = models.JSONField(default=dict, blank=True)
+    response_body = models.TextField(blank=True)
+    response_time_ms = models.FloatField(null=True, blank=True)
+    assertions_passed = models.JSONField(default=list, blank=True)
+    assertions_failed = models.JSONField(default=list, blank=True)
+    error = models.TextField(blank=True)
+    # Extra field: link to TestCase primary key
+    testcase = models.ForeignKey(
+        "TestCase",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="result_reports",
+    )
+    automation_report = models.ForeignKey(
+        "AutomationReport",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="result_reports",
+    )
+
+    class Meta:
+        ordering = ["run", "order", "id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ResultReport {self.pk} ({self.status})"
+
+
+class AutomationReport(TimeStampedModel):
+    """High level automation report grouping multiple API run reports."""
+
+    report_id = models.CharField(max_length=12, unique=True, blank=True)
+    triggered_in = models.CharField(max_length=500, blank=True)
+    triggered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="automation_reports",
+    )
+    total_passed = models.PositiveIntegerField(default=0)
+    total_failed = models.PositiveIntegerField(default=0)
+    total_blocked = models.PositiveIntegerField(default=0)
+    started = models.DateTimeField(null=True, blank=True)
+    finished = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "id"]
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Ensure report_id is populated after first save (uses pk)
+        if not self.report_id:
+            self.report_id = f"R{str(self.pk).rjust(5, '0')}"
+            super().save(update_fields=["report_id"])  # pragma: no cover - trivial
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return self.report_id or f"Report {self.pk}"
+
+
 class Project(TimeStampedModel):
     """Represents a software project tracked for automation."""
 

@@ -819,6 +819,115 @@
 
         // Fallback: if testcase controls expose a runRequest helper, run requests sequentially
         if (window.__automationTestcaseControls && typeof window.__automationTestcaseControls.runRequest === 'function') {
+            // Ensure an AutomationReport exists even when the multi-runner bundle
+            // didn't initialize. This helper creates a report and sets a global
+            // so downstream execute calls can include `automation_report_id`.
+            if (!window.__automationCreateReport) {
+                window.__automationCreateReport = async function (triggeredIn) {
+                    try {
+                        const name = 'csrftoken';
+                        let csrftoken = null;
+                        try {
+                            const cparts = document.cookie.split(';').map(s => s.trim()).filter(Boolean);
+                            for (const p of cparts) { if (p.startsWith(name + '=')) { csrftoken = decodeURIComponent(p.split('=')[1]); break; } }
+                        } catch (e) { csrftoken = null; }
+                        const url = '/api/core/automation-report/create/';
+                        const resp = await fetch(url, {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json', ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {}) },
+                            body: JSON.stringify({ triggered_in: triggeredIn || 'ui-run' }),
+                        });
+                        if (!resp.ok) {
+                            try { console.warn('[automation] create report failed, status', resp.status); } catch (_e) { }
+                            return null;
+                        }
+                        const body = await resp.json();
+                        try { window.__lastAutomationReportId = body && body.id ? Number(body.id) : null; } catch (_e) { }
+                        try { console.log('[automation] created automation report (fallback path)', body); } catch (_e) { }
+                        return body && body.id ? Number(body.id) : null;
+                    } catch (err) {
+                        try { console.warn('[automation] failed to create automation report (fallback)', err); } catch (_e) { }
+                        return null;
+                    }
+                };
+            }
+            // Finalize helper: allow manual or programmatic PATCHing of totals
+            if (!window.__automationFinalizeReport) {
+                window.__automationFinalizeReport = async function (reportId, totals) {
+                    try {
+                        const id = reportId || (window.__lastAutomationReportId ? Number(window.__lastAutomationReportId) : null);
+                        if (!id) {
+                            try { console.warn('[automation] finalize: no report id available'); } catch (_e) { }
+                            return null;
+                        }
+                        // collect totals fallback when not provided
+                        let payloadTotals = totals || null;
+                        if (!payloadTotals) {
+                            try {
+                                if (window.__automationMultiRunner && typeof window.__automationMultiRunner.getScenarioTotals === 'function') {
+                                    const modal = document.getElementById('testcase-multi-response-modal');
+                                    const res = window.__automationMultiRunner.getScenarioTotals(modal);
+                                    payloadTotals = res && res.totals ? res.totals : null;
+                                }
+                            } catch (_e) { payloadTotals = null; }
+                        }
+                        if (!payloadTotals) {
+                            // DOM fallback: attempt to read totals elements
+                            try {
+                                const passedEl = document.querySelector('[data-role="multi-total-passed"]');
+                                const failedEl = document.querySelector('[data-role="multi-total-failed"]');
+                                const blockedEl = document.querySelector('[data-role="multi-total-blocked"]');
+                                payloadTotals = {
+                                    passed: Number((passedEl && passedEl.textContent) ? Number(passedEl.textContent) : 0),
+                                    failed: Number((failedEl && failedEl.textContent) ? Number(failedEl.textContent) : 0),
+                                    blocked: Number((blockedEl && blockedEl.textContent) ? Number(blockedEl.textContent) : 0),
+                                };
+                            } catch (_e) { payloadTotals = { passed: 0, failed: 0, blocked: 0 }; }
+                        }
+
+                        const name = 'csrftoken';
+                        let csrftoken = null;
+                        try {
+                            const cparts = document.cookie.split(';').map(s => s.trim()).filter(Boolean);
+                            for (const p of cparts) { if (p.startsWith(name + '=')) { csrftoken = decodeURIComponent(p.split('=')[1]); break; } }
+                        } catch (e) { csrftoken = null; }
+
+                        const detailUrl = `/api/core/automation-report/${id}/`;
+                        const patchBody = {
+                            total_passed: Number(payloadTotals.passed || 0),
+                            total_failed: Number(payloadTotals.failed || 0),
+                            total_blocked: Number(payloadTotals.blocked || 0),
+                            finished: (new Date()).toISOString(),
+                        };
+                        try { console.log('[automation] finalize PATCH', detailUrl, patchBody); } catch (_e) { }
+                        const resp = await fetch(detailUrl, {
+                            method: 'PATCH',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json', ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {}) },
+                            body: JSON.stringify(patchBody),
+                        });
+                        // Detect authentication issues early and provide actionable logs
+                        if (resp.status === 401) {
+                            try { console.warn('[automation] finalize PATCH returned 401 Unauthorized; session may be expired'); } catch (_e) { }
+                            try { console.warn('[automation] document.cookie:', document.cookie); } catch (_e) { }
+                            try { alert('Your session appears to be unauthenticated. Please sign in again and retry the run.'); } catch (_e) { }
+                            return null;
+                        }
+                        let body = null;
+                        try { body = await resp.json(); } catch (_e) { body = null; }
+                        try { console.log('[automation] finalize response', resp.status, body); } catch (_e) { }
+                        return body;
+                    } catch (err) {
+                        try { console.warn('[automation] finalize failed', err); } catch (_e) { }
+                        return null;
+                    }
+                };
+            }
+            try {
+                // create report proactively; ignore errors
+                (async () => { try { await window.__automationCreateReport('ui-fallback-run'); } catch (_e) { } })();
+            } catch (_e) { }
             const runnableRequests = cases.map((c) => c.requestId).filter((r) => r);
             if (!runnableRequests.length) {
                 window.alert('Selected cases do not have linked API requests to run.');
@@ -851,6 +960,17 @@
                     if (i >= total) {
                         clearRunningState();
                         resolve(true);
+                        // Try to finalize report automatically if we have an id
+                        try {
+                            setTimeout(async () => {
+                                try {
+                                    const id = window.__lastAutomationReportId || null;
+                                    if (id && typeof window.__automationFinalizeReport === 'function') {
+                                        await window.__automationFinalizeReport(Number(id), null);
+                                    }
+                                } catch (_e) { /* ignore finalize errors */ }
+                            }, 250);
+                        } catch (_e) { }
                         return;
                     }
                     setRunningState(i + 1);
@@ -960,6 +1080,47 @@
         };
     };
 
+    // Background watcher: detect when a multi-run modal has completed and
+    // ensure we finalize the AutomationReport for it. This helps in cases
+    // where the primary finalize path wasn't invoked due to timing or other
+    // race conditions. Initialize once.
+    (function automationReportAutoFinalizer() {
+        try {
+            const finalized = new Set();
+            setInterval(async () => {
+                try {
+                    const modal = document.getElementById('testcase-multi-response-modal');
+                    if (!modal) return;
+                    // determine report id from modal dataset or global
+                    const rid = modal.dataset && modal.dataset.automationReportId ? modal.dataset.automationReportId : (window.__lastAutomationReportId || null);
+                    if (!rid) return;
+                    if (finalized.has(String(rid))) return;
+                    const items = Array.from(modal.querySelectorAll('.multi-item'));
+                    if (!items.length) return;
+                    // consider finished when no items are running/queued
+                    const anyRunning = items.some((it) => {
+                        const s = (it.dataset && it.dataset.status) ? String(it.dataset.status).toLowerCase() : 'queued';
+                        return s === 'running' || s === 'queued';
+                    });
+                    if (anyRunning) return;
+                    // not running -> attempt finalize
+                    try { console.log('[automation] auto-finalizer detected finished modal, finalizing report', rid); } catch (_e) { }
+                    if (typeof window.__automationFinalizeReport === 'function') {
+                        try {
+                            await window.__automationFinalizeReport(Number(rid), null);
+                            finalized.add(String(rid));
+                            try { console.log('[automation] auto-finalizer finalized report', rid); } catch (_e) { }
+                        } catch (_err) {
+                            try { console.warn('[automation] auto-finalizer finalize failed', _err); } catch (_e) { }
+                        }
+                    }
+                } catch (_e) {
+                    /* ignore interval errors */
+                }
+            }, 500);
+        } catch (_e) { /* ignore */ }
+    })();
+
     const handleProjectPlay = (projectId) => {
         const project = getProjectById(projectId);
         if (!project) {
@@ -968,6 +1129,7 @@
         const cases = collectProjectCases(project);
         try {
             if (window.__automationMultiRunner && typeof window.__automationMultiRunner.runProjectBatch === 'function') {
+                // build project -> modules -> scenarios -> cases payload
                 const modules = getProjectModules(project).map((m) => ({ id: m.id, title: m.title || m.name || m.id, scenarios: getScenariosForModule(project, m.id).map((s) => ({ id: s.id, title: s.title || s.name || s.id, cases: collectScenarioCases(project, [s.id]) })) }));
                 const projectObj = { id: projectId, title: project.name || projectId, modules };
                 window.__automationMultiRunner.runProjectBatch([projectObj], { title: `Run Project: ${project.name || projectId}` });
@@ -995,6 +1157,7 @@
                 return;
             }
         } catch (e) { /* ignore and fallback */ }
+        // fallback: collect all cases across selected projects
         const allCases = [];
         ids.forEach((id) => {
             const proj = getProjectById(id);

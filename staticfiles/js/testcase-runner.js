@@ -1581,33 +1581,35 @@
         }
     }
 
-    // Sanitize HTML that will be written into the preview iframe.
-    // Removes script tags and preload/modulepreload links and injects
-    // a restrictive inline Content-Security-Policy meta tag where possible.
+    // Sanitize HTML before writing into the preview iframe to prevent
+    // the embedded response from fetching external SPA client assets
+    // (for example /_next chunks). This removes <script> tags and
+    // modulepreload/preload <link> tags, and injects a restrictive
+    // inline Content-Security-Policy into the document head.
     function sanitizeHtmlForPreview(html) {
-        if (!html) return html;
+        if (!html || typeof html !== 'string') return '';
         try {
-            let s = String(html);
-            // Strip <script>...</script> blocks
-            s = s.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-            // Remove preload/modulepreload links that may pull SPA chunks
-            s = s.replace(/<link\b[^>]*rel=["']?(?:modulepreload|preload)["']?[^>]*>/gi, '');
+            let s = html;
+            // strip script tags
+            s = s.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '');
+            // remove modulepreload / preload links
+            s = s.replace(/<link[^>]+rel=["']?(modulepreload|preload)["']?[^>]*>/gi, '');
 
             // Do NOT inject a CSP meta tag here — injecting restrictive CSPs can
             // block inline styles and images in legitimate preview documents and
             // lead to confusing errors. Stripping scripts and preload links is
             // sufficient to prevent the preview from attempting to load Next.js
             // client chunks.
-            if (/\<\s*head[^>]*>/i.test(s)) {
+            if (/<head[^>]*>/i.test(s)) {
                 return s;
             }
-            if (/\<\s*html[^>]*>/i.test(s)) {
+            if (/<html[^>]*>/i.test(s)) {
                 return s;
             }
             // wrap in minimal document if no html/head present
             return '<!doctype html><html><head></head><body>' + s + '</body></html>';
         } catch (e) {
-            return html;
+            return '';
         }
     }
 
@@ -1639,10 +1641,9 @@
                 if (preview.contentDocument) {
                     preview.contentDocument.open();
                     try {
-                        const safeHtml = sanitizeHtmlForPreview(bodyText || '');
-                        preview.contentDocument.write(safeHtml);
-                    } catch (writeErr) {
-                        // Fallback: write raw body if sanitizer or write fails
+                        preview.contentDocument.write(sanitizeHtmlForPreview(bodyText || ''));
+                    } catch (e) {
+                        // fallback to raw write if something unexpected happens
                         preview.contentDocument.write(bodyText || '');
                     }
                     preview.contentDocument.close();
@@ -1800,9 +1801,8 @@
                             if (preview.contentDocument) {
                                 preview.contentDocument.open();
                                 try {
-                                    const safeHtml = sanitizeHtmlForPreview(_lastResponse.text || '');
-                                    preview.contentDocument.write(safeHtml);
-                                } catch (writeErr) {
+                                    preview.contentDocument.write(sanitizeHtmlForPreview(_lastResponse.text || ''));
+                                } catch (e) {
                                     preview.contentDocument.write(_lastResponse.text || '');
                                 }
                                 preview.contentDocument.close();
@@ -1833,9 +1833,8 @@
                         if (preview.contentDocument) {
                             preview.contentDocument.open();
                             try {
-                                const safeHtml = sanitizeHtmlForPreview(_lastResponse.text || '');
-                                preview.contentDocument.write(safeHtml);
-                            } catch (writeErr) {
+                                preview.contentDocument.write(sanitizeHtmlForPreview(_lastResponse.text || ''));
+                            } catch (e) {
                                 preview.contentDocument.write(_lastResponse.text || '');
                             }
                             preview.contentDocument.close();
@@ -2155,9 +2154,14 @@
                 mirrorAutomationLog('debug', 'testcase-run no body_transforms present');
             }
 
+            try {
+                if (!payload.automation_report_id && typeof window !== 'undefined' && window.__lastAutomationReportId) {
+                    payload.automation_report_id = Number(window.__lastAutomationReportId);
+                }
+            } catch (_e) { }
             const resp = await fetch(POST_URL, {
                 method: 'POST',
-                credentials: 'same-origin',
+                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
                     ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {}),

@@ -19,6 +19,71 @@ from django.utils import timezone
 from . import models
 
 
+def recompute_automation_report_totals(automation_report: models.AutomationReport | None) -> None:
+    """Recompute `total_passed`, `total_failed`, `total_blocked` for an AutomationReport.
+
+    Totals are computed by taking the latest `ApiRunResultReport` per `TestCase`
+    (by `created_at`) and counting statuses. Only reports linked to a `TestCase`
+    are considered since totals represent test cases.
+    """
+    if automation_report is None:
+        return
+    # If the report is already finalized (finished timestamp set), avoid
+    # recomputing and overwriting the persisted totals. Finalization should
+    # be the authoritative write for totals coming from the UI.
+    try:
+        # Refresh the automation_report from the DB to observe any recent
+        # client-side finalization (PATCH) which may have set `finished`.
+        try:
+            ar_pk = getattr(automation_report, 'pk', None) or getattr(automation_report, 'id', None)
+            if ar_pk is not None:
+                fresh = models.AutomationReport.objects.filter(pk=int(ar_pk)).first()
+                if fresh is not None:
+                    automation_report = fresh
+        except Exception:
+            # if refresh fails, continue with the provided instance
+            pass
+
+        if getattr(automation_report, "finished", None) is not None:
+            return
+    except Exception:
+        pass
+    try:
+        qs = models.ApiRunResultReport.objects.filter(automation_report=automation_report, testcase__isnull=False)
+        if not qs.exists():
+            automation_report.total_passed = 0
+            automation_report.total_failed = 0
+            automation_report.total_blocked = 0
+            automation_report.save(update_fields=["total_passed", "total_failed", "total_blocked"])
+            return
+
+        # Compute latest report per testcase without relying on Postgres DISTINCT ON
+        # which can cause SQL errors in some query/count situations. Collect
+        # distinct testcase ids and pick the latest row per testcase in Python.
+        testcase_ids = list(qs.values_list('testcase_id', flat=True).distinct())
+        latest_list: list = []
+        for tcid in testcase_ids:
+            try:
+                latest = qs.filter(testcase_id=tcid).order_by('-created_at').first()
+            except Exception:
+                latest = None
+            if latest:
+                latest_list.append(latest)
+        total = len(latest_list)
+        statuses = [((getattr(r, 'status', '') or '') or '').lower() for r in latest_list]
+        passed = statuses.count('passed')
+        failed = statuses.count('failed')
+        blocked = total - passed - failed
+
+        automation_report.total_passed = passed
+        automation_report.total_failed = failed
+        automation_report.total_blocked = blocked
+        automation_report.save(update_fields=["total_passed", "total_failed", "total_blocked"])
+    except Exception:
+        # don't allow reporting errors to break the run
+        return
+
+
 VARIABLE_PATTERN = re.compile(r"{{\s*([\w\.-]+)\s*}}")
 
 
@@ -894,11 +959,73 @@ def run_collection(
             result.status = models.ApiRunResult.Status.ERROR
 
         result.save()
+        # mirror saved result into report table (non-blocking)
+        try:
+            tc = None
+            try:
+                tc = api_request.test_cases.first()
+            except Exception:
+                tc = None
+            # find or create an AutomationReport for this run
+            automation_report = None
+            try:
+                # prefer an AutomationReport already linked to this run
+                automation_report = models.AutomationReport.objects.filter(report_id__isnull=False, started=run.started_at).first()
+                if not automation_report:
+                    # try to find by same triggered_by and collection name
+                    if run.triggered_by or run.collection:
+                        triggered_in = run.collection.name if run.collection else ""
+                        automation_report = models.AutomationReport.objects.filter(triggered_by=run.triggered_by, triggered_in=triggered_in, started__date=run.started_at.date() if run.started_at else None).first()
+                if not automation_report:
+                    automation_report = models.AutomationReport.objects.create(
+                        triggered_in=(run.collection.name if run.collection else ""),
+                        triggered_by=run.triggered_by,
+                        started=run.started_at,
+                    )
+            except Exception:
+                automation_report = None
+
+            models.ApiRunResultReport.objects.create(
+                run=run,
+                request=api_request,
+                order=result.order,
+                status=result.status,
+                response_status=result.response_status,
+                response_headers=result.response_headers,
+                response_body=result.response_body,
+                response_time_ms=result.response_time_ms,
+                assertions_passed=result.assertions_passed,
+                assertions_failed=result.assertions_failed,
+                error=result.error,
+                testcase=tc,
+                automation_report=automation_report,
+            )
+            # recompute report totals based on test case results
+            try:
+                recompute_automation_report_totals(automation_report)
+            except Exception:
+                pass
+        except Exception:
+            # don't let reporting failures interrupt the main run
+            pass
 
     run.finished_at = timezone.now()
     run.summary = _summarize_run(total_requests, passed_requests)
     run.status = models.ApiRun.Status.PASSED if passed_requests == total_requests else models.ApiRun.Status.FAILED
     run.save(update_fields=["finished_at", "summary", "status", "updated_at"])
+    # ensure any AutomationReport linked to this run has finished timestamp updated
+    try:
+        reports = models.AutomationReport.objects.filter(result_reports__run=run).distinct()
+        for r in reports:
+            try:
+                if run.finished_at and (not r.finished or run.finished_at > r.finished):
+                    r.finished = run.finished_at
+                    r.save(update_fields=["finished"])
+            except Exception:
+                continue
+    except Exception:
+        pass
+
     return run
 
 

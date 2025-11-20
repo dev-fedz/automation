@@ -2154,9 +2154,14 @@
                 mirrorAutomationLog('debug', 'testcase-run no body_transforms present');
             }
 
+            try {
+                if (!payload.automation_report_id && typeof window !== 'undefined' && window.__lastAutomationReportId) {
+                    payload.automation_report_id = Number(window.__lastAutomationReportId);
+                }
+            } catch (_e) { }
             const resp = await fetch(POST_URL, {
                 method: 'POST',
-                credentials: 'same-origin',
+                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
                     ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {}),

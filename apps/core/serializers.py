@@ -347,6 +347,27 @@ class ApiRunSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class AutomationReportSerializer(serializers.ModelSerializer):
+    triggered_by = serializers.StringRelatedField(read_only=True)
+
+    class Meta:
+        model = models.AutomationReport
+        fields = [
+            "id",
+            "report_id",
+            "triggered_in",
+            "triggered_by",
+            "total_passed",
+            "total_failed",
+            "total_blocked",
+            "started",
+            "finished",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "report_id", "triggered_by", "created_at", "updated_at"]
+
+
 class TestCaseSerializer(serializers.ModelSerializer):
     # Allow API clients to omit testcase_id; it will be generated in model.save()
     testcase_id = serializers.CharField(required=False, allow_blank=True, allow_null=True, default=None)

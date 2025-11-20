@@ -1333,6 +1333,9 @@ class ApiAdhocRequestView(APIView):
             order=1,
             status=models.ApiRunResult.Status.ERROR,
         )
+        # track any AutomationReport created during execution so we can
+        # include its id in the response payload to clients
+        automation_report = None
 
         outbound_plaintext = None
         outbound_payload = None
@@ -1389,15 +1392,78 @@ class ApiAdhocRequestView(APIView):
             run.summary = services._summarize_run(1, 0)  # type: ignore[attr-defined]
             run.finished_at = timezone.now()
             run.save(update_fields=["status", "summary", "finished_at", "updated_at"])
-            return Response(
-                {
-                    "error": str(exc),
-                    "resolved_url": resolved_url,
-                    "request_headers": resolved_headers,
-                    "run_id": run.id,
-                },
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
+            # mirror into report table (non-blocking)
+            try:
+                tc = None
+                try:
+                    tc = api_request.test_cases.first()
+                except Exception:
+                    tc = None
+
+                automation_report = None
+                # Prefer an explicit automation_report_id from the client payload
+                try:
+                    ar_id = payload.get("automation_report_id") if isinstance(payload, dict) else None
+                except Exception:
+                    ar_id = None
+                if ar_id:
+                    try:
+                        automation_report = models.AutomationReport.objects.filter(pk=int(ar_id)).first()
+                    except Exception:
+                        automation_report = None
+                # Fallback to finding/creating by run.started_at and triggered_by
+                if not automation_report:
+                    try:
+                        automation_report = models.AutomationReport.objects.filter(started=run.started_at, triggered_by=run.triggered_by).first()
+                        if not automation_report:
+                            automation_report = models.AutomationReport.objects.create(
+                                triggered_in=(run.collection.name if run.collection else ""),
+                                triggered_by=run.triggered_by,
+                                started=run.started_at,
+                                finished=run.finished_at,
+                            )
+                    except Exception:
+                        automation_report = None
+
+                models.ApiRunResultReport.objects.create(
+                    run=run,
+                    request=api_request,
+                    order=run_result.order,
+                    status=run_result.status,
+                    response_status=run_result.response_status,
+                    response_headers=run_result.response_headers,
+                    response_body=run_result.response_body,
+                    response_time_ms=run_result.response_time_ms,
+                    assertions_passed=run_result.assertions_passed,
+                    assertions_failed=run_result.assertions_failed,
+                    error=run_result.error,
+                    testcase=tc,
+                    automation_report=automation_report,
+                )
+                # recompute report totals based on test case results
+                try:
+                    services.recompute_automation_report_totals(automation_report)
+                    if automation_report is not None:
+                        # ensure finished is current
+                        if run.finished_at and (not automation_report.finished or run.finished_at > automation_report.finished):
+                            automation_report.finished = run.finished_at
+                            automation_report.save(update_fields=["finished"])
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            payload = {
+                "error": str(exc),
+                "resolved_url": resolved_url,
+                "request_headers": resolved_headers,
+                "run_id": run.id,
+            }
+            try:
+                if automation_report is not None:
+                    payload["automation_report_id"] = getattr(automation_report, "id", None)
+            except Exception:
+                pass
+            return Response(payload, status=status.HTTP_502_BAD_GATEWAY)
 
         elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -1464,6 +1530,64 @@ class ApiAdhocRequestView(APIView):
                 "updated_at",
             ]
         )
+        # mirror into report table (non-blocking)
+        try:
+            tc = None
+            try:
+                tc = api_request.test_cases.first()
+            except Exception:
+                tc = None
+
+            automation_report = None
+            try:
+                ar_id = payload.get("automation_report_id") if isinstance(payload, dict) else None
+            except Exception:
+                ar_id = None
+            if ar_id:
+                try:
+                    automation_report = models.AutomationReport.objects.filter(pk=int(ar_id)).first()
+                except Exception:
+                    automation_report = None
+            if not automation_report:
+                try:
+                    # try to find an existing report for this run
+                    automation_report = models.AutomationReport.objects.filter(started=run.started_at, triggered_by=run.triggered_by).first()
+                    if not automation_report:
+                        # fallback: create a new report with collection name as triggered_in
+                        automation_report = models.AutomationReport.objects.create(
+                            triggered_in=(run.collection.name if run.collection else ""),
+                            triggered_by=run.triggered_by,
+                            started=run.started_at,
+                        )
+                except Exception:
+                    automation_report = None
+
+            models.ApiRunResultReport.objects.create(
+                run=run,
+                request=api_request,
+                order=run_result.order,
+                status=run_result.status,
+                response_status=run_result.response_status,
+                response_headers=run_result.response_headers,
+                response_body=run_result.response_body,
+                response_time_ms=run_result.response_time_ms,
+                assertions_passed=run_result.assertions_passed,
+                assertions_failed=run_result.assertions_failed,
+                error=run_result.error,
+                testcase=tc,
+                automation_report=automation_report,
+            )
+            # recompute totals based on TestCase latest results and update finished
+            try:
+                services.recompute_automation_report_totals(automation_report)
+                if automation_report is not None:
+                    if run.finished_at and (not automation_report.finished or run.finished_at > automation_report.finished):
+                        automation_report.finished = run.finished_at
+                        automation_report.save(update_fields=["finished"])
+            except Exception:
+                pass
+        except Exception:
+            pass
         passed = 1 if response.ok else 0
         run.status = models.ApiRun.Status.PASSED if response.ok else models.ApiRun.Status.FAILED
         run.summary = services._summarize_run(1, passed)  # type: ignore[attr-defined]
@@ -1491,6 +1615,7 @@ class ApiAdhocRequestView(APIView):
                 "variables": variables,
                 "run_id": run.id,
                 "run_result_id": run_result.id,
+                "automation_report_id": (automation_report.id if automation_report is not None else None),
             }
         )
 
@@ -1499,3 +1624,193 @@ class ApiAdhocRequestView(APIView):
 def api_tester_page(request):
     """Render the interactive API testing workspace."""
     return render(request, "core/api_tester.html")
+
+
+class AutomationReportFinalizeView(APIView):
+    """Endpoint to recompute totals and mark an AutomationReport finished.
+
+    Expects JSON body: {"report_id": <int>, "finished": "ISO timestamp (optional)"}
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        report_id = request.data.get("report_id")
+        if not report_id:
+            return Response({"report_id": "report_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            report = models.AutomationReport.objects.get(pk=int(report_id))
+        except models.AutomationReport.DoesNotExist:
+            raise NotFound("AutomationReport not found")
+
+        # Allow client to provide final totals (useful for blocked/skipped cases
+        # that do not produce server-side report rows). If `totals` is present
+        # we persist these values directly. Otherwise recompute from stored
+        # ApiRunResultReport rows.
+        totals = request.data.get("totals")
+        if isinstance(totals, dict):
+            try:
+                passed = int(totals.get("passed") or 0)
+            except Exception:
+                passed = 0
+            try:
+                failed = int(totals.get("failed") or 0)
+            except Exception:
+                failed = 0
+            try:
+                blocked = int(totals.get("blocked") or 0)
+            except Exception:
+                blocked = 0
+            try:
+                report.total_passed = max(0, passed)
+                report.total_failed = max(0, failed)
+                report.total_blocked = max(0, blocked)
+                report.save(update_fields=["total_passed", "total_failed", "total_blocked"])
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.exception("Failed to persist provided totals for AutomationReport %s: %s", report_id, exc)
+                return Response({"error": "failed to persist provided totals"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        else:
+            try:
+                services.recompute_automation_report_totals(report)
+            except Exception as exc:
+                logger.exception("Failed to recompute totals for AutomationReport %s: %s", report_id, exc)
+                return Response({"error": "failed to recompute totals"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        finished_val = request.data.get("finished")
+        if finished_val:
+            try:
+                # try ISO parse, fallback to now
+                finished_dt = timezone.datetime.fromisoformat(str(finished_val))
+                if timezone.is_naive(finished_dt):
+                    finished_dt = timezone.make_aware(finished_dt, timezone.get_current_timezone())
+            except Exception:
+                finished_dt = timezone.now()
+        else:
+            finished_dt = timezone.now()
+
+        try:
+            if not report.finished or finished_dt > report.finished:
+                report.finished = finished_dt
+                report.save(update_fields=["finished"])
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("Failed to save finished timestamp for AutomationReport %s: %s", report_id, exc)
+
+        try:
+            serializer = serializers.AutomationReportSerializer(report)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception:
+            return Response({"status": "ok"}, status=status.HTTP_200_OK)
+
+
+class AutomationReportCreateView(APIView):
+    """Create a new AutomationReport for a batch run.
+
+    Expects optional JSON: {"triggered_in": "<string>", "started": "ISO (optional)"}
+    Returns serialized AutomationReport.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        try:
+            logger.info("[automation] AutomationReport create called by user=%s payload=%s", getattr(request, 'user', None), request.data)
+        except Exception:
+            pass
+        triggered_in = request.data.get("triggered_in") or request.data.get("triggeredIn") or ""
+        started_val = request.data.get("started")
+        try:
+            if started_val:
+                try:
+                    started_dt = timezone.datetime.fromisoformat(str(started_val))
+                    if timezone.is_naive(started_dt):
+                        started_dt = timezone.make_aware(started_dt, timezone.get_current_timezone())
+                except Exception:
+                    started_dt = timezone.now()
+            else:
+                started_dt = timezone.now()
+            report = models.AutomationReport.objects.create(
+                triggered_in=str(triggered_in)[:500],
+                triggered_by=request.user if request.user and request.user.is_authenticated else None,
+                started=started_dt,
+            )
+            serializer = serializers.AutomationReportSerializer(report)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        except Exception as exc:
+            logger.exception("Failed to create AutomationReport: %s", exc)
+            return Response({"error": "failed to create report"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class AutomationReportDetailView(APIView):
+    """Detail endpoint for AutomationReport allowing partial updates (PATCH).
+
+    URL: /api/core/automation-report/<pk>/
+    Accepts PATCH with any of: `total_passed`|`total_success`|`passed`,
+    `total_failed`|`failed`, `total_blocked`|`blocked`, and optional `finished`.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk=None, *args, **kwargs):
+        try:
+            report = models.AutomationReport.objects.get(pk=int(pk))
+        except (ValueError, models.AutomationReport.DoesNotExist):
+            raise NotFound("AutomationReport not found")
+
+        data = request.data or {}
+        try:
+            logger.info("[automation] PATCH automation-report payload: %s", data)
+        except Exception:
+            pass
+
+        # Normalise totals from several possible client keys
+        def parse_int(keys):
+            for k in keys:
+                if k in data:
+                    try:
+                        return int(data.get(k) or 0)
+                    except Exception:
+                        return 0
+            return None
+
+        updated_fields = []
+        passed = parse_int(["total_passed", "total_success", "passed"])
+        failed = parse_int(["total_failed", "failed"])
+        blocked = parse_int(["total_blocked", "blocked"])
+        try:
+            logger.info(
+                "[automation] PATCH parsed totals -> passed=%s failed=%s blocked=%s",
+                passed,
+                failed,
+                blocked,
+            )
+        except Exception:
+            pass
+
+        if passed is not None:
+            report.total_passed = max(0, passed)
+            updated_fields.append("total_passed")
+        if failed is not None:
+            report.total_failed = max(0, failed)
+            updated_fields.append("total_failed")
+        if blocked is not None:
+            report.total_blocked = max(0, blocked)
+            updated_fields.append("total_blocked")
+
+        # Allow client to set finished timestamp (ISO string) or use now
+        finished_val = data.get("finished")
+        if finished_val is not None:
+            try:
+                finished_dt = timezone.datetime.fromisoformat(str(finished_val))
+                if timezone.is_naive(finished_dt):
+                    finished_dt = timezone.make_aware(finished_dt, timezone.get_current_timezone())
+            except Exception:
+                finished_dt = timezone.now()
+            report.finished = finished_dt
+            updated_fields.append("finished")
+
+        try:
+            if updated_fields:
+                report.save(update_fields=updated_fields)
+        except Exception as exc:
+            logger.exception("Failed to patch AutomationReport %s: %s", pk, exc)
+            return Response({"error": "failed to update report"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        serializer = serializers.AutomationReportSerializer(report, context={})
+        return Response(serializer.data, status=status.HTTP_200_OK)

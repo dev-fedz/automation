@@ -20,4 +20,7 @@ urlpatterns = router.urls
 
 urlpatterns += [
 	path("tester/execute/", views.ApiAdhocRequestView.as_view(), name="core-request-execute"),
+	path("automation-report/finalize/", views.AutomationReportFinalizeView.as_view(), name="core-automation-report-finalize"),
+	path("automation-report/create/", views.AutomationReportCreateView.as_view(), name="core-automation-report-create"),
+	path("automation-report/<int:pk>/", views.AutomationReportDetailView.as_view(), name="core-automation-report-detail"),
 ]
