@@ -2155,6 +2155,20 @@
             }
 
             try {
+                // Ensure an AutomationReport is created for individual runs.
+                if (!payload.automation_report_id && typeof window !== 'undefined' && typeof window.__automationCreateReport === 'function') {
+                    try {
+                        const createdId = await window.__automationCreateReport('Run Individual Case');
+                        if (createdId) {
+                            try { window.__lastAutomationReportId = createdId; } catch (_e) { }
+                            payload.automation_report_id = Number(createdId);
+                            try { console.debug('[automation] created individual AutomationReport', createdId); } catch (_e) { }
+                        }
+                    } catch (_e) {
+                        // ignore create failures and fall back to any existing id
+                    }
+                }
+
                 if (!payload.automation_report_id && typeof window !== 'undefined' && window.__lastAutomationReportId) {
                     payload.automation_report_id = Number(window.__lastAutomationReportId);
                 }
@@ -2250,6 +2264,16 @@
                 }
                 latestPostExtras = postExtras;
                 syncConsoleOutputs();
+                // finalize report for failed individual run (mark as failed unless blocked indicated)
+                try {
+                    const reportId = Number(window.__lastAutomationReportId || (payload && payload.automation_report_id));
+                    if (reportId && typeof window.__automationFinalizeReport === 'function') {
+                        const resObj = result || {};
+                        const isBlocked = Boolean(resObj.blocked || resObj.skipped || resObj.skipped === true || resObj.blocked === true);
+                        const totals = { passed: 0, failed: isBlocked ? 0 : 1, blocked: isBlocked ? 1 : 0 };
+                        try { await window.__automationFinalizeReport(reportId, totals); } catch (_e) { /* ignore finalize errors */ }
+                    }
+                } catch (_e) { /* ignore finalize errors */ }
                 return;
             }
 
@@ -2312,6 +2336,24 @@
             }
             latestPostExtras = postExtrasSuccess;
             syncConsoleOutputs();
+            // finalize the AutomationReport for this individual run using evaluation outcome
+            try {
+                const reportId = Number(window.__lastAutomationReportId || (payload && payload.automation_report_id));
+                if (reportId && typeof window.__automationFinalizeReport === 'function') {
+                    let passed = 0, failed = 0, blocked = 0;
+                    const resObj = result || {};
+                    const isBlocked = Boolean(resObj.blocked || resObj.skipped || resObj.skipped === true || resObj.blocked === true);
+                    if (isBlocked) {
+                        blocked = 1;
+                    } else if (evaluation && typeof evaluation === 'object' && evaluation.evaluated) {
+                        if (evaluation.passed) passed = 1; else failed = 1;
+                    } else {
+                        failed = 1;
+                    }
+                    const totalsPayload = { passed, failed, blocked };
+                    try { await window.__automationFinalizeReport(reportId, totalsPayload); } catch (_e) { try { console.warn('[automation] __automationFinalizeReport failed', _e); } catch (_e2) { } }
+                }
+            } catch (_e) { /* ignore finalize path issues */ }
         } catch (err) {
             const loadingEl = document.getElementById('testcase-response-loading'); if (loadingEl) loadingEl.hidden = true;
             const contentEl = document.getElementById('testcase-response-content'); if (contentEl) contentEl.hidden = false;
