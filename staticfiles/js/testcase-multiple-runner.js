@@ -3616,36 +3616,40 @@
                     const autoClose = options && typeof options.autoCloseOnFinish === 'boolean' ? options.autoCloseOnFinish : false;
 
                     // Create an AutomationReport before running so all results can be associated.
-                    modal.__automation_report_promise = (async () => {
-                        try {
-                            const triggeredIn = (options && options.title) ? options.title : 'ui-multi-run';
-                            let csrftoken = null;
+                    // Only create the promise if it hasn't already been set by an earlier
+                    // proactive create path (avoid duplicate server-side records).
+                    if (!modal.__automation_report_promise) {
+                        modal.__automation_report_promise = (async () => {
                             try {
-                                const name = 'csrftoken';
-                                const cparts = document.cookie.split(';').map(s => s.trim()).filter(Boolean);
-                                for (const p of cparts) { if (p.startsWith(name + '=')) { csrftoken = decodeURIComponent(p.split('=')[1]); break; } }
-                            } catch (e) { csrftoken = null; }
-                            const resp = await fetch(FINALIZE_URL.replace('/finalize/', '/create/'), {
-                                method: 'POST',
-                                credentials: 'same-origin',
-                                headers: { 'Content-Type': 'application/json', ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {}) },
-                                body: JSON.stringify({ triggered_in: triggeredIn }),
-                            });
-                            if (!resp.ok) return null;
-                            const body = await resp.json();
-                            if (body && body.id) {
-                                try { modal.__automation_report_id = Number(body.id); } catch (_e) { }
-                                try { modal.dataset.automationReportId = String(body.id); } catch (_e) { }
-                                try { window.__lastAutomationReportId = Number(body.id); } catch (_e) { }
-                                try { console.log('[automation] created automation report', body); } catch (_e) { }
-                                return Number(body.id);
+                                const triggeredIn = (options && options.title) ? options.title : 'ui-multi-run';
+                                let csrftoken = null;
+                                try {
+                                    const name = 'csrftoken';
+                                    const cparts = document.cookie.split(';').map(s => s.trim()).filter(Boolean);
+                                    for (const p of cparts) { if (p.startsWith(name + '=')) { csrftoken = decodeURIComponent(p.split('=')[1]); break; } }
+                                } catch (e) { csrftoken = null; }
+                                const resp = await fetch(FINALIZE_URL.replace('/finalize/', '/create/'), {
+                                    method: 'POST',
+                                    credentials: 'same-origin',
+                                    headers: { 'Content-Type': 'application/json', ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {}) },
+                                    body: JSON.stringify({ triggered_in: triggeredIn }),
+                                });
+                                if (!resp.ok) return null;
+                                const body = await resp.json();
+                                if (body && body.id) {
+                                    try { modal.__automation_report_id = Number(body.id); } catch (_e) { }
+                                    try { modal.dataset.automationReportId = String(body.id); } catch (_e) { }
+                                    try { window.__lastAutomationReportId = Number(body.id); } catch (_e) { }
+                                    try { console.log('[automation] created automation report', body); } catch (_e) { }
+                                    return Number(body.id);
+                                }
+                                return null;
+                            } catch (_err) {
+                                console.warn('[automation] failed to create automation report before batch', _err);
+                                return null;
                             }
-                            return null;
-                        } catch (_err) {
-                            console.warn('[automation] failed to create automation report before batch', _err);
-                            return null;
-                        }
-                    })();
+                        })();
+                    }
 
                     (async () => {
                         try {
