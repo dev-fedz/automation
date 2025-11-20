@@ -824,32 +824,68 @@
             // so downstream execute calls can include `automation_report_id`.
             if (!window.__automationCreateReport) {
                 window.__automationCreateReport = async function (triggeredIn) {
+                    // coalesce concurrent create calls using a shared in-flight promise
                     try {
-                        const name = 'csrftoken';
-                        let csrftoken = null;
-                        try {
-                            const cparts = document.cookie.split(';').map(s => s.trim()).filter(Boolean);
-                            for (const p of cparts) { if (p.startsWith(name + '=')) { csrftoken = decodeURIComponent(p.split('=')[1]); break; } }
-                        } catch (e) { csrftoken = null; }
-                        const url = '/api/core/automation-report/create/';
-                        const resp = await fetch(url, {
-                            method: 'POST',
-                            credentials: 'same-origin',
-                            headers: { 'Content-Type': 'application/json', ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {}) },
-                            body: JSON.stringify({ triggered_in: triggeredIn || 'ui-run' }),
-                        });
-                        if (!resp.ok) {
-                            try { console.warn('[automation] create report failed, status', resp.status); } catch (_e) { }
-                            return null;
+                        if (window.__automationCreateReportPromise) {
+                            try { console.log('[automation] __automationCreateReport (fallback): using in-flight promise'); } catch (_e) { }
+                            return await window.__automationCreateReportPromise;
                         }
-                        const body = await resp.json();
-                        try { window.__lastAutomationReportId = body && body.id ? Number(body.id) : null; } catch (_e) { }
-                        try { console.log('[automation] created automation report (fallback path)', body); } catch (_e) { }
-                        return body && body.id ? Number(body.id) : null;
-                    } catch (err) {
-                        try { console.warn('[automation] failed to create automation report (fallback)', err); } catch (_e) { }
-                        return null;
-                    }
+                    } catch (_e) { }
+
+                    window.__automationCreateReportPromise = (async () => {
+                        try {
+                            // Try server-canonical reuse first if we have a last id
+                            try {
+                                const lastId = window.__lastAutomationReportId || null;
+                                if (lastId) {
+                                    try {
+                                        const detailUrl = `/api/core/automation-report/${Number(lastId)}/`;
+                                        const detailResp = await fetch(detailUrl, { method: 'GET', credentials: 'include', headers: { Accept: 'application/json' } });
+                                        if (detailResp && detailResp.ok) {
+                                            try {
+                                                const canonical = await detailResp.json();
+                                                if (canonical && (canonical.finished === null || canonical.finished === undefined)) {
+                                                    try { console.log('[automation] __automationCreateReport (fallback) reusing server unfinished report', lastId); } catch (_e) { }
+                                                    return Number(lastId);
+                                                }
+                                            } catch (_e) { /* ignore parse errors */ }
+                                        }
+                                    } catch (_e) { /* ignore fetch errors */ }
+                                }
+                            } catch (_e) { /* ignore */ }
+
+                            const name = 'csrftoken';
+                            let csrftoken = null;
+                            try {
+                                const cparts = document.cookie.split(';').map(s => s.trim()).filter(Boolean);
+                                for (const p of cparts) { if (p.startsWith(name + '=')) { csrftoken = decodeURIComponent(p.split('=')[1]); break; } }
+                            } catch (e) { csrftoken = null; }
+                            const url = '/api/core/automation-report/create/';
+                            const resp = await fetch(url, {
+                                method: 'POST',
+                                credentials: 'same-origin',
+                                headers: { 'Content-Type': 'application/json', ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {}) },
+                                body: JSON.stringify({ triggered_in: triggeredIn || 'ui-run' }),
+                            });
+                            if (!resp.ok) {
+                                try { console.warn('[automation] create report failed, status', resp.status); } catch (_e) { }
+                                return null;
+                            }
+                            const body = await resp.json();
+                            try { window.__lastAutomationReportId = body && body.id ? Number(body.id) : null; } catch (_e) { }
+                            try { window.__lastAutomationReportCreatedAt = Date.now(); } catch (_e) { }
+                            try { window.__lastAutomationReportFinished = false; } catch (_e) { }
+                            try { console.log('[automation] created automation report (fallback path)', body); } catch (_e) { }
+                            return body && body.id ? Number(body.id) : null;
+                        } catch (err) {
+                            try { console.warn('[automation] failed to create automation report (fallback)', err); } catch (_e) { }
+                            return null;
+                        } finally {
+                            try { delete window.__automationCreateReportPromise; } catch (_e) { window.__automationCreateReportPromise = null; }
+                        }
+                    })();
+
+                    try { return await window.__automationCreateReportPromise; } catch (_e) { return null; }
                 };
             }
             // Finalize helper: allow manual or programmatic PATCHing of totals
@@ -969,7 +1005,7 @@
                                         await window.__automationFinalizeReport(Number(id), null);
                                     }
                                 } catch (_e) { /* ignore finalize errors */ }
-                            }, 250);
+                            }, 800);
                         } catch (_e) { }
                         return;
                     }
