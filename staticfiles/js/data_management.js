@@ -80,6 +80,40 @@
         return date.toLocaleString();
     };
 
+    const showToast = (message, variant = 'success') => {
+        try {
+            let container = document.getElementById('automation-toast-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'automation-toast-container';
+                container.style.position = 'fixed';
+                container.style.right = '16px';
+                container.style.bottom = '16px';
+                container.style.zIndex = 99999;
+                document.body.appendChild(container);
+            }
+            const node = document.createElement('div');
+            node.className = `automation-toast automation-toast--${variant}`;
+            node.style.background = variant === 'error' ? 'rgba(208, 48, 48, 0.92)' : 'rgba(0, 0, 0, 0.85)';
+            node.style.color = '#fff';
+            node.style.padding = '9px 14px';
+            node.style.marginTop = '8px';
+            node.style.borderRadius = '4px';
+            node.style.fontSize = '13px';
+            node.textContent = message;
+            container.appendChild(node);
+            window.setTimeout(() => {
+                try {
+                    container.removeChild(node);
+                } catch (err) {
+                    /* ignore */
+                }
+            }, 3200);
+        } catch (err) {
+            /* ignore toast errors */
+        }
+    };
+
     const fallbackCoerceExpectedResultValue = (raw) => {
         if (raw === null || raw === undefined) {
             return "";
@@ -1069,6 +1103,22 @@
                     }
                 }
             } catch (e) { /* ignore */ }
+            const scenarioMode = state.moduleScenarioModalMode === 'edit' ? 'edit' : 'create';
+            const scenarioLabel = payload.title || 'this scenario';
+            let scenarioConfirmed = true;
+            try {
+                const message = scenarioMode === 'edit'
+                    ? `Are you sure you want to update the scenario "${scenarioLabel}"?`
+                    : `Are you sure you want to create the scenario "${scenarioLabel}"?`;
+                scenarioConfirmed = typeof window.confirm === 'function' ? window.confirm(message) : true;
+            } catch (e) {
+                scenarioConfirmed = true;
+            }
+            if (!scenarioConfirmed) {
+                state.moduleScenarioSubmitting = false;
+                if (saveBtn) saveBtn.disabled = false;
+                return;
+            }
             try {
                 setStatus('Saving scenario…', 'info');
                 try { console.info('[data-management] submitting scenario', { payloadPreview: { module: payload.module, title: payload.title, project: payload.project } }); } catch (e) { }
@@ -1103,7 +1153,9 @@
                     } catch (e) {
                         try { console.info('[data-management] error updating state after update', { error: e && (e.message || e) }); } catch (err) { }
                     }
+                    const displayName = updated && updated.title ? updated.title : scenarioLabel;
                     setStatus('Scenario updated.', 'success');
+                    showToast(`Scenario "${displayName}" updated successfully.`);
                 } else {
                     const created = await request(urlBase, { method: 'POST', body: JSON.stringify(payload) });
                     // insert scenario into module's sublist in state and DOM
@@ -1129,7 +1181,9 @@
                     } catch (e) {
                         try { console.info('[data-management] error in create flow', { error: e && (e.message || e) }); } catch (err) { }
                     }
+                    const displayName = created && created.title ? created.title : scenarioLabel;
                     setStatus('Scenario saved.', 'success');
+                    showToast(`Scenario "${displayName}" created successfully.`);
                 }
             } catch (error) {
                 const message = error instanceof Error ? error.message : 'Unable to save scenario.';
@@ -1138,12 +1192,52 @@
                 if (message && (/unique set/i.test(message) || /fields\s+(plan|project),\s*title/i.test(message))) {
                     setStatus('A scenario with that title already exists in the selected project. Choose a different title.', 'error');
                     try { console.info('[data-management] server-side unique constraint detected'); } catch (e) { }
-                    const t = document.getElementById('module-add-scenario-title'); if (t) { t.focus(); t.select(); }
+                    const t = document.getElementById('module-add-scenario-title');
+                    if (t) {
+                        // If the title exactly matches the attempted title, suggest a new unique one
+                        try {
+                            const current = (t.value || '').trim();
+                            const base = (titleVal || '').trim();
+                            if (current && base && current.toLowerCase() === base.toLowerCase()) {
+                                try {
+                                    // Look for existing titles in the same module or project and find numeric suffixes
+                                    const candidates = [];
+                                    const sourceList = (moduleId ? (state.testModules.find((m) => Number(m.id) === Number(moduleId)) || {}).scenarios : null) || [];
+                                    // also consider freshly fetched scenarios if available in scope
+                                    const pool = Array.isArray(sourceList) ? sourceList : [];
+                                    pool.forEach((s) => {
+                                        try {
+                                            if (!s || !s.title) return;
+                                            const tTitle = String(s.title).trim();
+                                            // match titles that start with base (case-insensitive) and optionally have a " (n)" suffix
+                                            // Build a safe regexp pattern from the base title
+                                            const escapedBase = String(base).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                                            const pattern = '^' + escapedBase.replace(/\s+/g, '\\s+') + '(?:\\s*\\((\\d+)\\))?\\s*$';
+                                            const re = new RegExp(pattern, 'i');
+                                            const m = tTitle.match(re);
+                                            if (m) {
+                                                const n = m[1] ? Number(m[1]) : 0;
+                                                candidates.push(Number.isFinite(n) ? n : 0);
+                                            }
+                                        } catch (_e) { /* ignore per-item errors */ }
+                                    });
+                                    const maxExisting = candidates.length ? Math.max(...candidates) : 0;
+                                    const next = maxExisting + 1;
+                                    t.value = `${base}(${next})`;
+                                } catch (_e) {
+                                    // fallback to simple suggestion
+                                    if (!/\(\d+\)\s*$/.test(current)) t.value = `${base}(1)`;
+                                }
+                            }
+                        } catch (_e) { /* ignore */ }
+                        try { t.focus(); t.select(); } catch (_e) { }
+                    }
                     // Refresh scenarios from the server for the current project/module
                     try {
                         const scenariosBase = apiEndpoints.scenarios || '/api/core/test-scenarios/';
                         // prefer fetching by project if we have it, otherwise by module
-                        const fetchUrl = payload && payload.project ? `${scenariosBase}?project=${encodeURIComponent(payload.project)}` : `${scenariosBase}?module=${encodeURIComponent(moduleId)}`;
+                        const fetchUrl = payload && payload.project ? `${scenariosBase} ? project = ${encodeURIComponent(payload.project)
+                            }` : `${scenariosBase}?module = ${encodeURIComponent(moduleId)} `;
                         try { console.info('[data-management] fetching latest scenarios after unique constraint', { fetchUrl }); } catch (e) { }
                         const latest = await request(fetchUrl, { method: 'GET' });
                         const normalized = Array.isArray(latest) ? latest.map(normalizeScenario) : [];
@@ -1165,6 +1259,7 @@
                     }
                 } else {
                     setStatus(message, 'error');
+                    showToast(message, 'error');
                 }
             } finally {
                 // clear submitting state and re-enable button
@@ -1177,14 +1272,9 @@
         // Previously this was incorrectly attached inside the keydown handler,
         // which meant the handler wasn't always registered when the user clicked
         // the Save button. Attach it once here so the form always works.
-        try {
-            const moduleAddScenarioFormInit = document.getElementById('module-add-scenario-form');
-            if (moduleAddScenarioFormInit) {
-                moduleAddScenarioFormInit.addEventListener('submit', handleModuleAddScenarioSubmit);
-            }
-        } catch (err) {
-            // ignore if DOM not ready or element missing
-        }
+        // The form submit is handled via delegated listener below so we avoid
+        // attaching a direct listener here which could run twice if the form
+        // is submitted normally (both direct and delegated handlers fire).
         // Delegated submit handler: ensures the submit event is captured even if
         // the form element is re-rendered or replaced. This supports the New
         // Scenario flow where the modal may be opened from another page context.
@@ -1293,7 +1383,7 @@
                 initialProjects.forEach((p) => {
                     const opt = document.createElement('option');
                     opt.value = p.id || '';
-                    opt.textContent = p.name || p.title || `Project ${p.id}`;
+                    opt.textContent = p.name || p.title || `Project ${p.id} `;
                     els.testModulesProject.appendChild(opt);
                 });
                 // set selected value when editing/viewing
@@ -1481,17 +1571,17 @@
                         : 0;
                     const updatedText = escapeHtml(formatDateTime(env ? env.updated_at : null));
                     return (
-                        `\n                        <tr data-environment-id="${env.id}">\n` +
-                        `                            <td data-label="Name">${name}</td>\n` +
-                        `                            <td data-label="Description">${description}</td>\n` +
-                        `                            <td data-label="Variables">${variableCount}</td>\n` +
-                        `                            <td data-label="Headers">${headerCount}</td>\n` +
-                        `                            <td data-label="Updated">${updatedText}</td>\n` +
+                        `\n < tr data - environment - id="${env.id}" >\n` +
+                        `                            < td data - label="Name" > ${name}</td >\n` +
+                        `                            < td data - label="Description" > ${description}</td >\n` +
+                        `                            < td data - label="Variables" > ${variableCount}</td >\n` +
+                        `                            < td data - label="Headers" > ${headerCount}</td >\n` +
+                        `                            < td data - label="Updated" > ${updatedText}</td >\n` +
                         "                            <td data-label=\"Actions\">\n" +
                         "                                <div class=\"table-action-group\">\n" +
-                        `                                    <button type="button" class="action-button" data-action="view-environment" data-id="${env.id}">View</button>\n` +
-                        `                                    <button type="button" class="action-button" data-action="edit-environment" data-id="${env.id}">Edit</button>\n` +
-                        `                                    <button type="button" class="action-button" data-action="delete-environment" data-id="${env.id}" data-variant="danger">Delete</button>\n` +
+                        `                                    < button type = "button" class="action-button" data - action="view-environment" data - id="${env.id}" > View</button >\n` +
+                        `                                    < button type = "button" class="action-button" data - action="edit-environment" data - id="${env.id}" > Edit</button >\n` +
+                        `                                    < button type = "button" class="action-button" data - action="delete-environment" data - id="${env.id}" data - variant="danger" > Delete</button >\n` +
                         "                                </div>\n" +
                         "                            </td>\n" +
                         "                        </tr>\n"
@@ -1546,7 +1636,7 @@
                     const title = risk.title ? escapeHtml(risk.title) : "Untitled";
                     const description = risk.description ? escapeHtml(risk.description) : "&mdash;";
                     return `
-                        <tr data-risk-id="${risk.id}">
+                                            < tr data - risk - id="${risk.id}" >
                             <td data-label="Title">${title}</td>
                             <td data-label="Description">${description}</td>
                             <td data-label="Created">${escapeHtml(formatDateTime(risk.created_at))}</td>
@@ -1558,8 +1648,8 @@
                                     <button type="button" class="action-button" data-action="delete-risk" data-id="${risk.id}" data-variant="danger">Delete</button>
                                 </div>
                             </td>
-                        </tr>
-                    `;
+                        </tr >
+            `;
                 })
                 .join("");
             els.riskList.innerHTML = rows;
@@ -1578,7 +1668,7 @@
                     const title = plan.title ? escapeHtml(plan.title) : "Untitled";
                     const description = plan.description ? escapeHtml(plan.description) : "&mdash;";
                     return `
-                        <tr data-mitigation-id="${plan.id}">
+            < tr data - mitigation - id="${plan.id}" >
                             <td data-label="Title">${title}</td>
                             <td data-label="Description">${description}</td>
                             <td data-label="Created">${escapeHtml(formatDateTime(plan.created_at))}</td>
@@ -1590,8 +1680,8 @@
                                     <button type="button" class="action-button" data-action="delete-mitigation" data-id="${plan.id}" data-variant="danger">Delete</button>
                                 </div>
                             </td>
-                        </tr>
-                    `;
+                        </tr >
+            `;
                 })
                 .join("");
             els.mitigationList.innerHTML = rows;
@@ -1611,7 +1701,7 @@
                     const mitigationTitle = mapping.mitigation_plan_title ? escapeHtml(mapping.mitigation_plan_title) : "Untitled";
                     const impact = mapping.impact ? escapeHtml(mapping.impact) : "&mdash;";
                     return `
-                        <tr data-mapping-id="${mapping.id}">
+            < tr data - mapping - id="${mapping.id}" >
                             <td data-label="#">${index + 1}</td>
                             <td data-label="Risk">
                                 <strong>${riskTitle}</strong>
@@ -1629,8 +1719,8 @@
                                     <button type="button" class="action-button" data-action="delete-mapping" data-id="${mapping.id}" data-variant="danger">Delete</button>
                                 </div>
                             </td>
-                        </tr>
-                    `;
+                        </tr >
+            `;
                 })
                 .join("");
             els.mappingList.innerHTML = rows;
@@ -1818,10 +1908,10 @@
                 return;
             }
             const riskOptions = state.risks
-                .map((risk) => `<option value="${risk.id}">${escapeHtml(risk.title || "Untitled")}</option>`)
+                .map((risk) => `< option value = "${risk.id}" > ${escapeHtml(risk.title || "Untitled")}</option > `)
                 .join("");
             const mitigationOptions = state.mitigationPlans
-                .map((plan) => `<option value="${plan.id}">${escapeHtml(plan.title || "Untitled")}</option>`)
+                .map((plan) => `< option value = "${plan.id}" > ${escapeHtml(plan.title || "Untitled")}</option > `)
                 .join("");
             if (riskOptions) {
                 els.mappingRiskSelect.innerHTML = riskOptions;
@@ -2121,7 +2211,9 @@
                     state.testModules.forEach((m) => {
                         if (Array.isArray(m.scenarios)) {
                             const s = m.scenarios.find((sc) => Number(sc.id) === Number(sid));
-                            if (s) found = { scenario: s, moduleId: m.id };
+                            if (s) {
+                                found = { scenario: s, moduleId: m.id };
+                            }
                         }
                     });
                     if (found) {
@@ -2189,9 +2281,12 @@
                         // keep parent module expanded if known
                         if (parentModuleId) ensureModuleExpanded(parentModuleId);
                         setStatus('Scenario deleted.', 'success');
+                        showToast('Scenario deleted.', 'success');
                         try { document.dispatchEvent(new CustomEvent('test-modules-changed', { detail: { moduleId: parentModuleId } })); } catch (e) { }
                     } catch (err) {
-                        setStatus(err instanceof Error ? err.message : 'Unable to delete scenario.', 'error');
+                        const message = err instanceof Error ? err.message : 'Unable to delete scenario.';
+                        setStatus(message, 'error');
+                        showToast(message, 'error');
                     }
                     break;
                 }
@@ -2275,9 +2370,12 @@
                     try {
                         await request(`${endpoints.testModules}${id}/`, { method: "DELETE" });
                         setStatus("Module deleted.", "success");
+                        showToast("Module deleted.", "success");
                         await loadTestModules();
                     } catch (error) {
-                        setStatus(error.message, "error");
+                        const message = error && error.message ? error.message : "Unable to delete module.";
+                        setStatus(message, "error");
+                        showToast(message, "error");
                     }
                     break;
                 }
@@ -2730,8 +2828,17 @@
                     description,
                     project: (els.testModulesProject && els.testModulesProject.value) ? Number(els.testModulesProject.value) : null,
                 };
+                const mode = (state.testModulesModalMode === 'edit' && state.testModulesCurrentId) ? 'edit' : 'create';
+                const moduleLabel = title || 'this module';
+                const confirmMessage = mode === 'edit'
+                    ? `Are you sure you want to update the module "${moduleLabel}"?`
+                    : `Are you sure you want to create the module "${moduleLabel}"?`;
+                const confirmResult = typeof window.confirm === 'function' ? window.confirm(confirmMessage) : true;
+                if (!confirmResult) {
+                    return;
+                }
                 try {
-                    if (state.testModulesModalMode === 'edit' && state.testModulesCurrentId) {
+                    if (mode === 'edit') {
                         const updated = await request(`${endpoints.testModules}${state.testModulesCurrentId}/`, { method: 'PATCH', body: JSON.stringify(payload) });
                         if (updated && typeof updated === 'object') {
                             const idx = state.testModules.findIndex((t) => Number(t.id) === Number(updated.id));
@@ -2741,11 +2848,15 @@
                                 state.testModules.unshift(updated);
                             }
                         }
+                        const displayName = updated && updated.title ? updated.title : moduleLabel;
                         setStatus('Module updated successfully.', 'success');
+                        showToast(`Module "${displayName}" updated successfully.`);
                     } else {
                         const created = await request(endpoints.testModules, { method: 'POST', body: JSON.stringify(payload) });
                         state.testModules.unshift(created);
+                        const displayName = created && created.title ? created.title : moduleLabel;
                         setStatus('Module created successfully.', 'success');
+                        showToast(`Module "${displayName}" created successfully.`);
                     }
                     closeTestModulesModal();
                     renderTestModulesList();
