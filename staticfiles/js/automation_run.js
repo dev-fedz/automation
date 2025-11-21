@@ -1,5 +1,65 @@
+// Lightweight console helper that always exposes a minimal modal runner
+// even if the main `automation_run` script did not initialize on this page.
+// Use `window.__automationTestOpenModalSimple()` in the browser console.
+try {
+    if (typeof window !== 'undefined' && !window.__automationTestOpenModalSimple) {
+        window.__automationTestOpenModalSimple = async function () {
+            console.debug('[automation] __automationTestOpenModalSimple invoked');
+            const cases = [];
+            try {
+                const checked = Array.from(document.querySelectorAll('input.case-checkbox:checked'));
+                checked.forEach((cb) => {
+                    try {
+                        const row = cb.closest ? cb.closest('tr') : null;
+                        if (!row) return;
+                        const caseId = row.getAttribute('data-case-id') || row.dataset.caseId || null;
+                        const requestId = row.getAttribute('data-request-id') || row.dataset.requestId || null;
+                        const title = row.querySelector('.case-title') ? row.querySelector('.case-title').textContent.trim() : (row.getAttribute('data-case-title') || '');
+                        cases.push({ caseId: caseId ? String(caseId) : null, requestId: requestId ? String(requestId) : null, title: String(title || '') });
+                    } catch (_e) { }
+                });
+                if (!cases.length) {
+                    const first = document.querySelector('tr[data-case-id]');
+                    if (first) {
+                        const caseId = first.getAttribute('data-case-id') || first.dataset.caseId || null;
+                        const requestId = first.getAttribute('data-request-id') || first.dataset.requestId || null;
+                        const title = first.querySelector('.case-title') ? first.querySelector('.case-title').textContent.trim() : (first.getAttribute('data-case-title') || '');
+                        cases.push({ caseId: caseId ? String(caseId) : null, requestId: requestId ? String(requestId) : null, title: String(title || '') });
+                    }
+                }
+            } catch (err) {
+                console.warn('[automation] __automationTestOpenModalSimple: DOM parsing error', err);
+            }
+            if (!cases.length) {
+                console.warn('[automation] __automationTestOpenModalSimple: no cases found');
+                const btn = document.getElementById('run-cases-btn');
+                if (btn) {
+                    console.debug('[automation] __automationTestOpenModalSimple: triggering #run-cases-btn click');
+                    try { btn.click(); return true; } catch (_e) { /* ignore */ }
+                }
+                return null;
+            }
+            // If the full runner API is available, prefer that.
+            if (typeof window.runCaseBatchWithModal === 'function') {
+                return await window.runCaseBatchWithModal(cases, { title: 'Manual Run (console)' });
+            }
+            if (window.__automationMultiRunner && typeof window.__automationMultiRunner.runCaseBatch === 'function') {
+                return await window.__automationMultiRunner.runCaseBatch(cases, { title: 'Manual Run (console)' });
+            }
+            // Fallback: attempt to click the run button
+            const btn = document.getElementById('run-cases-btn');
+            if (btn) {
+                try { btn.click(); return true; } catch (_e) { /* ignore */ }
+            }
+            return null;
+        };
+    }
+} catch (_e) { }
+
 (function () {
-    const root = document.getElementById('automation-run');
+    // Support pages that use either `automation-run` (detailed run UI)
+    // or `automation-app` / `automation-run` for the test-cases listing.
+    const root = document.getElementById('automation-run') || document.getElementById('automation-app');
     if (!root) {
         return;
     }
@@ -1340,6 +1400,48 @@
         renderCases();
     };
 
+    // Temporary global test helper: open the multi-run modal for currently
+    // selected cases (or the first case if none selected). Call from the
+    // browser console as `window.__automationTestOpenModal()` to reproduce
+    // modal behavior when click wiring fails.
+    try {
+        if (typeof window !== 'undefined') {
+            window.__automationTestOpenModal = async function () {
+                try {
+                    console.debug('[automation] __automationTestOpenModal invoked');
+                    const checked = Array.from(document.querySelectorAll('input.case-checkbox:checked'));
+                    let cases = [];
+                    if (checked.length) {
+                        checked.forEach((cb) => {
+                            try {
+                                const row = cb.closest ? cb.closest('tr') : null;
+                                const descriptor = collectCaseDescriptorFromRow(row);
+                                if (descriptor) cases.push(descriptor);
+                            } catch (_e) { }
+                        });
+                    }
+                    if (!cases.length) {
+                        // pick the first available case row
+                        const first = document.querySelector('tr[data-case-id]');
+                        if (first) {
+                            const d = collectCaseDescriptorFromRow(first);
+                            if (d) cases.push(d);
+                        }
+                    }
+                    if (!cases.length) {
+                        console.warn('[automation] __automationTestOpenModal: no cases found on the page');
+                        return null;
+                    }
+                    try { console.debug('[automation] __automationTestOpenModal calling runCaseBatchWithModal for', cases.length, 'cases'); } catch (_e) { }
+                    return await runCaseBatchWithModal(cases, { title: 'Manual Run (console)', autoCloseOnFinish: false });
+                } catch (err) {
+                    console.error('[automation] __automationTestOpenModal error', err);
+                    throw err;
+                }
+            };
+        }
+    } catch (_e) { /* ignore exposure errors */ }
+
     root.addEventListener('click', (event) => {
         const target = event.target;
         if (!target) {
@@ -1550,25 +1652,27 @@
         }
     });
 
-    // Wire Run Selected button
-    if (elements.runCasesButton) {
-        elements.runCasesButton.addEventListener('click', (ev) => {
-            ev.preventDefault();
+    // Wire Run Selected button (attach directly if present, otherwise delegate)
+    const runCasesButtonClickHandler = (ev) => {
+        try { if (ev && typeof ev.preventDefault === 'function') ev.preventDefault(); } catch (_e) { }
+        try { console.debug('[automation] runCasesButtonClickHandler invoked'); } catch (_e) { }
+        try {
+            const buttonEl = elements.runCasesButton || document.getElementById('run-cases-btn');
+            // Prevent duplicate rapid clicks from invoking multiple runs
             try {
-                // Prevent duplicate rapid clicks from invoking multiple runs
-                const ds = elements.runCasesButton.dataset || {};
+                const ds = buttonEl && buttonEl.dataset ? buttonEl.dataset : {};
                 if (ds.batchRunning === '1') return;
                 if (ds) ds.batchRunning = '1';
             } catch (_e) { /* ignore dataset issues */ }
 
-            const table = elements.caseTableContainer ? elements.caseTableContainer.querySelector('table') : null;
+            const table = elements.caseTableContainer ? elements.caseTableContainer.querySelector('table') : (document.querySelector('[data-role="case-table-body"]') ? document.querySelector('[data-role="case-table-body"]').closest('table') : null);
             if (!table) {
-                try { if (elements.runCasesButton && elements.runCasesButton.dataset) delete elements.runCasesButton.dataset.batchRunning; } catch (_e) { }
+                try { if (buttonEl && buttonEl.dataset) delete buttonEl.dataset.batchRunning; } catch (_e) { }
                 return;
             }
             const checked = Array.from(table.querySelectorAll('input.case-checkbox:checked'));
             if (!checked.length) {
-                try { if (elements.runCasesButton && elements.runCasesButton.dataset) delete elements.runCasesButton.dataset.batchRunning; } catch (_e) { }
+                try { if (buttonEl && buttonEl.dataset) delete buttonEl.dataset.batchRunning; } catch (_e) { }
                 window.alert('No test cases selected.');
                 return;
             }
@@ -1583,27 +1687,48 @@
                 }
             });
             if (!cases.length) {
-                try { if (elements.runCasesButton && elements.runCasesButton.dataset) delete elements.runCasesButton.dataset.batchRunning; } catch (_e) { }
+                try { if (buttonEl && buttonEl.dataset) delete buttonEl.dataset.batchRunning; } catch (_e) { }
                 window.alert('No runnable test cases were found for this selection.');
                 return;
             }
 
             // runCaseBatchWithModal may return a promise — clear guard when settled
             try {
+                try { console.debug('[automation] invoking runCaseBatchWithModal with', cases.length, 'cases'); } catch (_e) { }
                 const p = runCaseBatchWithModal(cases, { title: 'Run Selected Cases' });
                 if (p && typeof p.finally === 'function') {
                     p.finally(() => {
-                        try { if (elements.runCasesButton && elements.runCasesButton.dataset) delete elements.runCasesButton.dataset.batchRunning; } catch (_e) { }
+                        try { if (buttonEl && buttonEl.dataset) delete buttonEl.dataset.batchRunning; } catch (_e) { }
                     });
                 } else {
                     // fallback clear after delay
-                    setTimeout(() => { try { if (elements.runCasesButton && elements.runCasesButton.dataset) delete elements.runCasesButton.dataset.batchRunning; } catch (_e) { } }, 2000);
+                    setTimeout(() => { try { if (buttonEl && buttonEl.dataset) delete buttonEl.dataset.batchRunning; } catch (_e) { } }, 2000);
                 }
             } catch (err) {
-                try { if (elements.runCasesButton && elements.runCasesButton.dataset) delete elements.runCasesButton.dataset.batchRunning; } catch (_e) { }
+                try { if (buttonEl && buttonEl.dataset) delete buttonEl.dataset.batchRunning; } catch (_e) { }
             }
-        });
+        } catch (_e) { /* swallow handler errors */ }
+    };
+
+    if (elements.runCasesButton) {
+        try { elements.runCasesButton.addEventListener('click', runCasesButtonClickHandler); } catch (_e) { }
     }
+    // Also add a delegated listener so clicks are handled even if the button
+    // element is replaced later in the DOM lifecycle. The batchRunning guard
+    // prevents duplicate invocations when both handlers fire.
+    try {
+        document.addEventListener('click', (ev) => {
+            try {
+                const target = ev && ev.target ? ev.target : null;
+                if (!target) return;
+                const btn = target.closest ? target.closest('#run-cases-btn') : (target.id === 'run-cases-btn' ? target : null);
+                if (btn) {
+                    try { console.debug('[automation] delegated click detected for #run-cases-btn'); } catch (_e) { }
+                    runCasesButtonClickHandler(ev);
+                }
+            } catch (_e) { /* ignore delegation errors */ }
+        });
+    } catch (_e) { /* ignore attach errors */ }
 
     initializeSelection();
     renderAll();

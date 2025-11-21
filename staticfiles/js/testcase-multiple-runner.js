@@ -300,7 +300,13 @@
             </div>
         `;
 
-        document.body.appendChild(modal);
+        try {
+            try { console.debug('[automation] createModal: appending modal to document.body'); } catch (_e) { }
+            document.body.appendChild(modal);
+            try { console.debug('[automation] createModal: appended to document.body', modal && modal.id); } catch (_e) { }
+        } catch (err) {
+            try { console.error('[automation] createModal: failed to append modal', err); } catch (_e) { }
+        }
         // Do not auto-create an AutomationReport here; defer creation to the
         // caller (e.g. runCaseBatch) so the caller can supply a descriptive
         // `triggered_in` like "Run Selected Cases" and avoid duplicate creates.
@@ -2813,6 +2819,13 @@
                     payload.automation_report_id = Number(window.__lastAutomationReportId);
                 }
             } catch (_e) { }
+            try {
+                try {
+                    console.debug('[automation] executeForPanel payload', JSON.parse(JSON.stringify(payload)));
+                } catch (_e) {
+                    try { console.debug('[automation] executeForPanel payload (stringified failed) - keys', Object.keys(payload || {})); } catch (__e) { /* ignore */ }
+                }
+            } catch (_e) { }
             const resp = await fetch(POST_URL, {
                 method: 'POST',
                 credentials: 'include',
@@ -3024,7 +3037,20 @@
             const requiresDependency = requiresDependencyAttr === '1' || requiresDependencyAttr === 'true';
             const dependencyCaseId = normalizeCaseId(tr && tr.getAttribute && tr.getAttribute('data-dependency-id'));
             const dependencyKey = tr && tr.getAttribute ? (tr.getAttribute('data-dependency-key') || '').trim() : '';
-            const expectedRaw = tr && tr.getAttribute ? tr.getAttribute('data-expected-results') : '';
+            let expectedRaw = '';
+            try {
+                expectedRaw = tr && tr.getAttribute ? tr.getAttribute('data-expected-results') || '' : '';
+                // Fallback: some pages put the expected-results on the run button instead
+                if (!expectedRaw && tr && tr.querySelector) {
+                    const btn = tr.querySelector('button[data-action="run-case"]');
+                    if (btn && typeof btn.getAttribute === 'function') {
+                        expectedRaw = btn.getAttribute('data-expected-results') || '';
+                    }
+                }
+            } catch (_err) {
+                expectedRaw = '';
+            }
+            try { console.debug('[automation] collectSelectedCases expectedRaw for case', caseId, (expectedRaw || '').slice(0, 120)); } catch (_e) { }
             const expectedResults = normalizeExpectedResultsEntries(expectedRaw || []);
             let responseEncrypted = false;
             try {
@@ -3247,7 +3273,14 @@
                         resolve(null);
                         return;
                     }
-                    const modal = createModal();
+                    let modal = null;
+                    try {
+                        modal = createModal();
+                        try { console.debug('[automation] runCaseBatch: createModal returned', !!modal); } catch (_e) { }
+                    } catch (err) {
+                        try { console.error('[automation] runCaseBatch: createModal threw', err); } catch (_e) { }
+                        modal = null;
+                    }
                     // Proactively create an AutomationReport for this modal so
                     // execute calls can attach the report id. Do this early and
                     // non-blocking so the UI can start rendering immediately.
@@ -4302,5 +4335,143 @@
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+
+    // Delegated click handler to ensure the #run-cases-btn triggers the
+    // programmatic multi-run path even when other bundles/roots are missing.
+    try {
+        document.addEventListener('click', async function (event) {
+            try {
+                const target = event.target;
+                if (!target) return;
+                const btn = target.closest && target.closest('#run-cases-btn');
+                if (!btn) return;
+                // only handle actual user clicks
+                event.preventDefault();
+                event.stopPropagation();
+                try { console.debug('[automation] delegated #run-cases-btn click detected'); } catch (_e) { }
+                // collect selected cases or fall back to first row
+                const checked = Array.from(document.querySelectorAll('input.case-checkbox:checked'));
+                const buildFromRow = (row) => {
+                    if (!row) return null;
+                    const caseId = row.getAttribute('data-case-id') || row.dataset.caseId || null;
+                    const requestId = row.getAttribute('data-request-id') || row.dataset.requestId || null;
+                    const scenarioId = row.getAttribute('data-scenario-id') || row.dataset.scenarioId || null;
+                    const envId = row.getAttribute('data-environment-id') || row.dataset.environmentId || null;
+                    // Prefer the same title cell selector used on the Scenarios page
+                    // so modal shows testcase title (third column) rather than id.
+                    const titleCell = row.querySelector && row.querySelector('td:nth-child(3)');
+                    const title = titleCell ? (titleCell.textContent || '').trim() : (row.getAttribute('data-case-title') || '');
+                    // extract expected results and dependency metadata similar to the
+                    // `collectCaseDescriptorFromRow` implementation used by Run All.
+                    let expectedResults = [];
+                    try {
+                        if (row.dataset && row.dataset.expectedResults) {
+                            expectedResults = JSON.parse(row.dataset.expectedResults) || [];
+                        } else if (row.querySelector) {
+                            const runBtn = row.querySelector('button[data-action="run-case"]');
+                            if (runBtn && typeof runBtn.getAttribute === 'function') {
+                                const raw = runBtn.getAttribute('data-expected-results') || '';
+                                try { expectedResults = raw ? JSON.parse(raw) : []; } catch (_e) { expectedResults = []; }
+                                try { console.debug('[automation] buildFromRow expectedRaw for case', caseId, (raw || '').slice(0, 120)); } catch (_e) { }
+                            }
+                        }
+                    } catch (_e) { expectedResults = []; }
+                    let requiresDependency = (row.dataset && row.dataset.requiresDependency) ? String(row.dataset.requiresDependency) === 'true' : false;
+                    let dependencyCaseId = (row.dataset && row.dataset.dependencyId) ? String(row.dataset.dependencyId) : null;
+                    let dependencyKey = (row.dataset && row.dataset.dependencyKey) ? String(row.dataset.dependencyKey) : '';
+                    let responseEncrypted = (row.dataset && row.dataset.responseEncrypted) ? String(row.dataset.responseEncrypted) === 'true' : false;
+                    // Fallback: some pages put dependency metadata on the run button instead of the row
+                    try {
+                        if (row.querySelector) {
+                            const runBtn2 = row.querySelector('button[data-action="run-case"]');
+                            if (runBtn2 && typeof runBtn2.getAttribute === 'function') {
+                                if (!requiresDependency) {
+                                    const r = runBtn2.getAttribute('data-requires-dependency');
+                                    requiresDependency = (r === '1' || String(r) === 'true');
+                                }
+                                if (!dependencyCaseId) dependencyCaseId = runBtn2.getAttribute('data-dependency-id') || dependencyCaseId;
+                                if (!dependencyKey) dependencyKey = runBtn2.getAttribute('data-dependency-key') || dependencyKey;
+                                if (!responseEncrypted) responseEncrypted = String(runBtn2.getAttribute('data-response-encrypted') || responseEncrypted) === 'true';
+                            }
+                        }
+                    } catch (_e) { /* ignore */ }
+                    return {
+                        caseId: caseId ? String(caseId) : null,
+                        requestId: requestId ? String(requestId) : null,
+                        scenarioId: scenarioId ? String(scenarioId) : null,
+                        envId: envId ? String(envId) : null,
+                        title: String((title || '').trim()),
+                        expectedResults,
+                        requiresDependency,
+                        dependencyCaseId,
+                        dependencyKey,
+                        responseEncrypted,
+                    };
+                };
+                let cases = checked.length ? checked.map(cb => buildFromRow(cb.closest && cb.closest('tr'))).filter(Boolean) : (function () { const r = document.querySelector('tr[data-case-id]'); return r ? [buildFromRow(r)] : []; })();
+                // Enrich cases: if requestId is missing but caseId exists, try to fetch
+                // the TestCase detail to obtain `related_api_request` (if configured).
+                try {
+                    const needs = cases.filter(c => (!c.requestId || c.requestId === null) && c.caseId);
+                    if (needs.length) {
+                        const testcasesBase = (typeof endpoints === 'object' && (endpoints.testcases || endpoints['test-cases'] || endpoints.test_cases)) || '/api/core/test-cases/';
+                        for (const c of needs) {
+                            try {
+                                const url = testcasesBase.endsWith('/') ? `${testcasesBase}${String(c.caseId)}/` : `${testcasesBase}/${String(c.caseId)}/`;
+                                const resp = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                                if (!resp.ok) continue;
+                                const body = await resp.json();
+                                if (body && body.related_api_request) {
+                                    c.requestId = String(body.related_api_request);
+                                }
+                            } catch (_e) { /* ignore per-case failures */ }
+                        }
+                        // drop any cases that still lack requestId (they will be skipped by runner)
+                        cases = cases.filter(c => c && (c.requestId || c.requestId === 0 || c.requestId === '0'));
+                    }
+                } catch (_e) { /* ignore enrichment errors */ }
+                if (!cases.length) {
+                    try { console.warn('[automation] delegated run: no cases selected/found'); } catch (_e) { }
+                    return;
+                }
+                // Group cases by scenario to mirror Scenarios page behavior
+                try {
+                    const scenarioMap = new Map();
+                    cases.forEach((c) => {
+                        const sid = (c && c.scenarioId) ? String(c.scenarioId) : '__ungrouped__';
+                        if (!scenarioMap.has(sid)) scenarioMap.set(sid, { id: sid === '__ungrouped__' ? null : sid, title: sid === '__ungrouped__' ? 'Selected Cases' : `Scenario ${sid}`, cases: [] });
+                        const entry = scenarioMap.get(sid);
+                        // Preserve expectedResults and dependency metadata so the scenario
+                        // modal receives the same descriptor shape as Run All.
+                        entry.cases.push({
+                            caseId: c.caseId || null,
+                            requestId: c.requestId || null,
+                            title: c.title || '',
+                            envId: c.envId || null,
+                            expectedResults: c.expectedResults || [],
+                            requiresDependency: Boolean(c.requiresDependency),
+                            dependencyCaseId: c.dependencyCaseId || null,
+                            dependencyKey: c.dependencyKey || '',
+                            responseEncrypted: Boolean(c.responseEncrypted),
+                        });
+                    });
+                    const scenarioObjs = Array.from(scenarioMap.values()).filter(s => Array.isArray(s.cases) && s.cases.length);
+                    if (scenarioObjs.length) {
+                        if (window.__automationMultiRunner && typeof window.__automationMultiRunner.runScenarioBatch === 'function') {
+                            try { window.__automationMultiRunner.runScenarioBatch(scenarioObjs, { title: 'Run Selected Cases' }); } catch (err) { console.error('[automation] delegated run error', err); }
+                            return;
+                        }
+                        if (typeof window.runCaseBatchWithModal === 'function') {
+                            // fallback: flatten to cases and call existing API
+                            const flat = scenarioObjs.reduce((acc, s) => acc.concat((s.cases || []).map(cc => ({ caseId: cc.caseId, requestId: cc.requestId, envId: cc.envId, title: cc.title }))), []);
+                            try { window.runCaseBatchWithModal(flat, { title: 'Run Selected Cases' }); } catch (err) { console.error('[automation] delegated run error (fallback)', err); }
+                            return;
+                        }
+                    }
+                } catch (_e) { /* ignore grouping errors */ }
+                try { console.warn('[automation] delegated run: no programmatic runner API present'); } catch (_e) { }
+            } catch (_e) { /* swallow */ }
+        }, true);
+    } catch (_e) { /* ignore */ }
 
 })();
