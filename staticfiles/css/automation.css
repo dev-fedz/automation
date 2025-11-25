@@ -1642,6 +1642,12 @@ body.automation-modal-open {
 .response-pre { background: #0f1724; color: #e6eef8; padding: 0.7rem; border-radius: 8px; overflow: auto; max-height: none; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .response-pre.expandable { resize: vertical; min-height: 80px; max-height: none; }
 .response-preview { width: 100%; height: 320px; border: 1px solid rgba(0,0,0,0.06); border-radius: 6px; }
+:root /* Palette-based buttons for reports UI (mirrored) */
+:root { --palette-accent: #f4b400; --palette-accent-foreground: #2f2200; }
+.table-modern .btn-icon { background: var(--palette-accent); color: var(--palette-accent-foreground); box-shadow: 0 2px 8px -4px rgba(120,80,0,.35); }
+.table-pagination .btn { background: var(--palette-accent); color: var(--palette-accent-foreground); border: 1px solid rgba(0,0,0,0.05); border-radius:6px; margin-top:0.5rem; }
+.inner-testcase-table .btn { background: var(--palette-accent); color: var(--palette-accent-foreground); }
+.automation-modal__footer .btn { background: var(--palette-accent); color: var(--palette-accent-foreground); }
 .resizer { height: 8px; background: linear-gradient(90deg, rgba(0,0,0,0.06), rgba(0,0,0,0.12)); cursor: ns-resize; margin: 6px 0 8px 0; border-radius: 4px; }
 .resizer:hover { background: linear-gradient(90deg, rgba(0,0,0,0.12), rgba(0,0,0,0.18)); }
 .response-section .action-button { font-size: 0.7rem; padding: 0.25rem 0.5rem; }

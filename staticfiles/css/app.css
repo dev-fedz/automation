@@ -233,10 +233,34 @@ body.auth-layout { background:#f5f7fb; min-height:100dvh; display:flex; justify-
 .table-modern tbody tr:last-child td {border-bottom:none;}
 .table-modern tbody tr:hover {background:#fffef7;}
 .table-modern .actions {text-align:right;white-space:nowrap;}
-.btn-icon {display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;background:#2457c5;color:#fff;text-decoration:none;font-size:.8rem;font-weight:600;box-shadow:0 2px 4px -2px rgba(0,0,0,.25);}
+.btn-icon {display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;background:#2457c5;color:#fff;text-decoration:none;font-size:.8rem;font-weight:600;box-shadow:0 2px 4px -2px rgba(0,0,0,.25);} 
 .btn-icon.edit {background:#2b64d9;}
 .btn-icon.delete {background:#d92b2b;}
 .btn-icon:hover {filter:brightness(1.05);} 
+
+/* Palette variables for report UI */
+:root {
+	--palette-accent: #f4b400; /* yellow */
+	--palette-accent-foreground: #2f2200; /* dark brown */
+	--palette-primary: #2457c5; /* existing blue */
+}
+
+/* Use palette for arrow toggle inside report tables */
+.table-modern .btn-icon { background: var(--palette-accent); color: var(--palette-accent-foreground); box-shadow: 0 2px 8px -4px rgba(120,80,0,.35); }
+.table-modern .btn-icon:hover { filter:none; transform:translateY(-1px); }
+
+/* Pagination buttons (Prev/Next) inside tables */
+.table-pagination .btn { background: var(--palette-accent); color: var(--palette-accent-foreground); border: 1px solid rgba(0,0,0,0.05); border-radius:6px; box-shadow:none; margin-top:0.5rem; }
+.table-pagination .btn:hover { filter:brightness(0.98); }
+
+/* View buttons inside testcase rows */
+.inner-testcase-table .btn { background: var(--palette-accent); color: var(--palette-accent-foreground); border: none; box-shadow:none; }
+.inner-testcase-table .btn:hover { filter:brightness(0.98); }
+
+/* Modal close button and footer Close */
+.automation-modal__close { background: transparent; color: var(--palette-accent-foreground); border: none; font-size:1.25rem; padding:0.2rem 0.5rem; }
+.automation-modal__footer .btn { background: var(--palette-accent); color: var(--palette-accent-foreground); border: none; box-shadow:none; }
+.automation-modal__footer .btn:hover { filter:brightness(0.98); }
 .table-modern .mono {font-family:ui-monospace,Consolas,Menlo,monospace;font-size:.75rem;}
 .empty-row td {text-align:center;padding:2.2rem .5rem;color:#7a6a40;font-size:.8rem;}
 .tag {display:inline-block;background:#f6e4a6;color:#4a3600;padding:.2rem .45rem;border-radius:6px;font-size:.65rem;font-weight:600;line-height:1;margin:.1rem .2rem .1rem 0;}

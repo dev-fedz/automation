@@ -289,7 +289,7 @@
             wireFilter('testcase-report-filter','testcase-report-table',[0,1]);
 
             // --- Pagination ---
-            function createPaginationControls(paginationId, onPrev, onNext) {
+            function createPaginationControls(paginationId, onPrev, onNext, defaultPageSize) {
                 var container = document.getElementById(paginationId);
                 if (!container) return;
                 container.innerHTML = '';
@@ -298,8 +298,15 @@
                 var info = document.createElement('span'); info.className = 'pagination-info'; info.style.margin = '0 0.6rem';
                 var next = document.createElement('button'); next.type = 'button'; next.className = 'btn btn-sm'; next.textContent = 'Next';
                 prev.addEventListener('click', onPrev); next.addEventListener('click', onNext);
-                container.appendChild(prev); container.appendChild(info); container.appendChild(next);
-                return { prev: prev, info: info, next: next };
+
+                // pagesize selector
+                var select = document.createElement('select'); select.className = 'pagination-pagesize';
+                [10,20,30,40,50,100].forEach(function(n){ var opt = document.createElement('option'); opt.value = n; opt.text = String(n); select.appendChild(opt); });
+                if (defaultPageSize) select.value = String(defaultPageSize);
+                select.style.marginLeft = '0.6rem'; select.style.padding = '0.25rem 0.5rem'; select.title = 'Rows per page';
+
+                container.appendChild(prev); container.appendChild(info); container.appendChild(next); container.appendChild(select);
+                return { prev: prev, info: info, next: next, pagesize: select };
             }
 
             function initTablePagination(tableId, paginationId, pageSize) {
@@ -307,7 +314,13 @@
                 var tbody = table && table.querySelector('tbody');
                 if (!tbody) return;
                 // Only paginate primary rows (exclude details rows used by accordions)
-                var rows = Array.from(tbody.querySelectorAll('tr')).filter(function(r){ return !r.classList.contains('report-details'); });
+                // Select only primary rows for pagination. For the automation table we want only .report-row entries.
+                var rows;
+                if (tableId === 'automation-report-table') {
+                    rows = Array.from(tbody.querySelectorAll('tr.report-row'));
+                } else {
+                    rows = Array.from(tbody.querySelectorAll('tr')).filter(function(r){ return !r.classList.contains('report-details') && !r.classList.contains('empty'); });
+                }
                 var state = { page: 1, pageSize: pageSize, rows: rows };
 
                 function renderPage() {
@@ -339,14 +352,25 @@
                 function prev() { if (state.page > 1) { state.page--; renderPage(); } }
                 function next() { var totalPages = Math.max(1, Math.ceil(state.rows.length / state.pageSize)); if (state.page < totalPages) { state.page++; renderPage(); } }
 
-                var controls = createPaginationControls(paginationId, prev, next) || { prev: { disabled: true }, next: { disabled: true }, info: { textContent: '' } };
+                var controls = createPaginationControls(paginationId, prev, next, pageSize) || { prev: { disabled: true }, next: { disabled: true }, info: { textContent: '' }, pagesize: null };
+                // wire pagesize change
+                if (controls.pagesize) {
+                    controls.pagesize.addEventListener('change', function () {
+                        var v = parseInt(this.value, 10) || 10;
+                        state.pageSize = v; state.page = 1; renderPage();
+                    });
+                }
                 renderPage();
 
                 // expose a refresher to update rows (used after filtering)
                 return {
                     refresh: function () {
                         // Only include rows that are currently visible according to filter (style.display !== 'none')
-                        state.rows = Array.from(tbody.querySelectorAll('tr')).filter(function(r){ return !r.classList.contains('report-details') && ((r.style.display || '') !== 'none'); });
+                        if (tableId === 'automation-report-table') {
+                            state.rows = Array.from(tbody.querySelectorAll('tr.report-row')).filter(function(r){ return ((r.style.display || '') !== 'none'); });
+                        } else {
+                            state.rows = Array.from(tbody.querySelectorAll('tr')).filter(function(r){ return !r.classList.contains('report-details') && !r.classList.contains('empty') && ((r.style.display || '') !== 'none'); });
+                        }
                         state.page = 1; renderPage();
                     }
                 };
@@ -355,6 +379,65 @@
             // Initialize paginations for both tables with 10 rows per page
             var automationPager = initTablePagination('automation-report-table','automation-report-pagination',10);
             var testcasePager = initTablePagination('testcase-report-table','testcase-report-pagination',10);
+
+            // Initialize pagination for each nested inner-testcase-table (10 rows per page)
+            function initInnerTablePagination(tableEl, pageSize) {
+                if (!tableEl) return null;
+                var tbody = tableEl.querySelector('tbody');
+                if (!tbody) return null;
+
+                // collect only real testcase rows (ignore placeholder empty rows)
+                var rows = Array.from(tbody.querySelectorAll('tr')).filter(function (r) { return !r.classList.contains('empty'); });
+
+                // create pagination container immediately after the table
+                var container = document.createElement('div');
+                container.className = 'table-pagination inner-pagination';
+                tableEl.parentNode.insertBefore(container, tableEl.nextSibling);
+
+                var prev = document.createElement('button'); prev.type = 'button'; prev.className = 'btn btn-sm'; prev.textContent = 'Prev';
+                var info = document.createElement('span'); info.className = 'pagination-info'; info.style.margin = '0 0.6rem';
+                var next = document.createElement('button'); next.type = 'button'; next.className = 'btn btn-sm'; next.textContent = 'Next';
+
+                // pagesize select for inner tables
+                var select = document.createElement('select'); select.className = 'pagination-pagesize';
+                [10,20,30,40,50,100].forEach(function(n){ var opt = document.createElement('option'); opt.value = n; opt.text = String(n); select.appendChild(opt); });
+                select.value = String(pageSize);
+                select.style.marginLeft = '0.6rem'; select.style.padding = '0.25rem 0.5rem'; select.title = 'Rows per page';
+
+                container.appendChild(prev); container.appendChild(info); container.appendChild(next); container.appendChild(select);
+
+                var state = { page: 1, pageSize: pageSize, rows: rows };
+
+                function render() {
+                    var start = (state.page - 1) * state.pageSize;
+                    var end = start + state.pageSize;
+                    state.rows.forEach(function (r, i) {
+                        r.style.display = (i >= start && i < end) ? '' : 'none';
+                    });
+                    var totalPages = Math.max(1, Math.ceil(state.rows.length / state.pageSize));
+                    info.textContent = state.page + ' / ' + totalPages;
+                    prev.disabled = (state.page <= 1);
+                    next.disabled = (state.page >= totalPages);
+                }
+
+                prev.addEventListener('click', function () { if (state.page > 1) { state.page--; render(); } });
+                next.addEventListener('click', function () { var totalPages = Math.max(1, Math.ceil(state.rows.length / state.pageSize)); if (state.page < totalPages) { state.page++; render(); } });
+                // pagesize change for inner tables
+                select.addEventListener('change', function () { state.pageSize = parseInt(this.value,10) || 10; state.page = 1; render(); });
+
+                // expose a refresh method in case rows change (e.g., filtered)
+                return {
+                    refresh: function () {
+                        state.rows = Array.from(tbody.querySelectorAll('tr')).filter(function (r) { return !r.classList.contains('empty') && ((r.style.display || '') !== 'none'); });
+                        state.page = 1; render();
+                    }
+                };
+            }
+
+            // wire up all inner testcase tables found on the page
+            Array.from(document.querySelectorAll('.inner-testcase-table')).forEach(function (tbl) {
+                try { initInnerTablePagination(tbl, 10); } catch (e) { /* ignore */ }
+            });
 
             // --- Accordion toggles for automation report rows ---
                 (function () {
