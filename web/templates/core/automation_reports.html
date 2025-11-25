@@ -122,35 +122,33 @@
                                 <table class="table-modern automation-table" id="testcase-report-table" aria-label="Test case reports">
                                     <thead>
                                         <tr>
-                                            <th scope="col">Testcase ID</th>
-                                            <th scope="col">Request Name</th>
-                                            <th scope="col">Run ID</th>
-                                            <th scope="col">Outcome</th>
-                                            <th scope="col">Started At</th>
-                                            <th scope="col">Finished At</th>
-                                            <th scope="col">Action</th>
-                                        </tr>
+                                                    <th scope="col">Testcase ID</th>
+                                                    <th scope="col">Request Name</th>
+                                                    <th scope="col">Triggered By</th>
+                                                    <th scope="col">Started At</th>
+                                                    <th scope="col">Finished At</th>
+                                                    <th scope="col">Action</th>
+                                                </tr>
                                     </thead>
                                     <tbody data-role="testcase-report-list">
                                         {% for t in testcase_reports_serialized %}
-                                        <tr data-testcase-id="{{ t.testcase_id }}" data-run-id="{{ t.run_id }}">
+                                        <tr data-testcase-id="{{ t.testcase_id }}" data-run-id="{{ t.run_id }}" data-automation-report-id="{{ t.automation_report_id }}">
                                             <td data-label="Testcase ID">
                                                 <strong>{{ t.testcase_id }}</strong>
                                                 <div class="table-secondary">{{ t.request_name }}</div>
                                             </td>
                                             <td data-label="Request Name">{{ t.request_name }}</td>
-                                            <td data-label="Run ID">{{ t.run_id }}</td>
-                                            <td data-label="Outcome">{{ t.outcome }}</td>
-                                            <td data-label="Started At">{{ t.started }}</td>
-                                            <td data-label="Finished At">{{ t.finished }}</td>
+                                            <td data-label="Triggered By">{{ t.triggered_by|default:'' }}</td>
+                                            <td data-label="Started At">{{ t.created_at }}</td>
+                                            <td data-label="Finished At">{{ t.updated_at }}</td>
                                             <td data-label="Action">
                                                 <div class="table-action-group">
-                                                    <button class="btn btn-sm" data-action="view-testcase-report" data-report-id="{{ t.id }}">View</button>
+                                                    <button class="btn btn-sm" data-action="view-testcase" data-testcase-id="{{ t.testcase_id }}" data-automation-report-id="{{ t.automation_report_id }}">View</button>
                                                 </div>
                                             </td>
                                         </tr>
                                         {% empty %}
-                                        <tr><td colspan="7" class="empty">No testcase reports found.</td></tr>
+                                        <tr><td colspan="6" class="empty">No testcase reports found.</td></tr>
                                         {% endfor %}
                                     </tbody>
                                 </table>

@@ -1648,6 +1648,8 @@ body.automation-modal-open {
 .table-pagination .btn { background: var(--palette-accent); color: var(--palette-accent-foreground); border: 1px solid rgba(0,0,0,0.05); border-radius:6px; margin-top:0.5rem; }
 .inner-testcase-table .btn { background: var(--palette-accent); color: var(--palette-accent-foreground); }
 .automation-modal__footer .btn { background: var(--palette-accent); color: var(--palette-accent-foreground); }
+.table-modern .btn.btn-sm { background: var(--palette-accent); color: var(--palette-accent-foreground); border: none; box-shadow:none; padding: .35rem .7rem; }
+.table-modern .btn.btn-sm:hover { filter:brightness(0.98); }
 .resizer { height: 8px; background: linear-gradient(90deg, rgba(0,0,0,0.06), rgba(0,0,0,0.12)); cursor: ns-resize; margin: 6px 0 8px 0; border-radius: 4px; }
 .resizer:hover { background: linear-gradient(90deg, rgba(0,0,0,0.12), rgba(0,0,0,0.18)); }
 .response-section .action-button { font-size: 0.7rem; padding: 0.25rem 0.5rem; }

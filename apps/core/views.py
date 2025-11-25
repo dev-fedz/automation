@@ -802,14 +802,29 @@ def automation_reports(request):
         testcase_reports_qs = models.ApiRunResultReport.objects.select_related("testcase", "run", "request").order_by("-created_at")[:100]
         # base serialized list (from serializer)
         testcase_reports_serialized = serializers.ApiRunResultReportSerializer(testcase_reports_qs, many=True).data
-        # enrich serialized items with automation_report id from the queryset objects
+        # Build a lookup of automation_report.id -> triggered_by (from serialized automation_reports)
+        ar_triggered_by = {}
+        try:
+            for r in automation_reports:
+                if isinstance(r, dict) and r.get('id') is not None:
+                    ar_triggered_by[r['id']] = r.get('triggered_by')
+        except Exception:
+            ar_triggered_by = {}
+
+        # enrich serialized items with automation_report id from the queryset objects and copy triggered_by
         testcase_reports = []
         for ser, obj in zip(testcase_reports_serialized, testcase_reports_qs):
             item = dict(ser)
             try:
-                item["automation_report_id"] = getattr(obj, "automation_report_id", None)
+                ar_id = getattr(obj, "automation_report_id", None)
             except Exception:
-                item["automation_report_id"] = None
+                ar_id = None
+            item["automation_report_id"] = ar_id
+            # prefer the serialized automation report's triggered_by value when available
+            try:
+                item["triggered_by"] = ar_triggered_by.get(ar_id) if ar_id is not None else None
+            except Exception:
+                item["triggered_by"] = None
             testcase_reports.append(item)
     except Exception:
         testcase_reports = []

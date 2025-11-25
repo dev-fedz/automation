@@ -257,6 +257,10 @@ body.auth-layout { background:#f5f7fb; min-height:100dvh; display:flex; justify-
 .inner-testcase-table .btn { background: var(--palette-accent); color: var(--palette-accent-foreground); border: none; box-shadow:none; }
 .inner-testcase-table .btn:hover { filter:brightness(0.98); }
 
+/* Style View buttons (table action buttons) to match palette */
+.table-modern .btn.btn-sm { background: var(--palette-accent); color: var(--palette-accent-foreground); border: none; box-shadow:none; padding: .35rem .7rem; }
+.table-modern .btn.btn-sm:hover { filter:brightness(0.98); }
+
 /* Modal close button and footer Close */
 .automation-modal__close { background: transparent; color: var(--palette-accent-foreground); border: none; font-size:1.25rem; padding:0.2rem 0.5rem; }
 .automation-modal__footer .btn { background: var(--palette-accent); color: var(--palette-accent-foreground); border: none; box-shadow:none; }
