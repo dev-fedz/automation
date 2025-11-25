@@ -1639,7 +1639,7 @@ body.automation-modal-open {
 /* Response modal: expandable pre blocks and resizer */
 .response-section { margin-top: 0.6rem; position: relative; }
 .response-section-controls { position: absolute; right: 0.5rem; top: 0.25rem; }
-.response-pre { background: #0f1724; color: #e6eef8; padding: 0.7rem; border-radius: 8px; overflow: auto; max-height: none; }
+.response-pre { background: #0f1724; color: #e6eef8; padding: 0.7rem; border-radius: 8px; overflow: auto; max-height: none; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .response-pre.expandable { resize: vertical; min-height: 80px; max-height: none; }
 .response-preview { width: 100%; height: 320px; border: 1px solid rgba(0,0,0,0.06); border-radius: 6px; }
 .resizer { height: 8px; background: linear-gradient(90deg, rgba(0,0,0,0.06), rgba(0,0,0,0.12)); cursor: ns-resize; margin: 6px 0 8px 0; border-radius: 4px; }

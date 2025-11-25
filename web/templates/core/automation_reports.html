@@ -170,15 +170,49 @@
                 <button type="button" class="automation-modal__close" data-action="close-testcase-view" aria-label="Close">&times;</button>
             </header>
             <div class="automation-modal__body" style="padding:1rem;">
-                <dl id="testcase-view-content">
-                    <dt>Testcase ID</dt><dd data-role="tc-id">—</dd>
-                    <dt>Request Name</dt><dd data-role="tc-name">—</dd>
-                    <dt>Run ID</dt><dd data-role="tc-run">—</dd>
-                    <dt>Outcome</dt><dd data-role="tc-outcome">—</dd>
-                    <dt>Started At</dt><dd data-role="tc-started">—</dd>
-                    <dt>Finished At</dt><dd data-role="tc-finished">—</dd>
-                </dl>
-                <dl data-role="testcase-extra-container" style="margin-top:0.8rem; color:var(--muted-color, #333); font-size:0.95rem;"></dl>
+                <div class="api-tester__response-card" aria-live="polite">
+                    <header>
+                        <div id="tc-response-summary" class="response-summary">No request executed yet.</div>
+                    </header>
+                    <div class="response-body">
+                        <div class="response-section">
+                            <h3>Headers</h3>
+                            <pre id="tc-response-headers" class="response-pre">{}</pre>
+                        </div>
+                        <div class="response-section">
+                            <div class="response-section__header">
+                                <h3>Body</h3>
+                                <div class="response-body__controls" role="group" aria-label="Response body view options">
+                                    <div class="response-body__views" role="group" aria-label="Format type">
+                                        <button type="button" class="response-body__view-button is-active" data-response-body-view="json" aria-pressed="true">JSON</button>
+                                        <button type="button" class="response-body__view-button" data-response-body-view="xml" aria-pressed="false">XML</button>
+                                        <button type="button" class="response-body__view-button" data-response-body-view="html" aria-pressed="false">HTML</button>
+                                    </div>
+                                    <div class="response-body__modes" role="group" aria-label="Display mode">
+                                        <button type="button" class="response-body__mode-button is-active" data-response-body-mode="pretty" aria-pressed="true">Pretty</button>
+                                        <button type="button" class="response-body__mode-button" data-response-body-mode="preview" aria-pressed="false">Preview</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="response-body__content">
+                                <pre id="tc-response-body-pretty" class="response-pre">{}</pre>
+                                <iframe id="tc-response-body-preview" class="response-preview" title="Response body preview" hidden></iframe>
+                            </div>
+                        </div>
+                        <div class="response-section">
+                            <h3>Assertions</h3>
+                            <div id="tc-response-assertions" class="assertions-list"></div>
+                            <div class="script-console" aria-live="polite">
+                                <div class="script-console__header">Pre-request Console</div>
+                                <div class="script-console__body" id="tc-pre-script-console-response" role="log" aria-live="polite" aria-label="Pre-request script console output">Console idle.</div>
+                            </div>
+                            <div class="script-console" aria-live="polite">
+                                <div class="script-console__header">Post-request Console</div>
+                                <div class="script-console__body" id="tc-post-script-console-response" role="log" aria-live="polite" aria-label="Post-request script console output">Console idle.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
             <footer class="automation-modal__footer" style="padding:0.75rem 1rem; text-align:right;">
                 <button type="button" class="btn btn-sm" data-action="close-testcase-view">Close</button>
@@ -392,7 +426,7 @@
                 var root = document.getElementById('automation-reports');
                 if (!root) return;
                 var modal = document.getElementById('testcase-view-modal');
-                var content = modal && modal.querySelector('#testcase-view-content');
+                // modal content will be referenced by id-prefixed elements inside the dialog
 
                 // Helper to fetch testcase detail from the server (fallback to embedded JSON if available)
                 function fetchTestcaseDetail(reportId, testcaseId) {
@@ -453,55 +487,164 @@
                 }
 
                 function openModal(data, triggerElement) {
-                    if (!modal || !content) return;
+                    if (!modal) return;
                     lastTrigger = triggerElement || null;
-                    // populate available fields
-                    content.querySelector('[data-role="tc-id"]').textContent = data.testcase_id || '—';
-                    content.querySelector('[data-role="tc-name"]').textContent = data.request_name || '—';
-                    content.querySelector('[data-role="tc-run"]').textContent = data.run_id || '—';
-                    content.querySelector('[data-role="tc-outcome"]').textContent = data.outcome || '—';
-                    content.querySelector('[data-role="tc-started"]').textContent = data.started || '—';
-                    content.querySelector('[data-role="tc-finished"]').textContent = data.finished || '—';
+                    // populate summary with basic testcase metadata
+                    var summaryEl = modal.querySelector('#tc-response-summary');
+                    if (summaryEl) {
+                        var parts = [];
+                        if (data.testcase_id) parts.push('ID: ' + data.testcase_id);
+                        if (data.request_name) parts.push(data.request_name);
+                        if (data.run_id) parts.push('Run: ' + data.run_id);
+                        if (data.outcome) parts.push('Outcome: ' + data.outcome);
+                        if (data.started) parts.push('Started: ' + data.started);
+                        if (data.finished) parts.push('Finished: ' + data.finished);
+                        summaryEl.textContent = parts.join(' — ') || 'Testcase details';
+                    }
 
-                    // if richer payload available in reportsData, merge it
+                    // populate headers
+                    var headersEl = modal.querySelector('#tc-response-headers');
                     try {
-                        var found = reportsData.find(function (r) {
-                            // match by run id and testcase id; reportsData entries have run_id and testcase_id
-                            return String(r.run_id) === String(data.run_id) && String(r.testcase_id) === String(data.testcase_id || (r.testcase_id || ''));
-                        });
-                        if (found) {
-                            // Add optional fields if present (response, headers, error, assertions)
-                            var extraContainer = modal.querySelector('[data-role="testcase-extra-container"]');
-                            if (extraContainer) {
-                                // clear any previous extras
-                                var existing = extraContainer.querySelectorAll('.extra-field');
-                                existing.forEach(function (n) { n.remove(); });
-                                if (found.response_body) {
-                                    var dt = document.createElement('dt'); dt.className = 'extra-field'; dt.textContent = 'Response Body';
-                                    var dd = document.createElement('dd'); dd.className = 'extra-field'; dd.textContent = String(found.response_body).slice(0, 10000) || '—';
-                                    extraContainer.appendChild(dt); extraContainer.appendChild(dd);
-                                }
-                                if (found.response_headers && Object.keys(found.response_headers || {}).length) {
-                                    var dtH = document.createElement('dt'); dtH.className = 'extra-field'; dtH.textContent = 'Response Headers';
-                                    var ddH = document.createElement('dd'); ddH.className = 'extra-field'; ddH.textContent = JSON.stringify(found.response_headers);
-                                    extraContainer.appendChild(dtH); extraContainer.appendChild(ddH);
-                                }
-                                if (found.error) {
-                                    var dtE = document.createElement('dt'); dtE.className = 'extra-field'; dtE.textContent = 'Error';
-                                    var ddE = document.createElement('dd'); ddE.className = 'extra-field'; ddE.textContent = String(found.error);
-                                    extraContainer.appendChild(dtE); extraContainer.appendChild(ddE);
+                        if (headersEl) headersEl.textContent = data.response_headers ? JSON.stringify(data.response_headers, null, 2) : '{}';
+                    } catch (e) { if (headersEl) headersEl.textContent = '{}'; }
+
+                    // populate body (pretty) and preview iframe
+                    var bodyPretty = modal.querySelector('#tc-response-body-pretty');
+                    var bodyPreview = modal.querySelector('#tc-response-body-preview');
+                    var bodyText = data.response_body || '';
+
+                    // helpers for formatting
+                    function escapeHtml(str) {
+                        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                    }
+
+                    function prettyPrintJSON(txt) {
+                        try {
+                            var obj = JSON.parse(txt);
+                            return JSON.stringify(obj, null, 2);
+                        } catch (e) {
+                            return txt; // return raw if not valid JSON
+                        }
+                    }
+
+                    function prettyPrintXML(txt) {
+                        try {
+                            var formatted = txt.replace(/>\s*</g, '><').replace(/>\s+</g,'><');
+                            // insert line breaks between tags
+                            formatted = formatted.replace(/></g, '>\n<');
+                            var pad = 0;
+                            var lines = formatted.split('\n');
+                            for (var i = 0; i < lines.length; i++) {
+                                var line = lines[i].trim();
+                                if (line.match(/^<\/?[\w]/) && !line.match(/^<\?/) ) {
+                                    if (line.match(/^<\//)) {
+                                        pad = Math.max(pad-1,0);
+                                    }
+                                    lines[i] = '  '.repeat(pad) + line;
+                                    if (line.match(/^<[^\/!].*[^\/]>/) && !line.match(/^<.*\/>$/) && !line.match(/^<\?/)) {
+                                        pad++;
+                                    }
+                                } else {
+                                    lines[i] = '  '.repeat(pad) + line;
                                 }
                             }
+                            return lines.join('\n');
+                        } catch (e) { return txt; }
+                    }
+
+                    function applyBodyFormatting() {
+                        var activeView = modal.querySelector('.response-body__view-button.is-active');
+                        var activeMode = modal.querySelector('.response-body__mode-button.is-active');
+                        var view = activeView ? activeView.getAttribute('data-response-body-view') : 'json';
+                        var mode = activeMode ? activeMode.getAttribute('data-response-body-mode') : 'pretty';
+
+                        if (!bodyPretty || !bodyPreview) return;
+
+                        if (mode === 'preview') {
+                            // show iframe preview for all formats
+                            bodyPretty.hidden = true;
+                            try { bodyPreview.srcdoc = bodyText || ''; bodyPreview.hidden = false; } catch (e) { bodyPreview.hidden = true; }
+                            return;
                         }
-                    } catch (e) {
-                        // ignore failures to merge extra data
+
+                        // pretty mode -> render into pre
+                        bodyPreview.hidden = true;
+                        bodyPretty.hidden = false;
+
+                        if (view === 'json') {
+                            bodyPretty.textContent = prettyPrintJSON(bodyText || '');
+                        } else if (view === 'xml') {
+                            bodyPretty.textContent = prettyPrintXML(bodyText || '');
+                        } else if (view === 'html') {
+                            // for HTML in pretty mode, show escaped HTML source
+                            bodyPretty.textContent = escapeHtml(bodyText || '');
+                        } else {
+                            bodyPretty.textContent = bodyText || '';
+                        }
+                    }
+
+                    // initial formatting
+                    if (bodyPretty) bodyPretty.textContent = '';
+                    if (bodyPreview) { try { bodyPreview.srcdoc = ''; bodyPreview.hidden = true; } catch (e) { bodyPreview.hidden = true; } }
+                    applyBodyFormatting();
+
+                    // populate assertions
+                    var assertionsEl = modal.querySelector('#tc-response-assertions');
+                    if (assertionsEl) {
+                        assertionsEl.innerHTML = '';
+                        try {
+                            var passed = data.assertions_passed || [];
+                            var failed = data.assertions_failed || [];
+                            if (!passed.length && !failed.length) {
+                                assertionsEl.textContent = 'No assertions recorded.';
+                            } else {
+                                passed.forEach(function (a) {
+                                    var el = document.createElement('div'); el.className = 'assertion assertion--passed'; el.textContent = 'PASS: ' + String(a);
+                                    assertionsEl.appendChild(el);
+                                });
+                                failed.forEach(function (a) {
+                                    var el = document.createElement('div'); el.className = 'assertion assertion--failed'; el.textContent = 'FAIL: ' + String(a);
+                                    assertionsEl.appendChild(el);
+                                });
+                            }
+                        } catch (e) { assertionsEl.textContent = 'No assertions recorded.'; }
+                    }
+
+                    // populate consoles
+                    var preConsole = modal.querySelector('#tc-pre-script-console-response');
+                    var postConsole = modal.querySelector('#tc-post-script-console-response');
+                    if (preConsole) preConsole.textContent = (data.pre_console || 'Console idle.');
+                    if (postConsole) postConsole.textContent = (data.post_console || 'Console idle.');
+
+                    // wire simple body view/mode toggles once
+                    if (!modal._wiredBodyControls) {
+                        modal._wiredBodyControls = true;
+                        modal.addEventListener('click', function (ev) {
+                            var vBtn = ev.target.closest('.response-body__view-button');
+                            if (vBtn) {
+                                var group = vBtn.parentNode;
+                                Array.from(group.querySelectorAll('.response-body__view-button')).forEach(function (b) { b.classList.remove('is-active'); b.setAttribute('aria-pressed', 'false'); });
+                                vBtn.classList.add('is-active'); vBtn.setAttribute('aria-pressed', 'true');
+                                // re-apply formatting after view change
+                                applyBodyFormatting();
+                                return;
+                            }
+                            var mBtn = ev.target.closest('.response-body__mode-button');
+                            if (mBtn) {
+                                var mGroup = mBtn.parentNode;
+                                Array.from(mGroup.querySelectorAll('.response-body__mode-button')).forEach(function (b) { b.classList.remove('is-active'); b.setAttribute('aria-pressed', 'false'); });
+                                mBtn.classList.add('is-active'); mBtn.setAttribute('aria-pressed', 'true');
+                                // re-apply formatting after mode change
+                                applyBodyFormatting();
+                                return;
+                            }
+                        });
                     }
 
                     modal.removeAttribute('hidden');
                     document.body.classList.add('modal-open');
                     // focus the close button (or dialog) and trap focus
                     var cleanup = trapFocus(modal.querySelector('.automation-modal__dialog'));
-                    // store cleanup on modal element for later removal
                     modal._focusCleanup = cleanup;
                     var closeBtn = modal.querySelector('[data-action="close-testcase-view"]');
                     if (closeBtn && typeof closeBtn.focus === 'function') closeBtn.focus();
