@@ -14,10 +14,240 @@
         <div class="panel-header">
             <h2 id="headline-reports">REPORTS</h2>
         </div>
+        <div class="panel-body">
+            <div class="reports-grid">
+                    <div id="reports-tabs" class="reports-tabs-wrapper">
+                            <div class="reports-tabs-bar">
+                            <div class="card-actions">
+                                <div role="tablist" aria-label="Report tabs" class="report-tabs">
+                                    <button role="tab" aria-selected="true" aria-controls="panel-automated" id="tab-automated" class="tab-btn">Automated Report</button>
+                                    <button role="tab" aria-selected="false" aria-controls="panel-testcase" id="tab-testcase" class="tab-btn">Test Case Report</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="reports-tabs-panels">
+                        <div id="panel-automated" role="tabpanel" aria-labelledby="tab-automated" class="report-panel" data-active="true">
+                            <div class="table-round">
+                                <div class="panel-controls">
+                                    <label class="inline-filter">Filter: <input type="text" id="automation-report-filter" placeholder="Report id or triggered in" /></label>
+                                </div>
+                                <table class="table-modern automation-table" id="automation-report-table" aria-label="Automation reports">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">Report ID</th>
+                                            <th scope="col">Triggered In</th>
+                                            <th scope="col">Triggered By</th>
+                                            <th scope="col">Passed</th>
+                                            <th scope="col">Failed</th>
+                                            <th scope="col">Blocked</th>
+                                            <th scope="col">Started At</th>
+                                            <th scope="col">Finished At</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody data-role="automation-report-list">
+                                        {% for r in automation_reports %}
+                                        <tr data-report-id="{{ r.id }}">
+                                            <td data-label="Report ID">
+                                                <strong>{{ r.report_id }}</strong>
+                                                <div class="table-secondary">{{ r.triggered_in }} — {{ r.triggered_by }}</div>
+                                            </td>
+                                            <td data-label="Triggered In">{{ r.triggered_in }}</td>
+                                            <td data-label="Triggered By">{{ r.triggered_by }}</td>
+                                            <td data-label="Passed">{{ r.total_passed }}</td>
+                                            <td data-label="Failed">{{ r.total_failed }}</td>
+                                            <td data-label="Blocked">{{ r.total_blocked }}</td>
+                                            <td data-label="Started At">{{ r.started }}</td>
+                                            <td data-label="Finished At">{{ r.finished }}</td>
+                                        </tr>
+                                        {% empty %}
+                                        <tr><td colspan="8" class="empty">No automation reports found.</td></tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="table-pagination" id="automation-report-pagination" aria-label="Automation report pagination"></div>
+                        </div>
+
+                        <div id="panel-testcase" role="tabpanel" aria-labelledby="tab-testcase" class="report-panel" data-active="false" hidden>
+                            <div class="table-round">
+                                <div class="panel-controls" style="margin:0.85rem 0 0.6rem 0;">
+                                    <label class="inline-filter">Filter: <input type="text" id="testcase-report-filter" placeholder="Testcase id or request name" /></label>
+                                </div>
+                                <table class="table-modern automation-table" id="testcase-report-table" aria-label="Test case reports">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">Testcase ID</th>
+                                            <th scope="col">Request Name</th>
+                                            <th scope="col">Run ID</th>
+                                            <th scope="col">Outcome</th>
+                                            <th scope="col">Started At</th>
+                                            <th scope="col">Finished At</th>
+                                            <th scope="col">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody data-role="testcase-report-list">
+                                        {% for t in testcase_reports %}
+                                        <tr data-testcase-id="{{ t.testcase_id }}" data-run-id="{{ t.run_id }}">
+                                            <td data-label="Testcase ID">
+                                                <strong>{{ t.testcase_id }}</strong>
+                                                <div class="table-secondary">{{ t.request_name }}</div>
+                                            </td>
+                                            <td data-label="Request Name">{{ t.request_name }}</td>
+                                            <td data-label="Run ID">{{ t.run_id }}</td>
+                                            <td data-label="Outcome">{{ t.outcome }}</td>
+                                            <td data-label="Started At">{{ t.started }}</td>
+                                            <td data-label="Finished At">{{ t.finished }}</td>
+                                            <td data-label="Action">
+                                                <div class="table-action-group">
+                                                    <button class="btn btn-sm" data-action="view-testcase-report" data-report-id="{{ t.id }}">View</button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        {% empty %}
+                                        <tr><td colspan="7" class="empty">No testcase reports found.</td></tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="table-pagination" id="testcase-report-pagination" aria-label="Testcase report pagination"></div>
+                        </div>
+                    </div>
+            </div>
+        </div>
     </section>
 </div>
 {% endblock %}
 
 {% block body_js %}
     {{ block.super }}
+    <script>
+        (function () {
+            // Tab switching for Reports card
+            function $(sel, ctx){ return (ctx||document).querySelector(sel); }
+            function $all(sel, ctx){ return Array.from((ctx||document).querySelectorAll(sel)); }
+            var tabAutomated = $('#tab-automated');
+            var tabTestcase = $('#tab-testcase');
+            var panelAutomated = $('#panel-automated');
+            var panelTestcase = $('#panel-testcase');
+
+            function activateTab(tabBtn, panel) {
+                // deactivate all
+                $all('[role="tab"]').forEach(function(b){ b.setAttribute('aria-selected','false'); });
+                $all('[role="tabpanel"]').forEach(function(p){ p.setAttribute('hidden',''); p.dataset.active = 'false'; });
+                // activate
+                tabBtn.setAttribute('aria-selected','true');
+                panel.removeAttribute('hidden');
+                panel.dataset.active = 'true';
+            }
+
+            if (tabAutomated && tabTestcase && panelAutomated && panelTestcase) {
+                tabAutomated.addEventListener('click', function(){ activateTab(tabAutomated, panelAutomated); });
+                tabTestcase.addEventListener('click', function(){ activateTab(tabTestcase, panelTestcase); });
+            }
+
+            // Filters for each table (simple client-side text match)
+            function wireFilter(inputId, tableId, columnsToCheck) {
+                var input = document.getElementById(inputId);
+                var table = document.getElementById(tableId);
+                if (!input || !table) return;
+                var tbody = table.querySelector('tbody');
+                input.addEventListener('input', function () {
+                    var q = (this.value || '').toLowerCase().trim();
+                    Array.from(tbody.querySelectorAll('tr')).forEach(function (tr) {
+                        try {
+                            var text = columnsToCheck.map(function(i){ return (tr.children[i] && tr.children[i].textContent||'').toLowerCase(); }).join(' ');
+                            tr.style.display = (!q || text.indexOf(q) !== -1) ? '' : 'none';
+                        } catch (e) { /* ignore per-row errors */ }
+                    });
+                });
+            }
+
+            // automation reports: check first two columns (report id, triggered in)
+            wireFilter('automation-report-filter','automation-report-table',[0,1]);
+            // testcase reports: check testcase id and request name (first two columns)
+            wireFilter('testcase-report-filter','testcase-report-table',[0,1]);
+
+            // --- Pagination ---
+            function createPaginationControls(paginationId, onPrev, onNext) {
+                var container = document.getElementById(paginationId);
+                if (!container) return;
+                container.innerHTML = '';
+                var prev = document.createElement('button');
+                prev.type = 'button'; prev.className = 'btn btn-sm'; prev.textContent = 'Prev';
+                var info = document.createElement('span'); info.className = 'pagination-info'; info.style.margin = '0 0.6rem';
+                var next = document.createElement('button'); next.type = 'button'; next.className = 'btn btn-sm'; next.textContent = 'Next';
+                prev.addEventListener('click', onPrev); next.addEventListener('click', onNext);
+                container.appendChild(prev); container.appendChild(info); container.appendChild(next);
+                return { prev: prev, info: info, next: next };
+            }
+
+            function initTablePagination(tableId, paginationId, pageSize) {
+                var table = document.getElementById(tableId);
+                var tbody = table && table.querySelector('tbody');
+                if (!tbody) return;
+                var rows = Array.from(tbody.querySelectorAll('tr'));
+                var state = { page: 1, pageSize: pageSize, rows: rows };
+
+                function renderPage() {
+                    var start = (state.page - 1) * state.pageSize;
+                    var end = start + state.pageSize;
+                    state.rows.forEach(function (r, i) { r.style.display = (i >= start && i < end) ? '' : 'none'; });
+                    var totalPages = Math.max(1, Math.ceil(state.rows.length / state.pageSize));
+                    controls.info.textContent = state.page + ' / ' + totalPages;
+                    controls.prev.disabled = (state.page <= 1);
+                    controls.next.disabled = (state.page >= totalPages);
+                }
+
+                function prev() { if (state.page > 1) { state.page--; renderPage(); } }
+                function next() { var totalPages = Math.max(1, Math.ceil(state.rows.length / state.pageSize)); if (state.page < totalPages) { state.page++; renderPage(); } }
+
+                var controls = createPaginationControls(paginationId, prev, next) || { prev: { disabled: true }, next: { disabled: true }, info: { textContent: '' } };
+                renderPage();
+
+                // expose a refresher to update rows (used after filtering)
+                return {
+                    refresh: function () {
+                        // Only include rows that are currently visible according to filter (style.display !== 'none')
+                        state.rows = Array.from(tbody.querySelectorAll('tr')).filter(function(r){ return (r.style.display || '') !== 'none'; });
+                        state.page = 1; renderPage();
+                    }
+                };
+            }
+
+            // Initialize paginations for both tables with 10 rows per page
+            var automationPager = initTablePagination('automation-report-table','automation-report-pagination',10);
+            var testcasePager = initTablePagination('testcase-report-table','testcase-report-pagination',10);
+
+            // Update pagination when filters run (wrap wireFilter's input handler already present)
+            // We'll patch the filter inputs to also reset paginator page to 1 and re-render
+            function hookFilterToPager(inputId, pager) {
+                var input = document.getElementById(inputId);
+                if (!input || !pager) return;
+                input.addEventListener('input', function () { if (pager && pager.refresh) pager.refresh(); });
+            }
+            hookFilterToPager('automation-report-filter', automationPager);
+            hookFilterToPager('testcase-report-filter', testcasePager);
+        })();
+
+        (function () {
+            try {
+                const filterInput = document.getElementById('automation-report-filter');
+                if (!filterInput) return;
+                const table = document.getElementById('automation-report-table');
+                const tbody = table && table.querySelector('tbody');
+                filterInput.addEventListener('input', function () {
+                    const q = (this.value || '').toLowerCase().trim();
+                    if (!tbody) return;
+                    Array.from(tbody.querySelectorAll('tr')).forEach(function (tr) {
+                        try {
+                            const id = (tr.children[0] && tr.children[0].textContent || '').toLowerCase();
+                            const triggeredIn = (tr.children[1] && tr.children[1].textContent || '').toLowerCase();
+                            tr.style.display = (!q || id.indexOf(q) !== -1 || triggeredIn.indexOf(q) !== -1) ? '' : 'none';
+                        } catch (e) { /* ignore per-row errors */ }
+                    });
+                });
+            } catch (e) { /* ignore */ }
+        })();
+    </script>
 {% endblock %}

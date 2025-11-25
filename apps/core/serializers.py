@@ -368,6 +368,42 @@ class AutomationReportSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "report_id", "triggered_by", "created_at", "updated_at"]
 
 
+class ApiRunResultReportSerializer(serializers.ModelSerializer):
+    request_name = serializers.CharField(source="request.name", read_only=True)
+    run_id = serializers.IntegerField(source="run.id", read_only=True)
+    testcase_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = models.ApiRunResultReport
+        fields = [
+            "id",
+            "testcase_id",
+            "order",
+            "status",
+            "request",
+            "request_name",
+            "response_status",
+            "response_headers",
+            "response_body",
+            "response_time_ms",
+            "assertions_passed",
+            "assertions_failed",
+            "error",
+            "run_id",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_testcase_id(self, obj):
+        try:
+            if obj.testcase:
+                return obj.testcase.testcase_id or obj.testcase.id
+        except Exception:
+            return None
+        return None
+
+
 class TestCaseSerializer(serializers.ModelSerializer):
     # Allow API clients to omit testcase_id; it will be generated in model.save()
     testcase_id = serializers.CharField(required=False, allow_blank=True, allow_null=True, default=None)

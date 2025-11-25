@@ -792,9 +792,23 @@ def automation_reports(request):
     """
 
     data = _prepare_automation_data()
+    # Provide recent AutomationReport and ApiRunResultReport rows for server-side rendering
+    try:
+        automation_reports_qs = models.AutomationReport.objects.order_by("-created_at")[:50]
+        automation_reports = serializers.AutomationReportSerializer(automation_reports_qs, many=True).data
+    except Exception:
+        automation_reports = []
+    try:
+        testcase_reports_qs = models.ApiRunResultReport.objects.select_related("testcase", "run", "request").order_by("-created_at")[:100]
+        testcase_reports = serializers.ApiRunResultReportSerializer(testcase_reports_qs, many=True).data
+    except Exception:
+        testcase_reports = []
+
     context = {
         "initial_metrics": data.get("metrics", {}),
         "recent_runs": data.get("recent_runs", []),
+        "automation_reports": automation_reports,
+        "testcase_reports": testcase_reports,
     }
     return render(request, "core/automation_reports.html", context)
 

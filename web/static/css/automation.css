@@ -404,11 +404,166 @@
     gap: 1.05rem;
 }
 
+/* Layout breathing room: avoid panels sticking to the viewport edge */
+.automation-reports {
+    padding: 1rem 1rem; /* small padding on mobile */
+}
+
+@media (min-width: 900px) {
+    .automation-reports {
+        padding-left: 2rem;
+        padding-right: 2rem;
+    }
+    /* slightly lift the panel off the edge when in wide layout */
+    .automation-panel {
+        padding-left: 1.6rem;
+        padding-right: 1.6rem;
+    }
+    .automation-panel.wide {
+        margin-left: auto;
+        margin-right: auto;
+        padding-left: 1.6rem;
+        padding-right: 1.6rem;
+    }
+}
+
 .automation-panel.wide {
     max-width: 1200px;
     margin-left: auto;
     margin-right: auto;
 }
+
+/* Report tabs styling */
+.report-tabs { display: inline-flex; gap: 0.5rem; align-items: center; }
+.report-tabs .tab-btn {
+    appearance: none;
+    border: none;
+    background: transparent;
+    padding: 0.45rem 0.7rem;
+    font-weight: 700;
+    color: #3a2a00;
+    border-radius: 6px;
+    cursor: pointer;
+    position: relative;
+    transition: color 0.12s ease, background-color 0.12s ease;
+}
+.report-tabs .tab-btn:hover { background: transparent; }
+/* keep an accessible focus ring but remove the colored (orange) ring */
+.report-tabs .tab-btn:focus {
+    /* Remove default focus styling for mouse clicks (avoids gray border on click) */
+    outline: none;
+    box-shadow: none;
+}
+/* Show a subtle outline only for keyboard users */
+.report-tabs .tab-btn:focus-visible {
+    outline: 3px solid rgba(0,0,0,0.12);
+    outline-offset: 2px;
+}
+
+/* Ensure active (mouse-down) state doesn't apply any colored border */
+.report-tabs .tab-btn:active {
+    background: transparent;
+    box-shadow: none;
+    border-color: transparent;
+}
+
+/* Selected tab: subtle highlight + underline */
+.report-tabs .tab-btn[aria-selected="true"] {
+    color: #2b1b00;
+    background: transparent; /* removed filled background per user request */
+}
+.report-tabs .tab-btn[aria-selected="true"]::after {
+    content: '';
+    position: absolute;
+    left: 12%;
+    right: 12%;
+    bottom: -0.45rem;
+    height: 3px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #f4b400, #d19000);
+}
+
+/* Align reports tab container with Projects card/table styling */
+.reports-tabs-wrapper { width: 100%; }
+.reports-tabs-wrapper { position: relative; }
+.reports-tabs-bar {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: transparent;
+    padding: 0;
+    border: none;
+}
+.reports-tabs-panels { padding: 0; }
+.report-panel { padding: 0.75rem 0.5rem 1rem; }
+.report-panel .panel-controls { padding: 0.6rem 0; margin-top: 2rem; }
+
+/* Ensure inline filter inputs align with the rounded table width.
+   If the control sits inside `.table-round`, make the input fill that width
+   but remain constrained and centered so it doesn't overflow the table area. */
+.reports-tabs-wrapper .table-round > .panel-controls .inline-filter input,
+.reports-tabs-wrapper .report-panel .panel-controls .inline-filter input {
+    display: block;
+    width: calc(100% - 1.6rem);
+    max-width: 100%;
+    box-sizing: border-box;
+    margin: 0.15rem auto 0;
+    padding: 0.75rem 0.95rem;
+    border-radius: 8px;
+    border: 1px solid rgba(0,0,0,0.06);
+    background: #fff;
+    font-size: 0.95rem;
+}
+
+/* Small screens: ensure input still fits comfortably */
+@media (max-width: 720px) {
+    .reports-tabs-wrapper .table-round > .panel-controls .inline-filter input,
+    .reports-tabs-wrapper .report-panel .panel-controls .inline-filter input {
+        width: 100%;
+        padding: 0.6rem 0.8rem;
+    }
+}
+.reports-tabs-wrapper .table-modern thead {
+    background: #f2f4f7;
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: #5a4705;
+}
+.reports-tabs-wrapper .table-modern thead th {
+    padding: 0.85rem 0.95rem;
+    text-align: left;
+    border-bottom: 1px solid #e3e6eb;
+}
+.reports-tabs-wrapper .table-modern tbody td {
+    padding: 0.9rem 1rem;
+    border-bottom: 1px solid #edeff2;
+    font-size: 0.78rem;
+    vertical-align: middle;
+}
+.reports-tabs-wrapper .table-modern tbody tr:hover { background: #fffef7; }
+
+/* Round the table itself: wrapper clips table edges */
+.table-round {
+    border-radius: 18px;
+    overflow: hidden;
+    border: 1px solid var(--automation-border);
+    box-shadow: var(--automation-shadow);
+    background: #fff; /* ensure thead background sits on white */
+    margin-bottom: 0.75rem;
+}
+
+.table-round .table-modern { border-collapse: collapse; width: 100%; }
+.table-round .table-modern thead th:first-child { border-top-left-radius: 18px; }
+.table-round .table-modern thead th:last-child { border-top-right-radius: 18px; }
+.table-round .table-modern tbody tr:last-child td:first-child { border-bottom-left-radius: 12px; }
+.table-round .table-modern tbody tr:last-child td:last-child { border-bottom-right-radius: 12px; }
+.reports-tabs-wrapper .table-modern { margin: 0; }
+
 
 .panel-header {
     display: flex;
