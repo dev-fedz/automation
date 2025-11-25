@@ -15,7 +15,9 @@
             <h2 id="headline-reports">REPORTS</h2>
         </div>
         <div class="panel-body">
-            <div class="reports-grid">
+                <div class="reports-grid">
+                    {# Embed testcase_reports as JSON for client-side detail lookups #}
+                    {{ testcase_reports_serialized|json_script:"automation_testcase_reports" }}
                     <div id="reports-tabs" class="reports-tabs-wrapper">
                             <div class="reports-tabs-bar">
                             <div class="card-actions">
@@ -28,13 +30,14 @@
                     </div>
                     <div class="reports-tabs-panels">
                         <div id="panel-automated" role="tabpanel" aria-labelledby="tab-automated" class="report-panel" data-active="true">
-                            <div class="table-round">
+                            <div class="card table-card automation-table-card">
                                 <div class="panel-controls">
                                     <label class="inline-filter">Filter: <input type="text" id="automation-report-filter" placeholder="Report id or triggered in" /></label>
                                 </div>
                                 <table class="table-modern automation-table" id="automation-report-table" aria-label="Automation reports">
                                     <thead>
                                         <tr>
+                                            <th scope="col" class="col-collapse" aria-hidden="true"></th>
                                             <th scope="col">Report ID</th>
                                             <th scope="col">Triggered In</th>
                                             <th scope="col">Triggered By</th>
@@ -47,7 +50,10 @@
                                     </thead>
                                     <tbody data-role="automation-report-list">
                                         {% for r in automation_reports %}
-                                        <tr data-report-id="{{ r.id }}">
+                                        <tr class="report-row" data-report-id="{{ r.id }}" aria-expanded="false" tabindex="0">
+                                            <td class="col-collapse" aria-hidden="true">
+                                                <button type="button" class="btn-icon" aria-controls="report-details-{{ r.id }}" aria-expanded="false">▸</button>
+                                            </td>
                                             <td data-label="Report ID">
                                                 <strong>{{ r.report_id }}</strong>
                                                 <div class="table-secondary">{{ r.triggered_in }} — {{ r.triggered_by }}</div>
@@ -60,8 +66,47 @@
                                             <td data-label="Started At">{{ r.started }}</td>
                                             <td data-label="Finished At">{{ r.finished }}</td>
                                         </tr>
+                                        <tr class="report-details" id="report-details-{{ r.id }}" hidden>
+                                            <td colspan="9">
+                                                <div class="report-details-inner">
+                                                    <h4 class="details-heading">Test Cases</h4>
+                                                    <div class="table-responsive">
+                                                        <table class="table-modern inner-testcase-table">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th>Testcase ID</th>
+                                                                    <th>Request Name</th>
+                                                                    <th>Run ID</th>
+                                                                    <th>Outcome</th>
+                                                                    <th>Started At</th>
+                                                                    <th>Finished At</th>
+                                                                    <th>Actions</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {% for t in r.testcases %}
+                                                                    <tr data-testcase-id="{{ t.testcase_id }}" data-run-id="{{ t.run_id }}" data-automation-report-id="{{ r.id }}">
+                                                                        <td>{{ t.testcase_id }}</td>
+                                                                        <td>{{ t.request_name }}</td>
+                                                                        <td>{{ t.run_id }}</td>
+                                                                        <td>{{ t.outcome }}</td>
+                                                                        <td>{{ t.started }}</td>
+                                                                        <td>{{ t.finished }}</td>
+                                                                        <td>
+                                                                            <button class="btn btn-sm" data-action="view-testcase" data-testcase-id="{{ t.testcase_id }}">View</button>
+                                                                        </td>
+                                                                    </tr>
+                                                                {% empty %}
+                                                                    <tr><td colspan="7" class="empty">No test case available.</td></tr>
+                                                                {% endfor %}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
                                         {% empty %}
-                                        <tr><td colspan="8" class="empty">No automation reports found.</td></tr>
+                                        <tr><td colspan="9" class="empty">No automation reports found.</td></tr>
                                         {% endfor %}
                                     </tbody>
                                 </table>
@@ -87,7 +132,7 @@
                                         </tr>
                                     </thead>
                                     <tbody data-role="testcase-report-list">
-                                        {% for t in testcase_reports %}
+                                        {% for t in testcase_reports_serialized %}
                                         <tr data-testcase-id="{{ t.testcase_id }}" data-run-id="{{ t.run_id }}">
                                             <td data-label="Testcase ID">
                                                 <strong>{{ t.testcase_id }}</strong>
@@ -116,6 +161,30 @@
             </div>
         </div>
     </section>
+    <!-- Testcase View Modal -->
+    <div class="automation-modal" id="testcase-view-modal" hidden>
+        <div class="automation-modal__backdrop" data-action="close-testcase-view"></div>
+        <div class="automation-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="testcase-view-title">
+            <header class="automation-modal__header">
+                <h2 id="testcase-view-title">Testcase Details</h2>
+                <button type="button" class="automation-modal__close" data-action="close-testcase-view" aria-label="Close">&times;</button>
+            </header>
+            <div class="automation-modal__body" style="padding:1rem;">
+                <dl id="testcase-view-content">
+                    <dt>Testcase ID</dt><dd data-role="tc-id">—</dd>
+                    <dt>Request Name</dt><dd data-role="tc-name">—</dd>
+                    <dt>Run ID</dt><dd data-role="tc-run">—</dd>
+                    <dt>Outcome</dt><dd data-role="tc-outcome">—</dd>
+                    <dt>Started At</dt><dd data-role="tc-started">—</dd>
+                    <dt>Finished At</dt><dd data-role="tc-finished">—</dd>
+                </dl>
+                <dl data-role="testcase-extra-container" style="margin-top:0.8rem; color:var(--muted-color, #333); font-size:0.95rem;"></dl>
+            </div>
+            <footer class="automation-modal__footer" style="padding:0.75rem 1rem; text-align:right;">
+                <button type="button" class="btn btn-sm" data-action="close-testcase-view">Close</button>
+            </footer>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -154,17 +223,34 @@
                 var tbody = table.querySelector('tbody');
                 input.addEventListener('input', function () {
                     var q = (this.value || '').toLowerCase().trim();
-                    Array.from(tbody.querySelectorAll('tr')).forEach(function (tr) {
+                    // For automation report table, only filter primary report rows (exclude .report-details)
+                    var selector = (tableId === 'automation-report-table') ? 'tr.report-row' : 'tr';
+                    Array.from(tbody.querySelectorAll(selector)).forEach(function (tr) {
                         try {
                             var text = columnsToCheck.map(function(i){ return (tr.children[i] && tr.children[i].textContent||'').toLowerCase(); }).join(' ');
-                            tr.style.display = (!q || text.indexOf(q) !== -1) ? '' : 'none';
+                            var show = (!q || text.indexOf(q) !== -1);
+                            tr.style.display = show ? '' : 'none';
+                            // if this is a primary report row, also toggle its details row visibility
+                            if (tr.classList.contains('report-row')) {
+                                var id = tr.dataset.reportId;
+                                var details = tbody.querySelector('#report-details-' + id);
+                                if (details) {
+                                    // keep details visible only when parent visible and expanded
+                                    var expanded = tr.getAttribute('aria-expanded') === 'true';
+                                    if (show && expanded) {
+                                        details.removeAttribute('hidden');
+                                    } else {
+                                        details.setAttribute('hidden','');
+                                    }
+                                }
+                            }
                         } catch (e) { /* ignore per-row errors */ }
                     });
                 });
             }
 
-            // automation reports: check first two columns (report id, triggered in)
-            wireFilter('automation-report-filter','automation-report-table',[0,1]);
+            // automation reports: check report id and triggered in (account for collapse column)
+            wireFilter('automation-report-filter','automation-report-table',[1,2]);
             // testcase reports: check testcase id and request name (first two columns)
             wireFilter('testcase-report-filter','testcase-report-table',[0,1]);
 
@@ -186,13 +272,30 @@
                 var table = document.getElementById(tableId);
                 var tbody = table && table.querySelector('tbody');
                 if (!tbody) return;
-                var rows = Array.from(tbody.querySelectorAll('tr'));
+                // Only paginate primary rows (exclude details rows used by accordions)
+                var rows = Array.from(tbody.querySelectorAll('tr')).filter(function(r){ return !r.classList.contains('report-details'); });
                 var state = { page: 1, pageSize: pageSize, rows: rows };
 
                 function renderPage() {
                     var start = (state.page - 1) * state.pageSize;
                     var end = start + state.pageSize;
-                    state.rows.forEach(function (r, i) { r.style.display = (i >= start && i < end) ? '' : 'none'; });
+                    state.rows.forEach(function (r, i) {
+                        var show = (i >= start && i < end);
+                        r.style.display = show ? '' : 'none';
+                        // if this is a report-row, ensure its details row follows same visibility (unless expanded)
+                        if (r.classList.contains('report-row')) {
+                            var id = r.dataset.reportId;
+                            var details = tbody.querySelector('#report-details-' + id);
+                            if (details) {
+                                var expanded = r.getAttribute('aria-expanded') === 'true';
+                                if (show && expanded) {
+                                    details.removeAttribute('hidden');
+                                } else {
+                                    details.setAttribute('hidden','');
+                                }
+                            }
+                        }
+                    });
                     var totalPages = Math.max(1, Math.ceil(state.rows.length / state.pageSize));
                     controls.info.textContent = state.page + ' / ' + totalPages;
                     controls.prev.disabled = (state.page <= 1);
@@ -209,7 +312,7 @@
                 return {
                     refresh: function () {
                         // Only include rows that are currently visible according to filter (style.display !== 'none')
-                        state.rows = Array.from(tbody.querySelectorAll('tr')).filter(function(r){ return (r.style.display || '') !== 'none'; });
+                        state.rows = Array.from(tbody.querySelectorAll('tr')).filter(function(r){ return !r.classList.contains('report-details') && ((r.style.display || '') !== 'none'); });
                         state.page = 1; renderPage();
                     }
                 };
@@ -218,6 +321,61 @@
             // Initialize paginations for both tables with 10 rows per page
             var automationPager = initTablePagination('automation-report-table','automation-report-pagination',10);
             var testcasePager = initTablePagination('testcase-report-table','testcase-report-pagination',10);
+
+            // --- Accordion toggles for automation report rows ---
+                (function () {
+                var table = document.getElementById('automation-report-table');
+                if (!table) return;
+                var tbody = table.querySelector('tbody');
+
+                // click on the toggle button to expand/collapse
+                tbody.addEventListener('click', function (ev) {
+                    // If the click was on an action button or inside action controls, ignore (we have separate handlers)
+                    if (ev.target.closest('button[data-action]') || ev.target.closest('a')) return;
+
+                    // If click was on the small icon button, handle that first
+                    var btn = ev.target.closest('.btn-icon[aria-controls^="report-details-"]');
+                    if (btn) {
+                        toggleReportRow(btn);
+                        return;
+                    }
+
+                    // Otherwise, if the click occurred on the primary report row (not its details), toggle the accordion
+                    var row = ev.target.closest('tr.report-row');
+                    if (row && !ev.target.closest('button') && !ev.target.closest('.table-action-group')) {
+                        var icon = row.querySelector('.btn-icon[aria-controls^="report-details-"]');
+                        if (icon) toggleReportRow(icon);
+                    }
+                });
+
+                // support keyboard expand/collapse on Enter/Space when focusing primary row
+                tbody.addEventListener('keydown', function (ev) {
+                    var tr = ev.target.closest('tr.report-row');
+                    if (!tr) return;
+                    if (ev.key === 'Enter' || ev.key === ' ') {
+                        ev.preventDefault();
+                        var btn = tr.querySelector('.btn-icon[aria-controls^="report-details-"]');
+                        if (btn) toggleReportRow(btn);
+                    }
+                });
+
+                function toggleReportRow(btn) {
+                    var row = btn.closest('tr.report-row');
+                    if (!row) return;
+                    var id = row.dataset.reportId;
+                    var details = tbody.querySelector('#report-details-' + id);
+                    if (!details) return;
+                    var expanded = row.getAttribute('aria-expanded') === 'true';
+                    row.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+                    btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+                    btn.textContent = expanded ? '▸' : '▾';
+                    if (!expanded && row.style.display !== 'none') {
+                        details.removeAttribute('hidden');
+                    } else {
+                        details.setAttribute('hidden','');
+                    }
+                }
+            })();
 
             // Update pagination when filters run (wrap wireFilter's input handler already present)
             // We'll patch the filter inputs to also reset paginator page to 1 and re-render
@@ -228,6 +386,182 @@
             }
             hookFilterToPager('automation-report-filter', automationPager);
             hookFilterToPager('testcase-report-filter', testcasePager);
+
+            // View testcase details (open modal)
+            (function () {
+                var root = document.getElementById('automation-reports');
+                if (!root) return;
+                var modal = document.getElementById('testcase-view-modal');
+                var content = modal && modal.querySelector('#testcase-view-content');
+
+                // Helper to fetch testcase detail from the server (fallback to embedded JSON if available)
+                function fetchTestcaseDetail(reportId, testcaseId) {
+                    var url = '/api/core/automation-report/' + encodeURIComponent(reportId) + '/testcase/' + encodeURIComponent(testcaseId) + '/';
+                    return fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+                        .then(function (resp) {
+                            if (!resp.ok) throw resp;
+                            return resp.json();
+                        })
+                        .catch(function () {
+                            // fallback: try embedded JSON
+                            try {
+                                var el = document.getElementById('automation_testcase_reports');
+                                if (el) {
+                                    var arr = JSON.parse(el.textContent || el.innerText || '[]');
+                                    return Promise.resolve(arr.find(function (r) {
+                                        return String(r.automation_report_id) === String(reportId) && String(r.testcase_id) === String(testcaseId);
+                                    }) || null);
+                                }
+                            } catch (e) { /* ignore */ }
+                            return Promise.resolve(null);
+                        });
+                }
+
+                // Modal focus management helpers
+                var lastTrigger = null;
+                function trapFocus(modalEl) {
+                    if (!modalEl) return function () {};
+                    var focusableSelectors = 'a[href], area[href], input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+                    var nodes = Array.from(modalEl.querySelectorAll(focusableSelectors)).filter(function (n) { return n.offsetWidth || n.offsetHeight || n.getClientRects().length; });
+                    var first = nodes[0] || modalEl;
+                    var last = nodes[nodes.length - 1] || modalEl;
+                    function keyHandler(e) {
+                        if (e.key === 'Tab') {
+                            if (nodes.length === 0) {
+                                e.preventDefault();
+                                return;
+                            }
+                            if (e.shiftKey) {
+                                if (document.activeElement === first) {
+                                    e.preventDefault();
+                                    last.focus();
+                                }
+                            } else {
+                                if (document.activeElement === last) {
+                                    e.preventDefault();
+                                    first.focus();
+                                }
+                            }
+                        } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            closeModal();
+                        }
+                    }
+                    document.addEventListener('keydown', keyHandler);
+                    // return a cleanup function
+                    return function () { document.removeEventListener('keydown', keyHandler); };
+                }
+
+                function openModal(data, triggerElement) {
+                    if (!modal || !content) return;
+                    lastTrigger = triggerElement || null;
+                    // populate available fields
+                    content.querySelector('[data-role="tc-id"]').textContent = data.testcase_id || '—';
+                    content.querySelector('[data-role="tc-name"]').textContent = data.request_name || '—';
+                    content.querySelector('[data-role="tc-run"]').textContent = data.run_id || '—';
+                    content.querySelector('[data-role="tc-outcome"]').textContent = data.outcome || '—';
+                    content.querySelector('[data-role="tc-started"]').textContent = data.started || '—';
+                    content.querySelector('[data-role="tc-finished"]').textContent = data.finished || '—';
+
+                    // if richer payload available in reportsData, merge it
+                    try {
+                        var found = reportsData.find(function (r) {
+                            // match by run id and testcase id; reportsData entries have run_id and testcase_id
+                            return String(r.run_id) === String(data.run_id) && String(r.testcase_id) === String(data.testcase_id || (r.testcase_id || ''));
+                        });
+                        if (found) {
+                            // Add optional fields if present (response, headers, error, assertions)
+                            var extraContainer = modal.querySelector('[data-role="testcase-extra-container"]');
+                            if (extraContainer) {
+                                // clear any previous extras
+                                var existing = extraContainer.querySelectorAll('.extra-field');
+                                existing.forEach(function (n) { n.remove(); });
+                                if (found.response_body) {
+                                    var dt = document.createElement('dt'); dt.className = 'extra-field'; dt.textContent = 'Response Body';
+                                    var dd = document.createElement('dd'); dd.className = 'extra-field'; dd.textContent = String(found.response_body).slice(0, 10000) || '—';
+                                    extraContainer.appendChild(dt); extraContainer.appendChild(dd);
+                                }
+                                if (found.response_headers && Object.keys(found.response_headers || {}).length) {
+                                    var dtH = document.createElement('dt'); dtH.className = 'extra-field'; dtH.textContent = 'Response Headers';
+                                    var ddH = document.createElement('dd'); ddH.className = 'extra-field'; ddH.textContent = JSON.stringify(found.response_headers);
+                                    extraContainer.appendChild(dtH); extraContainer.appendChild(ddH);
+                                }
+                                if (found.error) {
+                                    var dtE = document.createElement('dt'); dtE.className = 'extra-field'; dtE.textContent = 'Error';
+                                    var ddE = document.createElement('dd'); ddE.className = 'extra-field'; ddE.textContent = String(found.error);
+                                    extraContainer.appendChild(dtE); extraContainer.appendChild(ddE);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // ignore failures to merge extra data
+                    }
+
+                    modal.removeAttribute('hidden');
+                    document.body.classList.add('modal-open');
+                    // focus the close button (or dialog) and trap focus
+                    var cleanup = trapFocus(modal.querySelector('.automation-modal__dialog'));
+                    // store cleanup on modal element for later removal
+                    modal._focusCleanup = cleanup;
+                    var closeBtn = modal.querySelector('[data-action="close-testcase-view"]');
+                    if (closeBtn && typeof closeBtn.focus === 'function') closeBtn.focus();
+                }
+
+                function closeModal() {
+                    if (!modal) return;
+                    modal.setAttribute('hidden','');
+                    document.body.classList.remove('modal-open');
+                    try {
+                        if (modal._focusCleanup) {
+                            modal._focusCleanup();
+                            modal._focusCleanup = null;
+                        }
+                    } catch (e) {}
+                    // restore focus to triggering element
+                    try { if (lastTrigger && typeof lastTrigger.focus === 'function') lastTrigger.focus(); } catch (e) {}
+                    lastTrigger = null;
+                }
+
+                // Click handler: view buttons inside report details
+                root.addEventListener('click', function (ev) {
+                    var btn = ev.target.closest('button[data-action="view-testcase"]');
+                    if (!btn) return;
+                    var tr = btn.closest('tr');
+                    if (!tr) return;
+                    var testcaseId = tr.dataset.testcaseId || tr.getAttribute('data-testcase-id') || (tr.children[0] && tr.children[0].textContent && tr.children[0].textContent.trim());
+                    var runId = tr.dataset.runId || tr.getAttribute('data-run-id') || (tr.children[2] && tr.children[2].textContent && tr.children[2].textContent.trim());
+                    var reportId = tr.dataset.automationReportId || tr.getAttribute('data-automation-report-id') || (tr.closest('tr.report-row') && tr.closest('tr.report-row').dataset.reportId);
+                    var baseData = {
+                        testcase_id: testcaseId,
+                        request_name: tr.children[1] && (tr.children[1].textContent || tr.children[1].innerText) || '',
+                        run_id: runId,
+                        outcome: tr.children[3] && tr.children[3].textContent || '',
+                        started: tr.children[4] && tr.children[4].textContent || '',
+                        finished: tr.children[5] && tr.children[5].textContent || '',
+                    };
+                    // fetch richer payload from server, fallback to embedded JSON
+                    fetchTestcaseDetail(reportId, testcaseId).then(function (found) {
+                        if (found) {
+                            baseData.response_body = found.response_body;
+                            baseData.response_headers = found.response_headers;
+                            baseData.error = found.error;
+                            baseData.assertions_passed = found.assertions_passed;
+                            baseData.assertions_failed = found.assertions_failed;
+                        }
+                        openModal(baseData, btn);
+                    }).catch(function () { openModal(baseData, btn); });
+                });
+
+                // close handlers (backdrop and close buttons)
+                root.addEventListener('click', function (ev) {
+                    if (ev.target.closest('[data-action="close-testcase-view"]')) {
+                        closeModal();
+                    }
+                    if (ev.target.classList.contains('automation-modal__backdrop')) {
+                        closeModal();
+                    }
+                });
+            })();
         })();
 
         (function () {
@@ -239,11 +573,22 @@
                 filterInput.addEventListener('input', function () {
                     const q = (this.value || '').toLowerCase().trim();
                     if (!tbody) return;
-                    Array.from(tbody.querySelectorAll('tr')).forEach(function (tr) {
+                    Array.from(tbody.querySelectorAll('tr.report-row')).forEach(function (tr) {
                         try {
-                            const id = (tr.children[0] && tr.children[0].textContent || '').toLowerCase();
-                            const triggeredIn = (tr.children[1] && tr.children[1].textContent || '').toLowerCase();
+                            // account for collapse column at index 0
+                            const id = (tr.children[1] && tr.children[1].textContent || '').toLowerCase();
+                            const triggeredIn = (tr.children[2] && tr.children[2].textContent || '').toLowerCase();
                             tr.style.display = (!q || id.indexOf(q) !== -1 || triggeredIn.indexOf(q) !== -1) ? '' : 'none';
+                            // hide/show details row as well
+                            const details = tbody.querySelector('#report-details-' + tr.dataset.reportId);
+                            if (details) {
+                                const expanded = tr.getAttribute('aria-expanded') === 'true';
+                                if (tr.style.display !== 'none' && expanded) {
+                                    details.removeAttribute('hidden');
+                                } else {
+                                    details.setAttribute('hidden','');
+                                }
+                            }
                         } catch (e) { /* ignore per-row errors */ }
                     });
                 });

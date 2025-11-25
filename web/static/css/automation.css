@@ -306,6 +306,14 @@
     margin-top: 1.6rem;
 }
 
+/* Center the empty message for inner testcase tables */
+.inner-testcase-table td.empty {
+    text-align: center;
+    padding: 1rem 0;
+    color: var(--automation-text-muted, #666);
+    font-style: italic;
+}
+
 .automation-table {
     width: 100%;
 }
@@ -563,6 +571,20 @@
 .table-round .table-modern tbody tr:last-child td:first-child { border-bottom-left-radius: 12px; }
 .table-round .table-modern tbody tr:last-child td:last-child { border-bottom-right-radius: 12px; }
 .reports-tabs-wrapper .table-modern { margin: 0; }
+
+/* Accordion details row styling */
+.report-details td {
+    background: transparent;
+    padding: 0; /* let inner table control spacing so it matches Projects table */
+}
+.report-details-inner { padding: 0.3rem 0 0.6rem; }
+.report-details .details-heading { margin: 0 0 0.45rem 0; font-size: 0.86rem; color: #2b1b00; }
+.inner-testcase-table { width: 100%; border-collapse: collapse; }
+.inner-testcase-table thead th { padding: .85rem .95rem; background: #f2f4f7; font-size: .72rem; text-transform: uppercase; font-weight: 600; color: #5a4705; }
+.inner-testcase-table tbody td { padding: .9rem 1rem; border-bottom: 1px solid #edeff2; font-size: .78rem; vertical-align: middle; }
+.report-row { cursor: pointer; }
+.accordion-toggle { margin-right: 0.5rem; background: transparent; border: none; font-size: 0.85rem; cursor: pointer; }
+.accordion-toggle:focus { outline: none; }
 
 
 .panel-header {

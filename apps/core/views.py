@@ -800,15 +800,39 @@ def automation_reports(request):
         automation_reports = []
     try:
         testcase_reports_qs = models.ApiRunResultReport.objects.select_related("testcase", "run", "request").order_by("-created_at")[:100]
-        testcase_reports = serializers.ApiRunResultReportSerializer(testcase_reports_qs, many=True).data
+        # base serialized list (from serializer)
+        testcase_reports_serialized = serializers.ApiRunResultReportSerializer(testcase_reports_qs, many=True).data
+        # enrich serialized items with automation_report id from the queryset objects
+        testcase_reports = []
+        for ser, obj in zip(testcase_reports_serialized, testcase_reports_qs):
+            item = dict(ser)
+            try:
+                item["automation_report_id"] = getattr(obj, "automation_report_id", None)
+            except Exception:
+                item["automation_report_id"] = None
+            testcase_reports.append(item)
     except Exception:
         testcase_reports = []
+
+    # attach per-report testcase lists so template can render "No test cases" correctly
+    try:
+        for r in automation_reports:
+            rid = r.get("id")
+            if rid is None:
+                r["testcases"] = []
+            else:
+                r["testcases"] = [t for t in testcase_reports if t.get("automation_report_id") == rid]
+    except Exception:
+        # fall back to empty lists on any error
+        for r in automation_reports:
+            r["testcases"] = []
 
     context = {
         "initial_metrics": data.get("metrics", {}),
         "recent_runs": data.get("recent_runs", []),
         "automation_reports": automation_reports,
-        "testcase_reports": testcase_reports,
+        # provide the enriched testcase reports for client-side use (JSON embed)
+        "testcase_reports_serialized": testcase_reports,
     }
     return render(request, "core/automation_reports.html", context)
 
@@ -1819,6 +1843,43 @@ class AutomationReportDetailView(APIView):
         if blocked is not None:
             report.total_blocked = max(0, blocked)
             updated_fields.append("total_blocked")
+        try:
+            report.save(update_fields=updated_fields or None)
+        except Exception:
+            try:
+                report.save()
+            except Exception:
+                pass
+        serializer = serializers.AutomationReportSerializer(report)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class AutomationReportTestcaseDetailView(APIView):
+    """Return a single ApiRunResultReport for an AutomationReport and testcase id.
+
+    URL: /api/core/automation-report/<report_pk>/testcase/<testcase_id>/
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk=None, testcase_id=None, *args, **kwargs):
+        try:
+            # Try to find by linked TestCase.testcase_id
+            qs = models.ApiRunResultReport.objects.select_related("testcase", "run", "request")
+            obj = qs.filter(automation_report_id=int(pk), testcase__testcase_id=str(testcase_id)).order_by("-created_at").first()
+            if not obj:
+                # fallback: try matching by TestCase PK if numeric
+                try:
+                    if str(testcase_id).isdigit():
+                        obj = qs.filter(automation_report_id=int(pk), testcase_id=int(testcase_id)).order_by("-created_at").first()
+                except Exception:
+                    obj = None
+            if not obj:
+                raise models.ApiRunResultReport.DoesNotExist()
+        except (ValueError, models.ApiRunResultReport.DoesNotExist):
+            raise NotFound("Testcase report not found")
+
+        serializer = serializers.ApiRunResultReportSerializer(obj, context={})
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
         # Allow client to set finished timestamp (ISO string) or use now
         finished_val = data.get("finished")
