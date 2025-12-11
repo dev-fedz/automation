@@ -798,6 +798,25 @@ def automation_reports(request):
         automation_reports = serializers.AutomationReportSerializer(automation_reports_qs, many=True).data
     except Exception:
         automation_reports = []
+    # Format started/finished dates for display in the template (YYYY-MM-DD hh:mm AM/PM)
+    try:
+        for ser, obj in zip(automation_reports, automation_reports_qs):
+            try:
+                if getattr(obj, 'started', None):
+                    ser['started'] = obj.started.strftime('%Y-%m-%d %I:%M %p')
+                else:
+                    ser['started'] = ''
+            except Exception:
+                ser['started'] = ser.get('started') or ''
+            try:
+                if getattr(obj, 'finished', None):
+                    ser['finished'] = obj.finished.strftime('%Y-%m-%d %I:%M %p')
+                else:
+                    ser['finished'] = ''
+            except Exception:
+                ser['finished'] = ser.get('finished') or ''
+    except Exception:
+        pass
     try:
         testcase_reports_qs = models.ApiRunResultReport.objects.select_related("testcase", "run", "request").order_by("-created_at")[:100]
         # base serialized list (from serializer)
@@ -825,6 +844,22 @@ def automation_reports(request):
                 item["triggered_by"] = ar_triggered_by.get(ar_id) if ar_id is not None else None
             except Exception:
                 item["triggered_by"] = None
+            # attach nicely formatted started/finished timestamps for display
+            try:
+                if getattr(obj, 'created_at', None):
+                    item['started'] = obj.created_at.strftime('%Y-%m-%d %I:%M %p')
+                else:
+                    item['started'] = ser.get('created_at') or ''
+            except Exception:
+                item['started'] = ser.get('created_at') or ''
+            try:
+                if getattr(obj, 'updated_at', None):
+                    item['finished'] = obj.updated_at.strftime('%Y-%m-%d %I:%M %p')
+                else:
+                    item['finished'] = ser.get('updated_at') or ''
+            except Exception:
+                item['finished'] = ser.get('updated_at') or ''
+
             testcase_reports.append(item)
     except Exception:
         testcase_reports = []

@@ -90,8 +90,8 @@
                                                                         <td>{{ t.request_name }}</td>
                                                                         <td>{{ t.run_id }}</td>
                                                                         <td>{{ t.outcome }}</td>
-                                                                        <td>{{ t.started }}</td>
-                                                                        <td>{{ t.finished }}</td>
+                                                                        <td>{{ t.created_at }}</td>
+                                                                        <td>{{ t.finished_at }}</td>
                                                                         <td>
                                                                             <button class="btn btn-sm" data-action="view-testcase" data-testcase-id="{{ t.testcase_id }}">View</button>
                                                                         </td>
@@ -139,8 +139,8 @@
                                             </td>
                                             <td data-label="Request Name">{{ t.request_name }}</td>
                                             <td data-label="Triggered By">{{ t.triggered_by|default:'' }}</td>
-                                            <td data-label="Started At">{{ t.created_at }}</td>
-                                            <td data-label="Finished At">{{ t.updated_at }}</td>
+                                            <td data-label="Started At">{{ t.started }}</td>
+                                            <td data-label="Finished At">{{ t.finished }}</td>
                                             <td data-label="Action">
                                                 <div class="table-action-group">
                                                     <button class="btn btn-sm" data-action="view-testcase" data-testcase-id="{{ t.testcase_id }}" data-automation-report-id="{{ t.automation_report_id }}">View</button>
@@ -242,9 +242,25 @@
                 panel.dataset.active = 'true';
             }
 
+            // When switching tabs, refresh pagers and inner pagers so controls render consistently
+            function refreshPagersForPanel(panel) {
+                try {
+                    if (automationPager && typeof automationPager.refresh === 'function') automationPager.refresh();
+                } catch (e) { /* ignore */ }
+                try {
+                    if (testcasePager && typeof testcasePager.refresh === 'function') testcasePager.refresh();
+                } catch (e) { /* ignore */ }
+                try {
+                    // innerPagers collected during initialization
+                    if (window.__innerTestcasePagers && Array.isArray(window.__innerTestcasePagers)) {
+                        window.__innerTestcasePagers.forEach(function(p){ try { if (p && typeof p.refresh === 'function') p.refresh(); } catch (e) {} });
+                    }
+                } catch (e) { /* ignore */ }
+            }
+
             if (tabAutomated && tabTestcase && panelAutomated && panelTestcase) {
-                tabAutomated.addEventListener('click', function(){ activateTab(tabAutomated, panelAutomated); });
-                tabTestcase.addEventListener('click', function(){ activateTab(tabTestcase, panelTestcase); });
+                tabAutomated.addEventListener('click', function(){ activateTab(tabAutomated, panelAutomated); refreshPagersForPanel(panelAutomated); });
+                tabTestcase.addEventListener('click', function(){ activateTab(tabTestcase, panelTestcase); refreshPagersForPanel(panelTestcase); });
             }
 
             // Filters for each table (simple client-side text match)
@@ -433,8 +449,10 @@
             }
 
             // wire up all inner testcase tables found on the page
+            // Keep track of inner table pagers so we can refresh them when tabs change
+            window.__innerTestcasePagers = [];
             Array.from(document.querySelectorAll('.inner-testcase-table')).forEach(function (tbl) {
-                try { initInnerTablePagination(tbl, 10); } catch (e) { /* ignore */ }
+                try { var p = initInnerTablePagination(tbl, 10); if (p) window.__innerTestcasePagers.push(p); } catch (e) { /* ignore */ }
             });
 
             // --- Accordion toggles for automation report rows ---

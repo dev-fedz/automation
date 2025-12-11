@@ -318,6 +318,26 @@
     width: 100%;
 }
 
+/* Keep the Data Management -> API Environment table in a regular table layout
+   even on narrow viewports. The global/mobile stacked rules are scoped to
+   `.automation-table-card` and are useful for some pages, but for the
+   environments registry we want the header/column layout preserved. */
+#data-management-app .automation-table-card .table-modern thead {
+    display: table-header-group;
+}
+#data-management-app .automation-table-card .table-modern tbody td {
+    display: table-cell;
+    padding: .9rem 1rem;
+}
+@media (max-width:760px) {
+    #data-management-app .automation-table-card .table-modern thead {
+        display: table-header-group;
+    }
+    #data-management-app .automation-table-card .table-modern tbody td {
+        display: table-cell;
+    }
+}
+
 .automation-table .table-secondary {
     display: block;
     margin-top: 0.25rem;
@@ -485,11 +505,15 @@
     position: absolute;
     left: 12%;
     right: 12%;
-    bottom: -0.45rem;
+    bottom: -0.25rem;
     height: 3px;
     border-radius: 3px;
     background: linear-gradient(90deg, #f4b400, #d19000);
 }
+
+/* Ensure tab underline is visible even when parent containers use overflow rules */
+.reports-tabs-wrapper, .reports-tabs-bar, .report-tabs { overflow: visible; }
+.report-tabs .tab-btn { z-index: 2; }
 
 /* Align reports tab container with Projects card/table styling */
 .reports-tabs-wrapper { width: 100%; }

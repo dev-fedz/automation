@@ -1571,20 +1571,20 @@
                         : 0;
                     const updatedText = escapeHtml(formatDateTime(env ? env.updated_at : null));
                     return (
-                        `\n < tr data - environment - id="${env.id}" >\n` +
-                        `                            < td data - label="Name" > ${name}</td >\n` +
-                        `                            < td data - label="Description" > ${description}</td >\n` +
-                        `                            < td data - label="Variables" > ${variableCount}</td >\n` +
-                        `                            < td data - label="Headers" > ${headerCount}</td >\n` +
-                        `                            < td data - label="Updated" > ${updatedText}</td >\n` +
-                        "                            <td data-label=\"Actions\">\n" +
-                        "                                <div class=\"table-action-group\">\n" +
-                        `                                    < button type = "button" class="action-button" data - action="view-environment" data - id="${env.id}" > View</button >\n` +
-                        `                                    < button type = "button" class="action-button" data - action="edit-environment" data - id="${env.id}" > Edit</button >\n` +
-                        `                                    < button type = "button" class="action-button" data - action="delete-environment" data - id="${env.id}" data - variant="danger" > Delete</button >\n` +
-                        "                                </div>\n" +
-                        "                            </td>\n" +
-                        "                        </tr>\n"
+                        `\n<tr data-environment-id="${env.id}">\n` +
+                        `  <td data-label="Name">${name}</td>\n` +
+                        `  <td data-label="Description">${description}</td>\n` +
+                        `  <td data-label="Variables">${variableCount}</td>\n` +
+                        `  <td data-label="Headers">${headerCount}</td>\n` +
+                        `  <td data-label="Updated">${updatedText}</td>\n` +
+                        `  <td data-label="Actions">\n` +
+                        `    <div class="table-action-group">\n` +
+                        `      <button type="button" class="action-button" data-action="view-environment" data-id="${env.id}">View</button>\n` +
+                        `      <button type="button" class="action-button" data-action="edit-environment" data-id="${env.id}">Edit</button>\n` +
+                        `      <button type="button" class="action-button" data-action="delete-environment" data-id="${env.id}" data-variant="danger">Delete</button>\n` +
+                        `    </div>\n` +
+                        `  </td>\n` +
+                        `</tr>\n`
                     );
                 })
                 .join("");

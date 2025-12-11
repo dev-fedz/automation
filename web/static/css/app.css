@@ -276,12 +276,14 @@ body.auth-layout { background:#f5f7fb; min-height:100dvh; display:flex; justify-
 .table-modern tbody tr td:first-child {font-weight:600;color:#5e4705;}
 /* Deprecated .role-form-card styles removed in favor of automation panels */
 @media (max-width:760px){
-	.table-modern thead {display:none;}
-	.table-modern tbody td {display:flex;justify-content:space-between;gap:1rem;padding:.65rem .85rem;font-size:.72rem;}
-	.table-modern tbody td:before {content:attr(data-label);font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#6a5307;}
-	.table-modern tbody tr {display:block;border:1px solid #eee;border-radius:12px;margin-bottom:.75rem;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.06);}
-	.table-modern tbody tr:last-child {margin-bottom:0;}
-	.table-card {padding:.75rem .9rem;}
+	/* Only apply the stacked/mobile table layout to automation-specific table cards
+	   so we don't globally convert every `.table-modern` into stacked cards. */
+	.automation-table-card .table-modern thead {display:none;}
+	.automation-table-card .table-modern tbody td {display:flex;justify-content:space-between;gap:1rem;padding:.65rem .85rem;font-size:.72rem;}
+	.automation-table-card .table-modern tbody td:before {content:attr(data-label);font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#6a5307;}
+	.automation-table-card .table-modern tbody tr {display:block;border:1px solid #eee;border-radius:12px;margin-bottom:.75rem;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.06);}
+	.automation-table-card .table-modern tbody tr:last-child {margin-bottom:0;}
+	.automation-table-card .table-card {padding:.75rem .9rem;}
 }
 
 /* User & Role management */
