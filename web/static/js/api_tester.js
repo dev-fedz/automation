@@ -1299,6 +1299,36 @@
 }`;
     };
 
+    // Resolve {{variable}} tokens against a provided variables map.
+    // If a variable is not present in the map, the original token is left intact.
+    const VARIABLE_PATTERN = /{{\s*([\w\.-]+)\s*}}/g;
+    const _resolveVariablesJS = (value, variables) => {
+        if (typeof value === 'string') {
+            return value.replace(VARIABLE_PATTERN, (match, key) => {
+                if (variables && Object.prototype.hasOwnProperty.call(variables, key)) {
+                    try {
+                        // convert non-string values to string for display
+                        return String(variables[key]);
+                    } catch (e) {
+                        return String(variables[key]);
+                    }
+                }
+                return match;
+            });
+        }
+        if (Array.isArray(value)) {
+            return value.map((v) => _resolveVariablesJS(v, variables));
+        }
+        if (value && typeof value === 'object') {
+            const out = {};
+            Object.keys(value).forEach((k) => {
+                out[k] = _resolveVariablesJS(value[k], variables);
+            });
+            return out;
+        }
+        return value;
+    };
+
     const escapeHtml = (value) => {
         if (value === null || value === undefined) {
             return '';
@@ -1449,6 +1479,7 @@
         responseCache: new Map(),
         activeResponseKey: null,
         activeEnvironmentId: null,
+        collectionEnvironmentSelections: new Map(),
         collapsedCollections: new Set(),
         collapsedDirectoryKeys: new Set(),
         knownDirectoryKeys: new Set(),
@@ -3198,6 +3229,11 @@
 
             const authType = (request.auth_type || 'none').toLowerCase();
             state.builder.auth.type = authType;
+            // Preserve saved auth values exactly as stored (including {{variable}} templates).
+            // Variable resolution happens at request execution time.
+            state.builder.auth.username = '';
+            state.builder.auth.password = '';
+            state.builder.auth.token = '';
             if (authType === 'basic') {
                 state.builder.auth.username = request.auth_basic?.username || '';
                 state.builder.auth.password = request.auth_basic?.password || '';
@@ -4252,9 +4288,15 @@
             elements.environmentSelect.innerHTML = options.join('');
 
             let selectedValue = '';
-            if (state.activeEnvironmentId !== null && environmentIds.has(state.activeEnvironmentId)) {
-                selectedValue = String(state.activeEnvironmentId);
-            } else if (collection?.environments?.length) {
+            const collectionId = normalizeEnvironmentId(collection?.id);
+            if (collectionId !== null) {
+                const stored = normalizeEnvironmentId(state.collectionEnvironmentSelections.get(collectionId));
+                if (stored !== null && environmentIds.has(stored)) {
+                    selectedValue = String(stored);
+                }
+            }
+
+            if (!selectedValue && collection?.environments?.length) {
                 const linked = collection.environments.find((item) => environmentIds.has(item.id));
                 selectedValue = linked ? String(linked.id) : '';
             }
@@ -5276,6 +5318,16 @@
             if (normalized !== null && !state.environments.some((env) => env.id === normalized)) {
                 return;
             }
+
+            // Environment choice is per-collection (Request Builder).
+            if (state.selectedCollectionId !== null) {
+                if (normalized === null) {
+                    state.collectionEnvironmentSelections.delete(state.selectedCollectionId);
+                } else {
+                    state.collectionEnvironmentSelections.set(state.selectedCollectionId, normalized);
+                }
+            }
+
             const value = normalized !== null ? String(normalized) : '';
             if (elements.environmentSelect && elements.environmentSelect.value !== value) {
                 elements.environmentSelect.value = value;
@@ -5283,6 +5335,43 @@
             setActiveEnvironmentId(normalized);
             syncEnvironmentListAppliedState();
             updateEnvironmentEditorActionState();
+        };
+
+        const linkEnvironmentToSelectedCollection = async (environmentId) => {
+            const normalized = normalizeEnvironmentId(environmentId);
+            if (normalized === null) {
+                return;
+            }
+            const activeCollection = state.collections.find((item) => item.id === state.selectedCollectionId) || null;
+            if (!activeCollection) {
+                return;
+            }
+            const alreadyLinked = Array.isArray(activeCollection.environments)
+                ? activeCollection.environments.some((env) => normalizeEnvironmentId(env?.id) === normalized)
+                : false;
+            if (alreadyLinked) {
+                return;
+            }
+            const detailUrl = getCollectionDetailUrl(activeCollection.id);
+            if (!detailUrl) {
+                return;
+            }
+            const existingIds = Array.isArray(activeCollection.environments)
+                ? activeCollection.environments
+                    .map((env) => normalizeEnvironmentId(env?.id))
+                    .filter((id) => id !== null)
+                : [];
+            const nextIds = Array.from(new Set([...existingIds, normalized]));
+            try {
+                const response = await postJson(detailUrl, { environment_ids: nextIds }, 'PATCH');
+                const index = state.collections.findIndex((item) => item.id === activeCollection.id);
+                if (index !== -1 && response && typeof response === 'object') {
+                    state.collections[index] = response;
+                    renderEnvironmentOptions(state.collections[index]);
+                }
+            } catch (error) {
+                setStatus(error instanceof Error ? error.message : 'Failed to link environment to collection.', 'error');
+            }
         };
 
         const handleBuilderFocusIn = (event) => {
@@ -7095,6 +7184,7 @@
             const variablesScope = attachReplaceIn(
                 createVariableScope({
                     store: localStore,
+                    fallbackStores: [workingEnvironmentStore, state.globalVariables],
                 }),
             );
 
@@ -7266,7 +7356,12 @@
             const variablesScope = attachReplaceIn(
                 createVariableScope({
                     store: localStore,
-                    fallbackStores: [overridesStore].filter((store) => store && Object.keys(store).length),
+                    fallbackStores: [
+                        overridesStore,
+                        localStore,
+                        seededEnvironmentStore,
+                        state.globalVariables,
+                    ].filter((store) => store && Object.keys(store).length),
                 }),
             );
 
@@ -7556,16 +7651,19 @@
 
             const authType = state.builder.auth.type;
             if (authType === 'basic') {
-                const username = state.builder.auth.username || '';
-                const password = state.builder.auth.password || '';
-                if (username || password) {
+                const rawUsername = state.builder.auth.username || '';
+                const rawPassword = state.builder.auth.password || '';
+                const username = resolveStringTemplate(rawUsername);
+                const password = resolveStringTemplate(rawPassword);
+                if (rawUsername || rawPassword) {
                     const token = btoa(`${username}:${password}`);
                     payload.headers.Authorization = `Basic ${token}`;
                     payload.auth = { type: 'basic', username, password };
                 }
             } else if (authType === 'bearer') {
-                const token = state.builder.auth.token || '';
-                if (token) {
+                const rawToken = state.builder.auth.token || '';
+                const token = resolveStringTemplate(rawToken);
+                if (rawToken) {
                     payload.headers.Authorization = `Bearer ${token}`;
                     payload.auth = { type: 'bearer', token };
                 }
@@ -8219,6 +8317,7 @@
             elements.environmentSelect.addEventListener('change', (event) => {
                 const selected = normalizeEnvironmentId(event.target.value);
                 applyEnvironmentSelection(selected);
+                linkEnvironmentToSelectedCollection(selected);
             });
         }
 
