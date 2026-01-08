@@ -449,10 +449,13 @@ class ScenarioCommentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        queryset = models.ScenarioComment.objects.select_related("user", "scenario").all()
+        queryset = models.ScenarioComment.objects.select_related("user", "scenario").prefetch_related("replies__user").all()
         scenario_id = self.request.query_params.get("scenario")
         if scenario_id:
             queryset = queryset.filter(scenario_id=scenario_id)
+        # Only filter to top-level comments for list action, not for retrieve/update/delete
+        if self.action == 'list':
+            queryset = queryset.filter(parent__isnull=True)
         return queryset
 
     def perform_create(self, serializer):
@@ -463,6 +466,12 @@ class ScenarioCommentViewSet(viewsets.ModelViewSet):
         if serializer.instance.user != self.request.user:
             raise ValidationError("You can only edit your own comments.")
         serializer.save()
+
+    def perform_destroy(self, instance):
+        # Only allow users to delete their own comments
+        if instance.user != self.request.user:
+            raise ValidationError("You can only delete your own comments.")
+        instance.delete()
 
 
 class TestCaseViewSet(viewsets.ModelViewSet):

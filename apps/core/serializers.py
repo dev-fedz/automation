@@ -604,6 +604,7 @@ class ScenarioCommentSerializer(serializers.ModelSerializer):
     user_email = serializers.EmailField(source="user.email", read_only=True)
     user_name = serializers.SerializerMethodField()
     is_edited = serializers.SerializerMethodField()
+    replies = serializers.SerializerMethodField()
 
     class Meta:
         model = models.ScenarioComment
@@ -614,9 +615,11 @@ class ScenarioCommentSerializer(serializers.ModelSerializer):
             "user_email",
             "user_name",
             "content",
+            "parent",
             "created_at",
             "updated_at",
             "is_edited",
+            "replies",
         ]
         read_only_fields = ["id", "user", "created_at", "updated_at"]
 
@@ -631,6 +634,13 @@ class ScenarioCommentSerializer(serializers.ModelSerializer):
             delta = (obj.updated_at - obj.created_at).total_seconds()
             return delta > 1
         return False
+
+    def get_replies(self, obj):
+        # Only include replies for top-level comments to avoid deep nesting
+        if obj.parent is None:
+            replies = obj.replies.all()
+            return ScenarioCommentSerializer(replies, many=True, context=self.context).data
+        return []
 
 
 class ProjectSerializer(serializers.ModelSerializer):

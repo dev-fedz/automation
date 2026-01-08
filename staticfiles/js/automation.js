@@ -443,14 +443,6 @@
             casePlanSelect: document.getElementById('case-plan-select'),
             caseModuleSelect: document.getElementById('case-module-select'),
             caseScenarioSelect: document.getElementById('case-scenario-select'),
-            // modal elements (selectors present in Test Cases template)
-            caseSelectionModal: document.querySelector('[data-role="case-selection-modal"]'),
-            caseSelectionModalDialog: document.querySelector('[data-role="case-selection-modal-dialog"]'),
-            modalCasePlan: document.querySelector('[data-role="modal-case-plan"]'),
-            modalCaseModule: document.querySelector('[data-role="modal-case-module"]'),
-            modalCaseScenario: document.querySelector('[data-role="modal-case-scenario"]'),
-            caseSelectionContinue: document.getElementById('case-selection-continue'),
-            caseSelectionCancel: document.getElementById('case-selection-cancel'),
             caseSelectedScenarioHidden: document.getElementById('case-selected-scenario-id'),
             maintenanceForm: document.getElementById('automation-maintenance-form'),
             planModal: root.querySelector('[data-role="plan-modal"]'),
@@ -501,32 +493,6 @@
                 throw error;
             }
         }
-
-        const rememberAndHide = (node) => {
-            if (!node) {
-                return;
-            }
-            if (node.dataset.modalHidden === '1') {
-                return;
-            }
-            node.dataset.modalHidden = '1';
-            node.dataset.modalOriginalDisplay = node.style.display || '';
-            node.style.display = 'none';
-        };
-
-        const restoreIfHidden = (node) => {
-            if (!node || node.dataset.modalHidden !== '1') {
-                return;
-            }
-            const previous = node.dataset.modalOriginalDisplay || '';
-            if (previous === '') {
-                node.style.removeProperty('display');
-            } else {
-                node.style.display = previous;
-            }
-            delete node.dataset.modalHidden;
-            delete node.dataset.modalOriginalDisplay;
-        };
 
         const ensureTrailingSlash = (value) => {
             if (!value) {
@@ -740,218 +706,6 @@
             } catch (e) { /* ignore */ }
         };
 
-        // Populate modal selects (separate elements) using state.plans and initialModules
-        const populateModalCaseSelects = () => {
-            try {
-                const planSelect = els.modalCasePlan || document.getElementById('modal-case-plan');
-                const moduleSelect = els.modalCaseModule || document.getElementById('modal-case-module');
-                const scenarioSelect = els.modalCaseScenario || document.getElementById('modal-case-scenario');
-                // If we don't have plans from the initial payload, try to fetch them now.
-                const ensurePlans = async () => {
-                    if (Array.isArray(state.plans) && state.plans.length) return;
-                    try {
-                        setStatus('Loading plans…', 'info');
-                        const resp = await fetch(apiEndpoints.plans || '/api/core/test-plans/', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-                        if (!resp.ok) throw new Error('Failed to load plans');
-                        const data = await resp.json();
-                        state.plans = normalizePlans(Array.isArray(data) ? data : []);
-                        setStatus('', 'info');
-                    } catch (err) {
-                        setStatus('Unable to load plans.', 'error');
-                    }
-                };
-                // kick off fetch if needed and wait for it to finish before populating
-                const ready = Array.isArray(state.plans) && state.plans.length ? Promise.resolve() : ensurePlans();
-                if (planSelect) {
-                    planSelect.innerHTML = '';
-                    const ph = document.createElement('option'); ph.value = ''; ph.textContent = '(select a plan)'; planSelect.appendChild(ph);
-                    ready.then(() => {
-                        (state.plans || []).forEach((p) => {
-                            const opt = document.createElement('option'); opt.value = p.id; opt.textContent = p.name || `Plan ${p.id}`; planSelect.appendChild(opt);
-                        });
-                    }).catch(() => { /* ignore */ });
-                }
-                if (moduleSelect) {
-                    moduleSelect.innerHTML = '';
-                    const ph2 = document.createElement('option'); ph2.value = ''; ph2.textContent = '(select module)'; moduleSelect.appendChild(ph2);
-                    moduleSelect.disabled = true;
-                }
-                if (scenarioSelect) {
-                    scenarioSelect.innerHTML = '';
-                    const ph3 = document.createElement('option'); ph3.value = ''; ph3.textContent = '(select scenario)'; scenarioSelect.appendChild(ph3);
-                    scenarioSelect.disabled = true;
-                }
-            } catch (e) { /* ignore */ }
-        };
-
-        // Mirror behavior of test-modules plan filter: populate modal plan select
-        try {
-            const modalPlanEl = els.modalCasePlan || document.getElementById('modal-case-plan');
-            if (modalPlanEl) {
-                // clear then populate using initialPlans for consistency with Data Management
-                modalPlanEl.innerHTML = '<option value="">(select a plan)</option>';
-                (initialPlans || []).forEach((p) => {
-                    const opt = document.createElement('option');
-                    opt.value = p.id || '';
-                    opt.textContent = p.name || p.title || `Plan ${p.id}`;
-                    modalPlanEl.appendChild(opt);
-                });
-                // existing change handlers (declared elsewhere) will handle module/scenario updates
-            }
-        } catch (e) { /* ignore */ }
-
-        // Accessibility helpers: manage inert (or fallback) on background when modal is open.
-        const _inertTargets = [];
-        let _previouslyFocused = null;
-
-        const _applyInert = (root, enable = true) => {
-            try {
-                const appRoot = document.getElementById('automation-app') || document.body;
-                // we will set inert on all direct children of body except the modal container
-                const exceptions = [els.caseSelectionModal];
-                const nodes = Array.from(document.body.children).filter((n) => !exceptions.includes(n));
-                // clear previous list first when disabling
-                if (!enable) {
-                    _inertTargets.forEach((n) => {
-                        try {
-                            if ('inert' in n) n.inert = false;
-                            n.removeAttribute('aria-hidden');
-                            // remove tabindex fallback markers
-                            n.querySelectorAll && n.querySelectorAll('[data-inert-fallback]').forEach((el) => {
-                                el.removeAttribute('tabindex');
-                                el.removeAttribute('data-inert-fallback');
-                            });
-                        } catch (e) { /* ignore */ }
-                    });
-                    _inertTargets.length = 0;
-                    return;
-                }
-                nodes.forEach((node) => {
-                    try {
-                        // If the node contains the currently focused element, skip setting inert to avoid hiding focused element.
-                        const active = document.activeElement;
-                        if (active && node.contains(active)) {
-                            // instead of making it inert, we leave it alone to avoid violating aria-hidden rules
-                            return;
-                        }
-                        if ('inert' in node) {
-                            node.inert = true;
-                        } else {
-                            // fallback: mark aria-hidden and remove tabbable by setting tabindex on focusable descendants
-                            node.setAttribute('aria-hidden', 'true');
-                            // add tabindex=-1 to focusable elements so they cannot be focused
-                            const focusable = node.querySelectorAll('a, button, input, select, textarea, [tabindex]');
-                            focusable.forEach((el) => {
-                                try {
-                                    // only add fallback if element is currently focusable
-                                    if (!el.hasAttribute('data-inert-fallback')) {
-                                        el.setAttribute('data-inert-fallback', 'true');
-                                        // store previous tabindex if needed
-                                        el.setAttribute('tabindex', '-1');
-                                    }
-                                } catch (e) { /* ignore */ }
-                            });
-                        }
-                        _inertTargets.push(node);
-                    } catch (e) { /* ignore */ }
-                });
-            } catch (e) { /* ignore */ }
-        };
-
-        const openCaseSelectionModal = () => {
-            try {
-                automationLog('debug', '[automation] openCaseSelectionModal invoked');
-                if (!els.caseSelectionModal) return;
-                // hide sections of the grid while the modal is visible to prevent duplicate content
-                try {
-                    rememberAndHide(els.casePanelContainer);
-                    rememberAndHide(els.automationGrid);
-                } catch (err) {
-                    automationLog('debug', '[automation] unable to hide case panel container', err);
-                }
-                // Fetch latest plans from API before populating modal so the
-                // options reflect the current server state. We do this even if
-                // state.plans exists to ensure freshness.
-                (async () => {
-                    automationLog('debug', '[automation] fetching plans for modal from', apiEndpoints.plans || '/api/core/test-plans/');
-                    try {
-                        setStatus('Loading test plans…', 'info');
-                        const resp = await fetch(apiEndpoints.plans || '/api/core/test-plans/', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-                        if (resp.ok) {
-                            const data = await resp.json();
-                            state.plans = normalizePlans(Array.isArray(data) ? data : []);
-                        } else {
-                            console.warn('[automation] fetch plans failed', resp.status);
-                        }
-                    } catch (err) {
-                        setStatus('Unable to load test plans.', 'error');
-                    } finally {
-                        setStatus('', 'info');
-                    }
-                    // populate options freshly (will use state.plans)
-                    try { populateModalCaseSelects(); } catch (e) { automationLog('debug', '[automation] populateModalCaseSelects error', e); }
-                    // If the page has a selected plan, auto-select it in the modal
-                    try {
-                        const modalPlanElAuto = document.getElementById('modal-case-plan') || els.modalCasePlan;
-                        if (modalPlanElAuto && state.selectedPlanId) {
-                            modalPlanElAuto.value = String(state.selectedPlanId);
-                            // trigger change so module list is populated/enabled
-                            modalPlanElAuto.dispatchEvent(new Event('change', { bubbles: true }));
-                        }
-                    } catch (e) { /* ignore */ }
-                    automationLog('debug', '[automation] modal open - state.plans length', Array.isArray(state.plans) ? state.plans.length : 0, 'initialModules length', Array.isArray(initialModules) ? initialModules.length : 0);
-                    // remember currently focused element so we can restore focus on close
-                    _previouslyFocused = document.activeElement;
-                    // show modal element (make it focusable)
-                    els.caseSelectionModal.hidden = false;
-                    // show explicit overlay (if present)
-                    try { const overlay = els.caseSelectionModal.querySelector('[data-role="case-selection-overlay"]'); if (overlay) overlay.hidden = false; } catch (e) { }
-                    document.body.classList.add('automation-modal-open');
-                    // focus the modal dialog container first (so activeElement is inside modal)
-                    window.requestAnimationFrame(() => {
-                        try {
-                            if (els.caseSelectionModal && els.caseSelectionModal.focus) {
-                                els.caseSelectionModal.focus();
-                            } else if (els.caseSelectionModalDialog && els.caseSelectionModalDialog.focus) {
-                                els.caseSelectionModalDialog.focus();
-                            }
-                        } catch (e) { /* ignore */ }
-                        // after focus has moved into the modal, mark background inert
-                        window.requestAnimationFrame(() => {
-                            _applyInert(document.body, true);
-                            // then focus the first control inside modal
-                            try { if (els.modalCasePlan) els.modalCasePlan.focus(); } catch (e) { /* ignore */ }
-                        });
-                    });
-                })();
-            } catch (e) { /* ignore */ }
-        };
-
-        const closeCaseSelectionModal = () => {
-            try {
-                if (!els.caseSelectionModal) return;
-                // remove inert from background before hiding modal so focus restoration won't be hidden
-                _applyInert(document.body, false);
-                els.caseSelectionModal.hidden = true;
-                try { const overlay = els.caseSelectionModal.querySelector('[data-role="case-selection-overlay"]'); if (overlay) overlay.hidden = true; } catch (e) { }
-                document.body.classList.remove('automation-modal-open');
-                // restore grid visibility when modal closes
-                try {
-                    restoreIfHidden(els.casePanelContainer);
-                    restoreIfHidden(els.automationGrid);
-                } catch (err) {
-                    automationLog('debug', '[automation] unable to restore case panel container', err);
-                }
-                // restore focus to previously focused element if still in document
-                try {
-                    if (_previouslyFocused && typeof _previouslyFocused.focus === 'function') {
-                        _previouslyFocused.focus();
-                    }
-                } catch (e) { /* ignore */ }
-                _previouslyFocused = null;
-            } catch (e) { /* ignore */ }
-        };
-
         // update module options when plan changes
         const updateCaseModulesForPlan = (planId) => {
             try {
@@ -1006,402 +760,6 @@
                 scenarioSelect.disabled = !scenarios.length;
             } catch (e) { /* ignore */ }
         };
-
-        // Modal-specific change listeners
-        try {
-            const modalPlanEl = els.modalCasePlan || document.getElementById('modal-case-plan');
-            const modalModuleEl = els.modalCaseModule || document.getElementById('modal-case-module');
-            const modalScenarioEl = els.modalCaseScenario || document.getElementById('modal-case-scenario');
-            if (modalPlanEl) {
-                modalPlanEl.addEventListener('change', (ev) => {
-                    const pid = (ev.currentTarget && ev.currentTarget.value) ? ev.currentTarget.value : (modalPlanEl.value || null);
-                    automationLog('debug', '[automation] modalPlan change invoked', { pid: pid, statePlansLength: Array.isArray(state.plans) ? state.plans.length : 0 });
-                    // update state selected plan similar to main scenarioPlan handler
-                    try {
-                        if (!pid) {
-                            state.selectedPlanId = null;
-                            state.selectedScenarioId = null;
-                        } else {
-                            state.selectedPlanId = toNumericId(pid);
-                        }
-                    } catch (ie) { /* ignore */ }
-                    // reuse logic: update modal module list based on plan
-                    try {
-                        // re-query elements at handler time to avoid stale references
-                        const moduleSelect = document.getElementById('modal-case-module') || modalModuleEl;
-                        const modalScenarioElLocal = document.getElementById('modal-case-scenario') || modalScenarioEl;
-                        automationLog('debug', '[automation] modalPlan handler elements', { moduleSelectPresent: !!moduleSelect, modalScenarioPresent: !!modalScenarioElLocal });
-                        if (!moduleSelect) return;
-                        moduleSelect.innerHTML = '';
-                        const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = '(select module)'; moduleSelect.appendChild(placeholder);
-                        let modules = [];
-                        const planObj = state.plans.find((p) => String(p.id) === String(pid));
-                        if (planObj && Array.isArray(planObj.scenarios)) {
-                            const seen = new Set();
-                            planObj.scenarios.forEach((s) => {
-                                const mid = s && (s.module || s.module_id);
-                                if (mid && !seen.has(String(mid))) {
-                                    seen.add(String(mid));
-                                    const m = initialModules.find((im) => String(im.id) === String(mid));
-                                    if (m) modules.push(m);
-                                }
-                            });
-                        }
-                        if (!modules.length) modules = Array.isArray(initialModules) ? initialModules.slice() : [];
-                        automationLog('debug', '[automation] modalPlan computed modules', { modulesCount: modules.length, modulesSample: modules.length ? modules.slice(0, 3) : [] });
-                        modules.forEach((m) => {
-                            const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.title || `Module ${m.id}`; moduleSelect.appendChild(opt);
-                        });
-                        // enable module select when a plan is selected (mirror main page behaviour)
-                        try { moduleSelect.disabled = !modules.length; } catch (_err) { moduleSelect.disabled = !modules.length; }
-                        // reset scenario select
-                        if (modalScenarioElLocal) {
-                            modalScenarioElLocal.innerHTML = '';
-                            const ph = document.createElement('option'); ph.value = ''; ph.textContent = '(select scenario)'; modalScenarioElLocal.appendChild(ph);
-                            modalScenarioElLocal.disabled = true;
-                        }
-                        // fetch scenarios for this plan from API and attach to state so scenario options are accurate
-                        (async () => {
-                            try {
-                                if (!state.selectedPlanId) return;
-                                const base = apiEndpoints.scenarios || '/api/core/test-scenarios/';
-                                const url = `${base}?plan=${encodeURIComponent(state.selectedPlanId)}`;
-                                const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-                                if (!resp.ok) throw new Error(`Failed to fetch scenarios: ${resp.status}`);
-                                const data = await resp.json();
-                                const normalized = Array.isArray(data) ? data.map(normalizeScenario) : [];
-                                automationLog('debug', '[automation] modalPlan fetched scenarios', { url, count: normalized.length, sample: normalized.length ? normalized[0] : null });
-                                // attach to the plan in state; if the plan isn't present
-                                // create a minimal plan entry so downstream code (module
-                                // computation) can use the attached scenarios.
-                                let p = state.plans.find((pp) => Number(pp.id) === Number(state.selectedPlanId));
-                                if (p) {
-                                    p.scenarios = normalized;
-                                } else if (state.selectedPlanId) {
-                                    try {
-                                        const newPlan = normalizePlan({ id: Number(state.selectedPlanId), name: `Plan ${state.selectedPlanId}`, scenarios: normalized });
-                                        state.plans.push(newPlan);
-                                        p = newPlan;
-                                    } catch (err) { /* ignore */ }
-                                }
-                                // Recompute modules from the newly attached scenarios and populate the module select
-                                try {
-                                    const moduleSelectRef = moduleSelect; // re-queried earlier in handler
-                                    if (moduleSelectRef && p && Array.isArray(p.scenarios)) {
-                                        // collect unique module ids from scenarios
-                                        const seen3 = new Set();
-                                        const moduleIds = [];
-                                        p.scenarios.forEach((s) => {
-                                            const mid2 = s && (s.module || s.module_id);
-                                            if (mid2 && !seen3.has(String(mid2))) {
-                                                seen3.add(String(mid2));
-                                                moduleIds.push(String(mid2));
-                                            }
-                                        });
-                                        // try to map to initialModules; if none exist, build minimal module objects from ids
-                                        const modulesFromFetch = moduleIds.map((mid) => {
-                                            const m = initialModules.find((im) => String(im.id) === String(mid));
-                                            if (m) return m;
-                                            return { id: mid, title: `Module ${mid}` };
-                                        });
-                                        automationLog('debug', '[automation] modulesFromFetch after fetch', modulesFromFetch.length, modulesFromFetch.slice(0, 3));
-                                        moduleSelectRef.innerHTML = '';
-                                        const placeholder2 = document.createElement('option'); placeholder2.value = ''; placeholder2.textContent = '(select module)'; moduleSelectRef.appendChild(placeholder2);
-                                        modulesFromFetch.forEach((m) => {
-                                            const opt2 = document.createElement('option'); opt2.value = m.id; opt2.textContent = m.title || `Module ${m.id}`; moduleSelectRef.appendChild(opt2);
-                                        });
-                                        try { moduleSelectRef.disabled = !modulesFromFetch.length; } catch (_err) { moduleSelectRef.disabled = !modulesFromFetch.length; }
-                                    }
-                                } catch (err) { /* ignore */ }
-                            } catch (err) { /* ignore */ }
-                        })();
-                    } catch (e) { /* ignore */ }
-                });
-            }
-            if (modalModuleEl) {
-                modalModuleEl.addEventListener('change', (ev) => {
-                    // re-query elements to ensure handlers operate on current DOM
-                    const modalPlanElLocal = document.getElementById('modal-case-plan') || modalPlanEl;
-                    const modalModuleElLocal = document.getElementById('modal-case-module') || modalModuleEl;
-                    const modalScenarioElLocal = document.getElementById('modal-case-scenario') || modalScenarioEl;
-                    const pid = (modalPlanElLocal && modalPlanElLocal.value) ? modalPlanElLocal.value : null;
-                    const mid = (ev.currentTarget && ev.currentTarget.value) ? ev.currentTarget.value : (modalModuleElLocal.value || null);
-                    if (!mid) {
-                        if (modalScenarioElLocal) modalScenarioElLocal.disabled = true;
-                        return;
-                    }
-                    try {
-                        // try to load scenarios from cached plan data
-                        let scenarios = [];
-                        const planObj = state.plans.find((p) => String(p.id) === String(pid));
-                        if (planObj && Array.isArray(planObj.scenarios)) {
-                            planObj.scenarios.forEach((s) => {
-                                if (String(s.module || s.module_id || '') === String(mid)) scenarios.push(s);
-                            });
-                        }
-                        // If no scenarios available locally, fetch from API filtered by module and plan
-                        if (!scenarios.length) {
-                            (async () => {
-                                try {
-                                    const base = apiEndpoints.scenarios || '/api/core/test-scenarios/';
-                                    const params = new URLSearchParams();
-                                    if (mid) params.append('module', String(mid));
-                                    if (pid) params.append('plan', String(pid));
-                                    const url = params.toString() ? `${base}?${params.toString()}` : base;
-                                    automationLog('debug', '[automation] modal module fetch', { pid, mid, url });
-                                    const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-                                    if (!resp.ok) throw new Error(`Failed to fetch scenarios for module: ${resp.status}`);
-                                    const data = await resp.json();
-                                    const normalized = Array.isArray(data) ? data.map(normalizeScenario) : [];
-                                    scenarios = normalized;
-                                    automationLog('debug', '[automation] modal module fetch result', { count: normalized.length, sample: normalized.length ? normalized[0] : null });
-                                    // attach to plan if selected
-                                    if (pid) {
-                                        const p = state.plans.find((pp) => Number(pp.id) === Number(pid));
-                                        if (p) p.scenarios = normalized;
-                                        // Recompute modules from the newly attached scenarios and
-                                        // populate the module select so the user sees options
-                                        // immediately after the fetch completes.
-                                        try {
-                                            let modulesFromFetch = [];
-                                            if (p && Array.isArray(p.scenarios)) {
-                                                const seen2 = new Set();
-                                                p.scenarios.forEach((s) => {
-                                                    const mid2 = s && (s.module || s.module_id);
-                                                    if (mid2 && !seen2.has(String(mid2))) {
-                                                        seen2.add(String(mid2));
-                                                        const m2 = initialModules.find((im) => String(im.id) === String(mid2));
-                                                        if (m2) modulesFromFetch.push(m2);
-                                                    }
-                                                });
-                                            }
-                                            if (!modulesFromFetch.length) modulesFromFetch = Array.isArray(initialModules) ? initialModules.slice() : [];
-                                            automationLog('debug', '[automation] modalPlan populate modules after fetch', { modulesCount: modulesFromFetch.length, sample: modulesFromFetch.slice(0, 3) });
-                                            if (modalModuleElLocal) {
-                                                modalModuleElLocal.innerHTML = '';
-                                                const placeholder2 = document.createElement('option'); placeholder2.value = ''; placeholder2.textContent = '(select module)'; modalModuleElLocal.appendChild(placeholder2);
-                                                modulesFromFetch.forEach((m) => {
-                                                    const opt2 = document.createElement('option'); opt2.value = m.id; opt2.textContent = m.title || `Module ${m.id}`; modalModuleElLocal.appendChild(opt2);
-                                                });
-                                                try { modalModuleElLocal.disabled = !modulesFromFetch.length; } catch (_err2) { modalModuleElLocal.disabled = !modulesFromFetch.length; }
-                                            }
-                                            if (modalScenarioElLocal) {
-                                                modalScenarioElLocal.innerHTML = '';
-                                                const ph2 = document.createElement('option'); ph2.value = ''; ph2.textContent = '(select scenario)'; modalScenarioElLocal.appendChild(ph2);
-                                                modalScenarioElLocal.disabled = true;
-                                            }
-                                        } catch (err) { /* ignore */ }
-                                    }
-                                } catch (err) {
-                                    automationLog('debug', '[automation] modal module fetch error', err);
-                                } finally {
-                                    // populate modal scenario select
-                                    if (modalScenarioEl) {
-                                        modalScenarioEl.innerHTML = '';
-                                        const ph = document.createElement('option'); ph.value = ''; ph.textContent = '(select scenario)'; modalScenarioEl.appendChild(ph);
-                                        scenarios.forEach((s) => {
-                                            const opt = document.createElement('option'); opt.value = s.id; opt.textContent = s.title || `Scenario ${s.id}`; modalScenarioEl.appendChild(opt);
-                                        });
-                                        modalScenarioEl.disabled = !scenarios.length;
-                                    }
-                                }
-                            })();
-                            return; // async path will populate select
-                        }
-                        // populate from local scenarios
-                        if (modalScenarioEl) {
-                            modalScenarioEl.innerHTML = '';
-                            const ph = document.createElement('option'); ph.value = ''; ph.textContent = '(select scenario)'; modalScenarioEl.appendChild(ph);
-                            scenarios.forEach((s) => {
-                                const opt = document.createElement('option'); opt.value = s.id; opt.textContent = s.title || `Scenario ${s.id}`; modalScenarioEl.appendChild(opt);
-                            });
-                            modalScenarioEl.disabled = !scenarios.length;
-                        }
-                    } catch (e) { /* ignore */ }
-                });
-            }
-            if (els.caseSelectionContinue) {
-                els.caseSelectionContinue.addEventListener('click', (ev) => {
-                    try {
-                        const selectedScenario = els.modalCaseScenario && els.modalCaseScenario.value ? els.modalCaseScenario.value : null;
-                        if (!selectedScenario) {
-                            setStatus('Please select a scenario before continuing.', 'error');
-                            return;
-                        }
-                        // set hidden input used by form submit
-                        if (els.caseSelectedScenarioHidden) els.caseSelectedScenarioHidden.value = selectedScenario;
-                        // also set the visible caseScenarioSelect if present (for compatibility)
-                        if (els.caseScenarioSelect) {
-                            // ensure option exists
-                            const exists = Array.from(els.caseScenarioSelect.options).some((o) => String(o.value) === String(selectedScenario));
-                            if (!exists) {
-                                // try to find label from state
-                                let label = `Scenario ${selectedScenario}`;
-                                for (const p of state.plans) {
-                                    if (Array.isArray(p.scenarios)) {
-                                        const s = p.scenarios.find((sc) => String(sc.id) === String(selectedScenario));
-                                        if (s) { label = s.title || label; break; }
-                                    }
-                                }
-                                const opt = document.createElement('option'); opt.value = selectedScenario; opt.textContent = label; els.caseScenarioSelect.appendChild(opt);
-                            }
-                            els.caseScenarioSelect.value = selectedScenario;
-                            els.caseScenarioSelect.disabled = false;
-                        }
-                        // Update client-side selection state so renderers show the selected scenario
-                        try {
-                            const modalPlanVal = (els.modalCasePlan && els.modalCasePlan.value) ? els.modalCasePlan.value : (document.getElementById('modal-case-plan') && document.getElementById('modal-case-plan').value) || null;
-                            if (modalPlanVal) {
-                                state.selectedPlanId = Number(modalPlanVal);
-                            }
-                            state.selectedScenarioId = Number(selectedScenario);
-                            const modalModuleVal = (els.modalCaseModule && els.modalCaseModule.value) ? els.modalCaseModule.value : (document.getElementById('modal-case-module') && document.getElementById('modal-case-module').value) || null;
-                            syncSelectionQueryParams({ moduleId: modalModuleVal || null });
-                            markListVisible();
-                        } catch (e) { /* ignore */ }
-                        // enable form fieldset
-                        if (els.caseForm) {
-                            const fieldset = els.caseForm.querySelector('fieldset'); if (fieldset) fieldset.disabled = false;
-                        }
-                        // show the test cases grid/panel when a scenario is confirmed
-                        try {
-                            if (els.automationGrid) {
-                                restoreIfHidden(els.automationGrid);
-                                els.automationGrid.style.removeProperty('display');
-                            }
-                            const panel = document.getElementById('test-cases-panel-container');
-                            if (panel) {
-                                restoreIfHidden(panel);
-                                panel.style.removeProperty('display');
-                            }
-                        } catch (ie) { /* ignore */ }
-                        // Ensure persisted panel replaces the default data card after Continue
-                        try {
-                            activatePersistedCasePanel();
-                        } catch (e) { /* ignore */ }
-                        // re-render UI so cases for the selected scenario are shown (table body will be populated)
-                        try { renderAll(); } catch (e) { try { renderCaseList(); } catch (_e) { /* ignore */ } }
-                        // close modal
-                        closeCaseSelectionModal();
-                        // focus title input
-                        if (inputs.case.title) inputs.case.title.focus();
-                        setStatus('Scenario selected. You may now fill and save the test case.', 'success');
-                    } catch (e) { /* ignore */ }
-                });
-            }
-            if (els.caseSelectionCancel) {
-                els.caseSelectionCancel.addEventListener('click', (ev) => {
-                    try {
-                        ev.preventDefault();
-                        closeCaseSelectionModal();
-                        try { renderAll(); } catch (error) { try { renderCaseList(); } catch (_error) { /* ignore */ } }
-                        try {
-                            const panelContainer = document.getElementById('test-cases-panel-container');
-                            if (panelContainer) {
-                                restoreIfHidden(panelContainer);
-                                panelContainer.style.removeProperty('display');
-                            }
-                            if (els.automationGrid) {
-                                restoreIfHidden(els.automationGrid);
-                                els.automationGrid.style.removeProperty('display');
-                            }
-                            syncCasesPanelForVisibilityFlag();
-                        } catch (error) {
-                            /* ignore */
-                        }
-                    } catch (error) {
-                        /* ignore */
-                    }
-                });
-            }
-            // Prevent closing the selection modal by clicking outside or on 'close' actions.
-            // The modal is intentionally modal — user must choose a scenario and click Continue.
-            root.addEventListener('click', (ev) => {
-                if (!els.caseSelectionModal || els.caseSelectionModal.hidden) return;
-                const close = ev.target.closest('[data-action="close-case-selection"]');
-                if (close) {
-                    // ignore close clicks while our modal is open
-                    ev.preventDefault();
-                    ev.stopPropagation();
-                }
-                // prevent clicks on the overlay from closing the modal
-                const insideDialog = ev.target.closest('[data-role="case-selection-modal-dialog"]');
-                if (!insideDialog) {
-                    // absorb the click
-                    ev.preventDefault();
-                    ev.stopPropagation();
-                }
-            });
-
-            // Prevent Escape key from closing the modal when it's open
-            document.addEventListener('keydown', (ev) => {
-                // attach handler to the case search input (ensure element exists)
-                try {
-                    const caseSearchElLocal = panel.querySelector('#case-search');
-                    if (caseSearchElLocal && !caseSearchElLocal.dataset._searchAttached) {
-                        caseSearchElLocal.dataset._searchAttached = '1';
-                        caseSearchElLocal.addEventListener('input', debounce(async (ev) => {
-                            const q = (caseSearchElLocal.value || '').trim();
-                            state._caseSearch = q.toLowerCase();
-                            if (!q) {
-                                state._caseSearchResults = null;
-                                try { renderCaseList(); } catch (e) { /* ignore */ }
-                                return;
-                            }
-                            try {
-                                setStatus('Searching cases...', 'info');
-                                const base = apiEndpoints.cases || '/api/core/test-cases/';
-                                // include scenario filter when available
-                                try {
-                                    const params = new URLSearchParams();
-                                    params.append('search', String(q));
-                                    if (state && state.selectedScenarioId) params.append('scenario', String(state.selectedScenarioId));
-                                    const query = params.toString();
-                                    const computed = query ? `${base}?${query}` : base;
-                                    // store computed URL on window as a fallback for other scopes
-                                    window.__automation_case_search_url = computed;
-                                } catch (e) {
-                                    window.__automation_case_search_url = `${base}?search=${encodeURIComponent(q)}`;
-                                }
-                                const url = window.__automation_case_search_url;
-                                const resp = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-                                if (!resp.ok) throw new Error('Search failed');
-                                const data = await resp.json();
-                                state._caseSearchResults = Array.isArray(data) ? data : [];
-                                setStatus('', 'info');
-                                try { renderCaseList(); } catch (e) { /* ignore */ }
-                            } catch (err) {
-                                setStatus('Case search failed.', 'error');
-                            }
-                        }, 300));
-                    }
-                } catch (e) { /* ignore */ }
-                if (!els.caseSelectionModal || els.caseSelectionModal.hidden) return;
-                if (ev.key === 'Escape' || ev.key === 'Esc') {
-                    ev.preventDefault();
-                    ev.stopPropagation();
-                    setStatus('Please select a scenario and click Continue to proceed.', 'info');
-                }
-            });
-            // wire open modal button if present on page
-            const openModalBtn = document.getElementById('open-case-selection-modal');
-            if (openModalBtn) {
-                openModalBtn.addEventListener('click', (ev) => {
-                    ev.preventDefault();
-                    openCaseSelectionModal();
-                });
-            }
-            // Delegated fallback: catch clicks on the open modal button even if
-            // the direct binding above was not executed or the element was
-            // dynamic. This ensures the modal opens on click.
-            root.addEventListener('click', (ev) => {
-                const btn = ev.target.closest && ev.target.closest('#open-case-selection-modal');
-                if (btn) {
-                    try { ev.preventDefault(); } catch (e) { }
-                    try { openCaseSelectionModal(); } catch (e) { /* ignore */ }
-                }
-            });
-        } catch (e) { /* ignore */ }
 
         // populate plan and module selects for scenarios panel
         const populateScenarioPlanAndModule = () => {
@@ -1609,6 +967,35 @@
             return { html: sanitized, plain };
         };
 
+        // Normalize scenario shape returned by the API so client-side code can
+        // reliably compare module and plan ids. Some API responses include
+        // nested objects for `module` or `plan` which breaks equality checks.
+        const normalizeScenario = (s) => {
+            if (!s || typeof s !== 'object') return s;
+            const next = { ...s };
+            try {
+                if (next.module && typeof next.module === 'object') {
+                    next.module = next.module.id || next.module.pk || null;
+                }
+            } catch (e) { /* ignore */ }
+            try {
+                if (next.plan && typeof next.plan === 'object') {
+                    next.plan = next.plan.id || next.plan.pk || null;
+                }
+            } catch (e) { /* ignore */ }
+            try {
+                if ((next.module === undefined || next.module === null) && (next.module_id !== undefined)) {
+                    next.module = next.module_id;
+                }
+            } catch (e) { /* ignore */ }
+            try {
+                if ((next.plan === undefined || next.plan === null) && (next.plan_id !== undefined)) {
+                    next.plan = next.plan_id;
+                }
+            } catch (e) { /* ignore */ }
+            return next;
+        };
+
         const normalizePlan = (plan) => {
             if (!plan || typeof plan !== 'object') {
                 return plan;
@@ -1623,7 +1010,7 @@
                 next.objective_plain = '';
             }
             if (Array.isArray(next.scenarios)) {
-                next.scenarios = next.scenarios.map((scenario) => ({ ...scenario }));
+                next.scenarios = next.scenarios.map((scenario) => normalizeScenario({ ...scenario }));
             }
             if (Array.isArray(next.scopes)) {
                 next.scopes = next.scopes.map((scope) => ({ ...scope }));
@@ -1666,38 +1053,7 @@
             return next;
         };
 
-        // Normalize scenario shape returned by the API so client-side code can
-        // reliably compare module and plan ids. Some API responses include
-        // nested objects for `module` or `plan` (e.g. { module: { id: 1, title: '...' } })
-        // which breaks equality checks like `String(s.module) === moduleFilterVal`.
-        const normalizeScenario = (s) => {
-            if (!s || typeof s !== 'object') return s;
-            const next = { ...s };
-            try {
-                if (next.module && typeof next.module === 'object') {
-                    // prefer id, fallback to pk
-                    next.module = next.module.id || next.module.pk || null;
-                }
-            } catch (e) { /* ignore */ }
-            try {
-                if (next.plan && typeof next.plan === 'object') {
-                    next.plan = next.plan.id || next.plan.pk || null;
-                }
-            } catch (e) { /* ignore */ }
-            // Support APIs that return module_id / plan_id instead of module/plan
-            try {
-                if ((next.module === undefined || next.module === null) && (next.module_id !== undefined)) {
-                    next.module = next.module_id;
-                }
-            } catch (e) { /* ignore */ }
-            try {
-                if ((next.plan === undefined || next.plan === null) && (next.plan_id !== undefined)) {
-                    next.plan = next.plan_id;
-                }
-            } catch (e) { /* ignore */ }
-            return next;
-        };
-
+        // Normalize plans while preserving nested structures that the UI expects.
         const normalizePlans = (plans) => (Array.isArray(plans) ? plans.map(normalizePlan) : []);
 
         const initialModules = readScriptJson('automation-initial-modules') || [];
@@ -1870,11 +1226,7 @@
 
         const syncCasesPanelForVisibilityFlag = () => {
             try {
-                if (getListVisibleFlag()) {
-                    activatePersistedCasePanel();
-                } else {
-                    deactivatePersistedCasePanel();
-                }
+                activatePersistedCasePanel();
             } catch (error) {
                 /* ignore */
             }
@@ -1907,7 +1259,6 @@
                 if (window.localStorage) {
                     window.localStorage.removeItem(listVisibleStorageKey);
                 }
-                deactivatePersistedCasePanel();
             } catch (error) {
                 /* ignore */
             }
@@ -1941,15 +1292,6 @@
         }
 
         const listVisibleOnReload = (isReloadNavigation || restoredFromStorage) && getListVisibleFlag();
-
-        if (listVisibleOnReload && els.caseSelectionModal) {
-            try {
-                els.caseSelectionModal.hidden = true;
-                body.classList.remove('automation-modal-open');
-            } catch (error) {
-                /* ignore */
-            }
-        }
 
         function clearPersistedSelection() {
             try {
@@ -2101,48 +1443,24 @@
         }
 
         try {
-            let hasSelection = Boolean(state.selectedScenarioId);
+            const hasSelection = Boolean(state.selectedScenarioId);
             const panel = document.getElementById('test-cases-panel-container');
-            if (isReloadNavigation && hasSelection && !listVisibleOnReload) {
-                hasSelection = false;
-                state.selectedScenarioId = null;
-                state.selectedPlanId = null;
-                clearPersistedSelection();
-                if (els.caseSelectedScenarioHidden) {
-                    try { els.caseSelectedScenarioHidden.value = ''; } catch (error) { /* ignore */ }
-                }
-                try { syncSelectionQueryParams(); } catch (error) { /* ignore */ }
+            // Ensure the persistent cases panel is visible by default.
+            markListVisible();
+            const activePanel = document.getElementById(PERSISTED_CASES_PANEL_ID);
+            const panelToShow = activePanel || panel;
+            if (panelToShow) {
+                try { panelToShow.hidden = false; } catch (e) { /* ignore */ }
+                panelToShow.style.removeProperty('display');
             }
-            if (!hasSelection) {
-                deactivatePersistedCasePanel();
-                if (panel) {
-                    panel.style.display = 'none';
-                }
-                if (els.automationGrid) {
-                    els.automationGrid.style.display = 'none';
-                }
-                window.requestAnimationFrame(() => {
-                    try {
-                        if (!state.selectedScenarioId && !listVisibleOnReload) {
-                            openCaseSelectionModal();
-                        } else if (listVisibleOnReload && els.caseSelectionModal) {
-                            els.caseSelectionModal.hidden = true;
-                            body.classList.remove('automation-modal-open');
-                        }
-                    } catch (error) {
-                        /* ignore */
-                    }
-                });
-            } else {
+            if (els.automationGrid) {
+                try { els.automationGrid.hidden = false; } catch (e) { /* ignore */ }
+                els.automationGrid.style.removeProperty('display');
+            }
+            if (hasSelection) {
                 syncCasesPanelForVisibilityFlag();
-                if (panel) {
-                    restoreIfHidden(panel);
-                    panel.style.removeProperty('display');
-                }
-                if (els.automationGrid) {
-                    restoreIfHidden(els.automationGrid);
-                    els.automationGrid.style.removeProperty('display');
-                }
+            } else {
+                try { renderCaseList(); } catch (e) { /* ignore */ }
             }
         } catch (error) {
             /* ignore */
@@ -2318,6 +1636,7 @@
                     return;
                 }
 
+                // Rebuild plan options when collection size changes.
                 const expectedPlanOptions = (state.plans || []).length + 1;
                 if (planSelect.options.length !== expectedPlanOptions) {
                     planSelect.innerHTML = '';
@@ -2617,7 +1936,7 @@
         }
 
         // Lightweight toast helper for transient messages
-        const showToast = (message, timeout = 3000) => {
+        const showToast = (message, variant = 'info', timeout = 3000) => {
             try {
                 let container = document.getElementById('automation-toast-container');
                 if (!container) {
@@ -2630,10 +1949,10 @@
                     document.body.appendChild(container);
                 }
                 const node = document.createElement('div');
-                node.className = 'automation-toast';
-                node.style.background = 'rgba(0,0,0,0.8)';
+                node.className = `automation-toast automation-toast--${variant}`;
+                node.style.background = variant === 'error' ? 'rgba(208, 48, 48, 0.92)' : variant === 'success' ? 'rgba(39, 124, 72, 0.92)' : 'rgba(33, 47, 60, 0.88)';
                 node.style.color = '#fff';
-                node.style.padding = '8px 12px';
+                node.style.padding = '9px 14px';
                 node.style.marginTop = '8px';
                 node.style.borderRadius = '4px';
                 node.style.fontSize = '13px';
@@ -2694,24 +2013,6 @@
         // call once on init
         populateModuleSelects();
         populateScenarioPlanAndModule();
-
-        // Hide Test Cases panel/grid on init when there is no pre-selected scenario
-        try {
-            const selected = getSelectedScenario();
-            const panel = document.getElementById('test-cases-panel-container');
-            const manageCasePanel = Boolean(panel);
-            if (!selected && manageCasePanel) {
-                panel.style.display = 'none';
-                if (els.automationGrid) els.automationGrid.style.display = 'none';
-                // defer modal open so layout settles first
-                window.requestAnimationFrame(() => {
-                    try { if (!state.selectedScenarioId) openCaseSelectionModal(); } catch (e2) { /* ignore */ }
-                });
-            } else {
-                if (panel) panel.style.removeProperty('display');
-                if (els.automationGrid) els.automationGrid.style.removeProperty('display');
-            }
-        } catch (e) { /* ignore */ }
 
         const focusPlanRow = (planId) => {
             if (!els.planList || typeof planId === 'undefined' || planId === null) {
@@ -4215,16 +3516,16 @@
                 const data = await response.json();
                 state.plans = normalizePlans(data);
 
-                let nextPlanId = typeof selectPlanId !== 'undefined' ? selectPlanId : state.selectedPlanId;
-                if (nextPlanId !== null && nextPlanId !== undefined && !state.plans.some((plan) => plan.id === nextPlanId)) {
-                    nextPlanId = state.plans.length ? state.plans[0].id : null;
+                let nextPlanId = typeof selectPlanId !== 'undefined' ? toNumericId(selectPlanId) : toNumericId(state.selectedPlanId);
+                if (nextPlanId !== null && nextPlanId !== undefined && !state.plans.some((plan) => Number(plan.id) === Number(nextPlanId))) {
+                    nextPlanId = state.plans.length ? toNumericId(state.plans[0].id) : null;
                 }
                 state.selectedPlanId = nextPlanId;
 
                 const currentPlan = getSelectedPlan();
-                let nextScenarioId = typeof selectScenarioId !== 'undefined' ? selectScenarioId : state.selectedScenarioId;
-                if (!currentPlan || !Array.isArray(currentPlan.scenarios) || !currentPlan.scenarios.some((scenario) => scenario.id === nextScenarioId)) {
-                    nextScenarioId = currentPlan && Array.isArray(currentPlan.scenarios) && currentPlan.scenarios.length ? currentPlan.scenarios[0].id : null;
+                let nextScenarioId = typeof selectScenarioId !== 'undefined' ? toNumericId(selectScenarioId) : toNumericId(state.selectedScenarioId);
+                if (!currentPlan || !Array.isArray(currentPlan.scenarios) || !currentPlan.scenarios.some((scenario) => Number(scenario.id) === Number(nextScenarioId))) {
+                    nextScenarioId = currentPlan && Array.isArray(currentPlan.scenarios) && currentPlan.scenarios.length ? toNumericId(currentPlan.scenarios[0].id) : null;
                 }
                 state.selectedScenarioId = nextScenarioId;
 
@@ -4330,13 +3631,25 @@
                         const resp = await fetch(delUrl, { method: 'DELETE', credentials: 'same-origin', headers: { 'X-CSRFToken': getCsrfToken() } });
                         if (resp && (resp.status === 204 || resp.ok)) {
                             setStatus('Scenario deleted.', 'success');
+                            showToast('Scenario deleted.', 'success');
                             // refresh plans to update UI
-                            await refreshPlans({ silent: true });
+                            const currentPlanId = state.selectedPlanId;
+                            const wasSelectedScenario = Number(state.selectedScenarioId) === Number(sid);
+                            if (wasSelectedScenario) {
+                                state.selectedScenarioId = null;
+                            }
+                            await refreshPlans({
+                                silent: true,
+                                selectPlanId: currentPlanId,
+                                selectScenarioId: state.selectedScenarioId,
+                            });
                         } else {
                             setStatus('Failed to delete scenario.', 'error');
+                            showToast('Failed to delete scenario.', 'error');
                         }
                     } catch (err) {
                         setStatus('Failed to delete scenario.', 'error');
+                        showToast('Failed to delete scenario.', 'error');
                     }
                 }
             });
@@ -5461,30 +4774,15 @@
             if (commentScenarioIdInput) commentScenarioIdInput.value = scenarioId;
             if (commentContentInput) commentContentInput.value = '';
 
+            // Hide add form initially
+            const addForm = document.getElementById('add-comment-form');
+            if (addForm) addForm.style.display = 'none';
+
             // Load existing comments
             await loadComments(scenarioId);
 
             modal.hidden = false;
             body.classList.add('automation-modal-open');
-
-            // Initialize TinyMCE on the comment textarea
-            if (typeof tinymce !== 'undefined') {
-                tinymce.remove('#comment-content');
-                tinymce.init({
-                    selector: '#comment-content',
-                    height: 250,
-                    menubar: false,
-                    plugins: [
-                        'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
-                        'searchreplace', 'visualblocks', 'code', 'fullscreen',
-                        'insertdatetime', 'table', 'help', 'wordcount'
-                    ],
-                    toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
-                        'alignleft aligncenter alignright alignjustify | ' +
-                        'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
-                    content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }'
-                });
-            }
         };
 
         const loadComments = async (scenarioId) => {
@@ -5501,35 +4799,56 @@
                 if (resp && resp.ok) {
                     const comments = await resp.json();
 
-                    if (comments.length === 0) {
-                        commentsList.innerHTML = '<div class="comment-empty">No comments yet. Be the first to comment!</div>';
-                    } else {
-                        commentsList.innerHTML = comments.map(comment => `
-                            <div class="comment-item" data-comment-id="${comment.id}">
+                    // Get current user ID from data attribute
+                    const appElement = document.getElementById('automation-app');
+                    const currentUserId = appElement && appElement.dataset.currentUserId !== 'null'
+                        ? parseInt(appElement.dataset.currentUserId, 10)
+                        : null;
+
+                    const renderComment = (comment, isReply = false) => {
+                        const canEdit = currentUserId && comment.user === currentUserId;
+                        const editBtn = canEdit ? `
+                            <button type="button" class="comment-action-btn" data-action="edit-comment" data-comment-id="${comment.id}" title="Edit">
+                                <span>✏️</span>
+                            </button>` : '';
+                        const deleteBtn = canEdit ? `
+                            <button type="button" class="comment-action-btn" data-action="delete-comment" data-comment-id="${comment.id}" title="Delete">
+                                <span>🗑️</span>
+                            </button>` : '';
+
+                        const repliesHtml = (!isReply && comment.replies && comment.replies.length > 0)
+                            ? `<div class="comment-replies">${comment.replies.map(reply => renderComment(reply, true)).join('')}</div>`
+                            : '';
+
+                        return `
+                            <div class="comment-item ${isReply ? 'comment-reply' : ''}" data-comment-id="${comment.id}" data-comment-user="${comment.user}">
                                 <div class="comment-header">
                                     <span class="comment-author">${escapeHtml(comment.user_name || 'Unknown')}${comment.is_edited ? ' (edited)' : ''}</span>
                                     <span class="comment-date">${formatDateTime(comment.created_at)}</span>
                                 </div>
                                 <div class="comment-content" data-comment-content>${comment.content || ''}</div>
                                 <div class="comment-actions">
-                                    <button type="button" class="comment-action-btn" data-action="reply-comment" data-comment-id="${comment.id}" title="Reply">
+                                    ${!isReply ? `<button type="button" class="comment-action-btn" data-action="reply-comment" data-comment-id="${comment.id}" title="Reply">
                                         <span>↩️</span>
-                                    </button>
+                                    </button>` : ''}
                                     <button type="button" class="comment-action-btn" data-action="thumbs-up-comment" data-comment-id="${comment.id}" title="Thumbs Up">
                                         <span>👍</span>
                                     </button>
                                     <button type="button" class="comment-action-btn" data-action="add-reaction-comment" data-comment-id="${comment.id}" title="Add Reaction">
                                         <span>😊</span>
                                     </button>
-                                    <button type="button" class="comment-action-btn" data-action="edit-comment" data-comment-id="${comment.id}" title="Edit">
-                                        <span>✏️</span>
-                                    </button>
-                                    <button type="button" class="comment-action-btn" data-action="delete-comment" data-comment-id="${comment.id}" title="Delete">
-                                        <span>🗑️</span>
-                                    </button>
+                                    ${editBtn}
+                                    ${deleteBtn}
                                 </div>
+                                ${repliesHtml}
                             </div>
-                        `).join('');
+                        `;
+                    };
+
+                    if (comments.length === 0) {
+                        commentsList.innerHTML = '<div class="comment-empty">No comments yet. Be the first to comment!</div>';
+                    } else {
+                        commentsList.innerHTML = comments.map(comment => renderComment(comment, false)).join('');
                     }
                 } else {
                     commentsList.innerHTML = '<div class="comment-empty">Failed to load comments.</div>';
@@ -5540,8 +4859,74 @@
             }
         };
 
+        const initInlineEditor = (mode, commentId, content = '', parentCommentId = null) => {
+            const inlineEditor = document.getElementById('inline-comment-editor');
+            const inlineForm = document.getElementById('inline-comment-form');
+            const inlineLabel = document.getElementById('inline-editor-label');
+            const inlineSubmitBtn = document.getElementById('inline-submit-btn');
+            const inlineScenarioInput = document.getElementById('inline-comment-scenario-id');
+            const inlineContentInput = document.getElementById('inline-comment-content');
+
+            if (!inlineEditor || !inlineForm) return;
+
+            // Hide any existing editor and clean up TinyMCE first
+            inlineEditor.style.display = 'none';
+            if (typeof tinymce !== 'undefined') {
+                tinymce.remove('#inline-comment-content');
+            }
+
+            // Set form mode
+            inlineForm.setAttribute('data-mode', mode);
+            inlineForm.setAttribute('data-comment-id', commentId || '');
+            inlineForm.setAttribute('data-parent-id', parentCommentId || '');
+
+            // Update labels and buttons
+            if (mode === 'edit') {
+                inlineLabel.textContent = 'Edit Comment';
+                inlineSubmitBtn.textContent = 'Update Comment';
+            } else if (mode === 'reply') {
+                inlineLabel.textContent = 'Reply to Comment';
+                inlineSubmitBtn.textContent = 'Post Reply';
+            }
+
+            // Position inline editor below the comment BEFORE initializing TinyMCE
+            const commentItem = document.querySelector(`[data-comment-id="${commentId || parentCommentId}"]`);
+            if (commentItem) {
+                const actionsDiv = commentItem.querySelector('.comment-actions');
+                if (actionsDiv) {
+                    actionsDiv.after(inlineEditor);
+                }
+            }
+
+            // Show the editor
+            inlineEditor.style.display = 'block';
+
+            // Initialize TinyMCE after positioning and showing
+            if (typeof tinymce !== 'undefined') {
+                tinymce.init({
+                    selector: '#inline-comment-content',
+                    height: 200,
+                    menubar: false,
+                    plugins: [
+                        'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
+                        'searchreplace', 'visualblocks', 'code', 'fullscreen',
+                        'insertdatetime', 'table', 'help', 'wordcount'
+                    ],
+                    toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
+                        'alignleft aligncenter alignright alignjustify | ' +
+                        'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
+                    content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }',
+                    init_instance_callback: function (editor) {
+                        editor.setContent(content);
+                        editor.focus();
+                    }
+                });
+            } else if (inlineContentInput) {
+                inlineContentInput.value = content;
+            }
+        };
+
         const editComment = async (commentId) => {
-            // Find the comment element
             const commentItem = document.querySelector(`[data-comment-id="${commentId}"]`);
             if (!commentItem) return;
 
@@ -5549,53 +4934,151 @@
             if (!contentDiv) return;
 
             const currentContent = contentDiv.innerHTML;
+            initInlineEditor('edit', commentId, currentContent);
+        };
 
-            // Get the form textarea and populate with current content
-            const commentContentInput = document.getElementById('comment-content');
-            const commentScenarioIdInput = document.getElementById('comment-scenario-id');
+        const replyToComment = (parentCommentId) => {
+            initInlineEditor('reply', null, '', parentCommentId);
+        };
 
-            if (commentContentInput) {
-                // Set content in TinyMCE if available
-                if (typeof tinymce !== 'undefined' && tinymce.get('comment-content')) {
-                    tinymce.get('comment-content').setContent(currentContent);
+        const deleteComment = async (commentId) => {
+            if (!confirm('Are you sure you want to delete this comment?')) {
+                return;
+            }
+
+            try {
+                const resp = await fetch(`/api/core/scenario-comments/${commentId}/`, {
+                    method: 'DELETE',
+                    credentials: 'same-origin',
+                    headers: {
+                        'X-CSRFToken': getCsrfToken()
+                    }
+                });
+
+                if (resp && resp.ok) {
+                    setStatus('Comment deleted successfully.', 'success');
+                    const scenarioIdInput = document.getElementById('comment-scenario-id');
+                    const scenarioId = scenarioIdInput ? scenarioIdInput.value : null;
+                    if (scenarioId) {
+                        await loadComments(scenarioId);
+                    }
                 } else {
-                    commentContentInput.value = currentContent;
+                    const errorData = await resp.json().catch(() => ({}));
+                    setStatus(errorData.detail || 'Failed to delete comment.', 'error');
                 }
-            }
-
-            // Store the comment ID we're editing
-            if (commentScenarioIdInput) {
-                commentScenarioIdInput.setAttribute('data-editing-comment-id', commentId);
-            }
-
-            // Change button text
-            const submitBtn = document.querySelector('#add-comment-form button[type="submit"]');
-            if (submitBtn) {
-                submitBtn.textContent = 'Update Comment';
+            } catch (err) {
+                console.error('Error deleting comment:', err);
+                setStatus('Error deleting comment.', 'error');
             }
         };
 
-        // Handle edit comment button clicks
-        document.addEventListener('click', (ev) => {
-            const target = ev.target;
-            if (target && target.dataset && target.dataset.action === 'edit-comment') {
+        // Handle comment action button clicks (using event delegation)
+        document.addEventListener('click', async (ev) => {
+            const target = ev.target.closest('[data-action]');
+            if (!target) return;
+
+            const action = target.dataset.action;
+            const commentId = target.dataset.commentId;
+
+            if (action === 'edit-comment' && commentId) {
                 ev.preventDefault();
-                const commentId = target.dataset.commentId;
-                if (commentId) editComment(commentId);
+                editComment(commentId);
+            } else if (action === 'reply-comment' && commentId) {
+                ev.preventDefault();
+                replyToComment(commentId);
+            } else if (action === 'delete-comment' && commentId) {
+                ev.preventDefault();
+                await deleteComment(commentId);
             }
         });
 
         const closeScenarioCommentsModal = () => {
             const modal = document.querySelector('[data-role="scenario-comments-modal"]');
             if (modal) {
-                // Cleanup TinyMCE instance
-                if (typeof tinymce !== 'undefined') {
-                    tinymce.remove('#comment-content');
-                }
                 modal.hidden = true;
                 body.classList.remove('automation-modal-open');
             }
+            // Cleanup TinyMCE instances
+            if (typeof tinymce !== 'undefined') {
+                tinymce.remove('#comment-content');
+                tinymce.remove('#inline-comment-content');
+            }
         };
+
+        // Handle add comment button click (+ icon in header)
+        document.addEventListener('click', (ev) => {
+            const target = ev.target.closest('#add-comment-btn');
+            if (target) {
+                ev.preventDefault();
+                const addForm = document.getElementById('add-comment-form');
+                const inlineEditor = document.getElementById('inline-comment-editor');
+
+                // Hide inline editor if visible
+                if (inlineEditor) inlineEditor.style.display = 'none';
+
+                // Show add form
+                if (addForm) {
+                    addForm.style.display = 'block';
+
+                    // Initialize TinyMCE for add form
+                    if (typeof tinymce !== 'undefined') {
+                        tinymce.remove('#comment-content');
+                        tinymce.init({
+                            selector: '#comment-content',
+                            height: 200,
+                            menubar: false,
+                            plugins: [
+                                'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
+                                'searchreplace', 'visualblocks', 'code', 'fullscreen',
+                                'insertdatetime', 'table', 'help', 'wordcount'
+                            ],
+                            toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
+                                'alignleft aligncenter alignright alignjustify | ' +
+                                'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
+                            content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }',
+                            init_instance_callback: function (editor) {
+                                editor.focus();
+                            }
+                        });
+                    }
+                }
+            }
+        });
+
+        // Handle cancel add comment
+        document.addEventListener('click', (ev) => {
+            const target = ev.target.closest('#cancel-add-comment');
+            if (target) {
+                ev.preventDefault();
+                const addForm = document.getElementById('add-comment-form');
+                if (addForm) {
+                    addForm.style.display = 'none';
+                    if (typeof tinymce !== 'undefined') {
+                        tinymce.remove('#comment-content');
+                    }
+                }
+            }
+        });
+
+        // Handle cancel inline editor
+        document.addEventListener('click', (ev) => {
+            const target = ev.target.closest('#cancel-inline-comment');
+            if (target) {
+                ev.preventDefault();
+                const inlineEditor = document.getElementById('inline-comment-editor');
+                if (inlineEditor) {
+                    inlineEditor.style.display = 'none';
+                    // Move back to original position to prevent being orphaned
+                    const commentsList = document.getElementById('comments-list');
+                    if (commentsList && commentsList.parentNode) {
+                        commentsList.parentNode.insertBefore(inlineEditor, commentsList.nextSibling);
+                    }
+                    if (typeof tinymce !== 'undefined') {
+                        tinymce.remove('#inline-comment-content');
+                    }
+                }
+            }
+        });
 
         // Handle close comments modal
         document.addEventListener('click', (ev) => {
@@ -5606,17 +5089,15 @@
             }
         });
 
-        // Handle add comment form submission
+        // Handle add comment form submission (top form - only for adding new comments)
         const addCommentForm = document.getElementById('add-comment-form');
         if (addCommentForm) {
             addCommentForm.addEventListener('submit', async (ev) => {
                 ev.preventDefault();
 
                 const scenarioIdInput = document.getElementById('comment-scenario-id');
-                const editingCommentId = scenarioIdInput ? scenarioIdInput.getAttribute('data-editing-comment-id') : null;
-
                 const scenarioId = scenarioIdInput ? scenarioIdInput.value : null;
-                // Get content from TinyMCE if available, otherwise from textarea
+
                 let content = '';
                 if (typeof tinymce !== 'undefined' && tinymce.get('comment-content')) {
                     content = tinymce.get('comment-content').getContent();
@@ -5630,25 +5111,84 @@
                     return;
                 }
 
+                if (!scenarioId) {
+                    setStatus('Invalid scenario.', 'error');
+                    return;
+                }
+
                 try {
-                    let url, method;
-                    if (editingCommentId) {
-                        // Update existing comment
-                        url = `/api/core/scenario-comments/${editingCommentId}/`;
-                        method = 'PATCH';
+                    const resp = await fetch('/api/core/scenario-comments/', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': getCsrfToken()
+                        },
+                        body: JSON.stringify({ scenario: scenarioId, content: content })
+                    });
+
+                    if (resp && resp.ok) {
+                        setStatus('Comment posted successfully.', 'success');
+                        if (typeof tinymce !== 'undefined' && tinymce.get('comment-content')) {
+                            tinymce.get('comment-content').setContent('');
+                        }
+                        addCommentForm.style.display = 'none';
+                        if (typeof tinymce !== 'undefined') {
+                            tinymce.remove('#comment-content');
+                        }
+                        await loadComments(scenarioId);
                     } else {
-                        // Create new comment
-                        if (!scenarioId) {
-                            setStatus('Please enter a comment.', 'error');
+                        const errorData = await resp.json().catch(() => ({}));
+                        setStatus(errorData.detail || 'Failed to save comment.', 'error');
+                    }
+                } catch (err) {
+                    console.error('Error saving comment:', err);
+                    setStatus('Error saving comment.', 'error');
+                }
+            });
+        }
+
+        // Handle inline comment form submission (for edit/reply)
+        const inlineCommentForm = document.getElementById('inline-comment-form');
+        if (inlineCommentForm) {
+            inlineCommentForm.addEventListener('submit', async (ev) => {
+                ev.preventDefault();
+
+                const mode = inlineCommentForm.getAttribute('data-mode');
+                const commentId = inlineCommentForm.getAttribute('data-comment-id');
+                const parentId = inlineCommentForm.getAttribute('data-parent-id');
+                const scenarioIdInput = document.getElementById('comment-scenario-id');
+                const scenarioId = scenarioIdInput ? scenarioIdInput.value : null;
+
+                let content = '';
+                if (typeof tinymce !== 'undefined' && tinymce.get('inline-comment-content')) {
+                    content = tinymce.get('inline-comment-content').getContent();
+                } else {
+                    const contentInput = document.getElementById('inline-comment-content');
+                    content = contentInput ? contentInput.value.trim() : '';
+                }
+
+                if (!content) {
+                    setStatus('Please enter a comment.', 'error');
+                    return;
+                }
+
+                try {
+                    let url, method, body;
+
+                    if (mode === 'edit') {
+                        url = `/api/core/scenario-comments/${commentId}/`;
+                        method = 'PATCH';
+                        body = JSON.stringify({ content: content });
+                    } else if (mode === 'reply') {
+                        if (!scenarioId || !parentId) {
+                            setStatus('Invalid reply target.', 'error');
                             return;
                         }
                         url = '/api/core/scenario-comments/';
                         method = 'POST';
+                        body = JSON.stringify({ scenario: scenarioId, content: content, parent: parentId });
                     }
-
-                    const body = editingCommentId
-                        ? JSON.stringify({ content: content })
-                        : JSON.stringify({ scenario: scenarioId, content: content });
 
                     const resp = await fetch(url, {
                         method: method,
@@ -5661,18 +5201,22 @@
                     });
 
                     if (resp && resp.ok) {
-                        setStatus(editingCommentId ? 'Comment updated successfully.' : 'Comment posted successfully.', 'success');
-                        // Clear TinyMCE content
-                        if (typeof tinymce !== 'undefined' && tinymce.get('comment-content')) {
-                            tinymce.get('comment-content').setContent('');
-                        } else {
-                            const contentInput = document.getElementById('comment-content');
-                            if (contentInput) contentInput.value = '';
+                        const statusMsg = mode === 'edit' ? 'Comment updated successfully.' : 'Reply posted successfully.';
+                        setStatus(statusMsg, 'success');
+
+                        // Hide and cleanup inline editor, then move it back to original position
+                        const inlineEditor = document.getElementById('inline-comment-editor');
+                        if (inlineEditor) {
+                            inlineEditor.style.display = 'none';
+                            // Move back to original position (after comments-list) to prevent being destroyed
+                            const commentsList = document.getElementById('comments-list');
+                            if (commentsList && commentsList.parentNode) {
+                                commentsList.parentNode.insertBefore(inlineEditor, commentsList.nextSibling);
+                            }
                         }
-                        // Reset form state
-                        if (scenarioIdInput) scenarioIdInput.removeAttribute('data-editing-comment-id');
-                        const submitBtn = addCommentForm.querySelector('button[type="submit"]');
-                        if (submitBtn) submitBtn.textContent = 'Post Comment';
+                        if (typeof tinymce !== 'undefined') {
+                            tinymce.remove('#inline-comment-content');
+                        }
 
                         await loadComments(scenarioId);
                     } else {
@@ -5688,5 +5232,7 @@
 
         // Make openScenarioCommentsModal available globally
         window.openScenarioCommentsModal = openScenarioCommentsModal;
+
     });
+
 })();

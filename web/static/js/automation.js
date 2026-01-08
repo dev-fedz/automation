@@ -4774,30 +4774,15 @@
             if (commentScenarioIdInput) commentScenarioIdInput.value = scenarioId;
             if (commentContentInput) commentContentInput.value = '';
 
+            // Hide add form initially
+            const addForm = document.getElementById('add-comment-form');
+            if (addForm) addForm.style.display = 'none';
+
             // Load existing comments
             await loadComments(scenarioId);
 
             modal.hidden = false;
             body.classList.add('automation-modal-open');
-
-            // Initialize TinyMCE on the comment textarea
-            if (typeof tinymce !== 'undefined') {
-                tinymce.remove('#comment-content');
-                tinymce.init({
-                    selector: '#comment-content',
-                    height: 250,
-                    menubar: false,
-                    plugins: [
-                        'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
-                        'searchreplace', 'visualblocks', 'code', 'fullscreen',
-                        'insertdatetime', 'table', 'help', 'wordcount'
-                    ],
-                    toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
-                        'alignleft aligncenter alignright alignjustify | ' +
-                        'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
-                    content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }'
-                });
-            }
         };
 
         const loadComments = async (scenarioId) => {
@@ -4814,35 +4799,56 @@
                 if (resp && resp.ok) {
                     const comments = await resp.json();
 
-                    if (comments.length === 0) {
-                        commentsList.innerHTML = '<div class="comment-empty">No comments yet. Be the first to comment!</div>';
-                    } else {
-                        commentsList.innerHTML = comments.map(comment => `
-                            <div class="comment-item" data-comment-id="${comment.id}">
+                    // Get current user ID from data attribute
+                    const appElement = document.getElementById('automation-app');
+                    const currentUserId = appElement && appElement.dataset.currentUserId !== 'null'
+                        ? parseInt(appElement.dataset.currentUserId, 10)
+                        : null;
+
+                    const renderComment = (comment, isReply = false) => {
+                        const canEdit = currentUserId && comment.user === currentUserId;
+                        const editBtn = canEdit ? `
+                            <button type="button" class="comment-action-btn" data-action="edit-comment" data-comment-id="${comment.id}" title="Edit">
+                                <span>✏️</span>
+                            </button>` : '';
+                        const deleteBtn = canEdit ? `
+                            <button type="button" class="comment-action-btn" data-action="delete-comment" data-comment-id="${comment.id}" title="Delete">
+                                <span>🗑️</span>
+                            </button>` : '';
+
+                        const repliesHtml = (!isReply && comment.replies && comment.replies.length > 0)
+                            ? `<div class="comment-replies">${comment.replies.map(reply => renderComment(reply, true)).join('')}</div>`
+                            : '';
+
+                        return `
+                            <div class="comment-item ${isReply ? 'comment-reply' : ''}" data-comment-id="${comment.id}" data-comment-user="${comment.user}">
                                 <div class="comment-header">
                                     <span class="comment-author">${escapeHtml(comment.user_name || 'Unknown')}${comment.is_edited ? ' (edited)' : ''}</span>
                                     <span class="comment-date">${formatDateTime(comment.created_at)}</span>
                                 </div>
                                 <div class="comment-content" data-comment-content>${comment.content || ''}</div>
                                 <div class="comment-actions">
-                                    <button type="button" class="comment-action-btn" data-action="reply-comment" data-comment-id="${comment.id}" title="Reply">
+                                    ${!isReply ? `<button type="button" class="comment-action-btn" data-action="reply-comment" data-comment-id="${comment.id}" title="Reply">
                                         <span>↩️</span>
-                                    </button>
+                                    </button>` : ''}
                                     <button type="button" class="comment-action-btn" data-action="thumbs-up-comment" data-comment-id="${comment.id}" title="Thumbs Up">
                                         <span>👍</span>
                                     </button>
                                     <button type="button" class="comment-action-btn" data-action="add-reaction-comment" data-comment-id="${comment.id}" title="Add Reaction">
                                         <span>😊</span>
                                     </button>
-                                    <button type="button" class="comment-action-btn" data-action="edit-comment" data-comment-id="${comment.id}" title="Edit">
-                                        <span>✏️</span>
-                                    </button>
-                                    <button type="button" class="comment-action-btn" data-action="delete-comment" data-comment-id="${comment.id}" title="Delete">
-                                        <span>🗑️</span>
-                                    </button>
+                                    ${editBtn}
+                                    ${deleteBtn}
                                 </div>
+                                ${repliesHtml}
                             </div>
-                        `).join('');
+                        `;
+                    };
+
+                    if (comments.length === 0) {
+                        commentsList.innerHTML = '<div class="comment-empty">No comments yet. Be the first to comment!</div>';
+                    } else {
+                        commentsList.innerHTML = comments.map(comment => renderComment(comment, false)).join('');
                     }
                 } else {
                     commentsList.innerHTML = '<div class="comment-empty">Failed to load comments.</div>';
@@ -4853,8 +4859,74 @@
             }
         };
 
+        const initInlineEditor = (mode, commentId, content = '', parentCommentId = null) => {
+            const inlineEditor = document.getElementById('inline-comment-editor');
+            const inlineForm = document.getElementById('inline-comment-form');
+            const inlineLabel = document.getElementById('inline-editor-label');
+            const inlineSubmitBtn = document.getElementById('inline-submit-btn');
+            const inlineScenarioInput = document.getElementById('inline-comment-scenario-id');
+            const inlineContentInput = document.getElementById('inline-comment-content');
+
+            if (!inlineEditor || !inlineForm) return;
+
+            // Hide any existing editor and clean up TinyMCE first
+            inlineEditor.style.display = 'none';
+            if (typeof tinymce !== 'undefined') {
+                tinymce.remove('#inline-comment-content');
+            }
+
+            // Set form mode
+            inlineForm.setAttribute('data-mode', mode);
+            inlineForm.setAttribute('data-comment-id', commentId || '');
+            inlineForm.setAttribute('data-parent-id', parentCommentId || '');
+
+            // Update labels and buttons
+            if (mode === 'edit') {
+                inlineLabel.textContent = 'Edit Comment';
+                inlineSubmitBtn.textContent = 'Update Comment';
+            } else if (mode === 'reply') {
+                inlineLabel.textContent = 'Reply to Comment';
+                inlineSubmitBtn.textContent = 'Post Reply';
+            }
+
+            // Position inline editor below the comment BEFORE initializing TinyMCE
+            const commentItem = document.querySelector(`[data-comment-id="${commentId || parentCommentId}"]`);
+            if (commentItem) {
+                const actionsDiv = commentItem.querySelector('.comment-actions');
+                if (actionsDiv) {
+                    actionsDiv.after(inlineEditor);
+                }
+            }
+
+            // Show the editor
+            inlineEditor.style.display = 'block';
+
+            // Initialize TinyMCE after positioning and showing
+            if (typeof tinymce !== 'undefined') {
+                tinymce.init({
+                    selector: '#inline-comment-content',
+                    height: 200,
+                    menubar: false,
+                    plugins: [
+                        'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
+                        'searchreplace', 'visualblocks', 'code', 'fullscreen',
+                        'insertdatetime', 'table', 'help', 'wordcount'
+                    ],
+                    toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
+                        'alignleft aligncenter alignright alignjustify | ' +
+                        'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
+                    content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }',
+                    init_instance_callback: function (editor) {
+                        editor.setContent(content);
+                        editor.focus();
+                    }
+                });
+            } else if (inlineContentInput) {
+                inlineContentInput.value = content;
+            }
+        };
+
         const editComment = async (commentId) => {
-            // Find the comment element
             const commentItem = document.querySelector(`[data-comment-id="${commentId}"]`);
             if (!commentItem) return;
 
@@ -4862,53 +4934,151 @@
             if (!contentDiv) return;
 
             const currentContent = contentDiv.innerHTML;
+            initInlineEditor('edit', commentId, currentContent);
+        };
 
-            // Get the form textarea and populate with current content
-            const commentContentInput = document.getElementById('comment-content');
-            const commentScenarioIdInput = document.getElementById('comment-scenario-id');
+        const replyToComment = (parentCommentId) => {
+            initInlineEditor('reply', null, '', parentCommentId);
+        };
 
-            if (commentContentInput) {
-                // Set content in TinyMCE if available
-                if (typeof tinymce !== 'undefined' && tinymce.get('comment-content')) {
-                    tinymce.get('comment-content').setContent(currentContent);
+        const deleteComment = async (commentId) => {
+            if (!confirm('Are you sure you want to delete this comment?')) {
+                return;
+            }
+
+            try {
+                const resp = await fetch(`/api/core/scenario-comments/${commentId}/`, {
+                    method: 'DELETE',
+                    credentials: 'same-origin',
+                    headers: {
+                        'X-CSRFToken': getCsrfToken()
+                    }
+                });
+
+                if (resp && resp.ok) {
+                    setStatus('Comment deleted successfully.', 'success');
+                    const scenarioIdInput = document.getElementById('comment-scenario-id');
+                    const scenarioId = scenarioIdInput ? scenarioIdInput.value : null;
+                    if (scenarioId) {
+                        await loadComments(scenarioId);
+                    }
                 } else {
-                    commentContentInput.value = currentContent;
+                    const errorData = await resp.json().catch(() => ({}));
+                    setStatus(errorData.detail || 'Failed to delete comment.', 'error');
                 }
-            }
-
-            // Store the comment ID we're editing
-            if (commentScenarioIdInput) {
-                commentScenarioIdInput.setAttribute('data-editing-comment-id', commentId);
-            }
-
-            // Change button text
-            const submitBtn = document.querySelector('#add-comment-form button[type="submit"]');
-            if (submitBtn) {
-                submitBtn.textContent = 'Update Comment';
+            } catch (err) {
+                console.error('Error deleting comment:', err);
+                setStatus('Error deleting comment.', 'error');
             }
         };
 
-        // Handle edit comment button clicks
-        document.addEventListener('click', (ev) => {
-            const target = ev.target;
-            if (target && target.dataset && target.dataset.action === 'edit-comment') {
+        // Handle comment action button clicks (using event delegation)
+        document.addEventListener('click', async (ev) => {
+            const target = ev.target.closest('[data-action]');
+            if (!target) return;
+
+            const action = target.dataset.action;
+            const commentId = target.dataset.commentId;
+
+            if (action === 'edit-comment' && commentId) {
                 ev.preventDefault();
-                const commentId = target.dataset.commentId;
-                if (commentId) editComment(commentId);
+                editComment(commentId);
+            } else if (action === 'reply-comment' && commentId) {
+                ev.preventDefault();
+                replyToComment(commentId);
+            } else if (action === 'delete-comment' && commentId) {
+                ev.preventDefault();
+                await deleteComment(commentId);
             }
         });
 
         const closeScenarioCommentsModal = () => {
             const modal = document.querySelector('[data-role="scenario-comments-modal"]');
             if (modal) {
-                // Cleanup TinyMCE instance
-                if (typeof tinymce !== 'undefined') {
-                    tinymce.remove('#comment-content');
-                }
                 modal.hidden = true;
                 body.classList.remove('automation-modal-open');
             }
+            // Cleanup TinyMCE instances
+            if (typeof tinymce !== 'undefined') {
+                tinymce.remove('#comment-content');
+                tinymce.remove('#inline-comment-content');
+            }
         };
+
+        // Handle add comment button click (+ icon in header)
+        document.addEventListener('click', (ev) => {
+            const target = ev.target.closest('#add-comment-btn');
+            if (target) {
+                ev.preventDefault();
+                const addForm = document.getElementById('add-comment-form');
+                const inlineEditor = document.getElementById('inline-comment-editor');
+
+                // Hide inline editor if visible
+                if (inlineEditor) inlineEditor.style.display = 'none';
+
+                // Show add form
+                if (addForm) {
+                    addForm.style.display = 'block';
+
+                    // Initialize TinyMCE for add form
+                    if (typeof tinymce !== 'undefined') {
+                        tinymce.remove('#comment-content');
+                        tinymce.init({
+                            selector: '#comment-content',
+                            height: 200,
+                            menubar: false,
+                            plugins: [
+                                'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
+                                'searchreplace', 'visualblocks', 'code', 'fullscreen',
+                                'insertdatetime', 'table', 'help', 'wordcount'
+                            ],
+                            toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
+                                'alignleft aligncenter alignright alignjustify | ' +
+                                'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
+                            content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }',
+                            init_instance_callback: function (editor) {
+                                editor.focus();
+                            }
+                        });
+                    }
+                }
+            }
+        });
+
+        // Handle cancel add comment
+        document.addEventListener('click', (ev) => {
+            const target = ev.target.closest('#cancel-add-comment');
+            if (target) {
+                ev.preventDefault();
+                const addForm = document.getElementById('add-comment-form');
+                if (addForm) {
+                    addForm.style.display = 'none';
+                    if (typeof tinymce !== 'undefined') {
+                        tinymce.remove('#comment-content');
+                    }
+                }
+            }
+        });
+
+        // Handle cancel inline editor
+        document.addEventListener('click', (ev) => {
+            const target = ev.target.closest('#cancel-inline-comment');
+            if (target) {
+                ev.preventDefault();
+                const inlineEditor = document.getElementById('inline-comment-editor');
+                if (inlineEditor) {
+                    inlineEditor.style.display = 'none';
+                    // Move back to original position to prevent being orphaned
+                    const commentsList = document.getElementById('comments-list');
+                    if (commentsList && commentsList.parentNode) {
+                        commentsList.parentNode.insertBefore(inlineEditor, commentsList.nextSibling);
+                    }
+                    if (typeof tinymce !== 'undefined') {
+                        tinymce.remove('#inline-comment-content');
+                    }
+                }
+            }
+        });
 
         // Handle close comments modal
         document.addEventListener('click', (ev) => {
@@ -4919,17 +5089,15 @@
             }
         });
 
-        // Handle add comment form submission
+        // Handle add comment form submission (top form - only for adding new comments)
         const addCommentForm = document.getElementById('add-comment-form');
         if (addCommentForm) {
             addCommentForm.addEventListener('submit', async (ev) => {
                 ev.preventDefault();
 
                 const scenarioIdInput = document.getElementById('comment-scenario-id');
-                const editingCommentId = scenarioIdInput ? scenarioIdInput.getAttribute('data-editing-comment-id') : null;
-
                 const scenarioId = scenarioIdInput ? scenarioIdInput.value : null;
-                // Get content from TinyMCE if available, otherwise from textarea
+
                 let content = '';
                 if (typeof tinymce !== 'undefined' && tinymce.get('comment-content')) {
                     content = tinymce.get('comment-content').getContent();
@@ -4943,25 +5111,84 @@
                     return;
                 }
 
+                if (!scenarioId) {
+                    setStatus('Invalid scenario.', 'error');
+                    return;
+                }
+
                 try {
-                    let url, method;
-                    if (editingCommentId) {
-                        // Update existing comment
-                        url = `/api/core/scenario-comments/${editingCommentId}/`;
-                        method = 'PATCH';
+                    const resp = await fetch('/api/core/scenario-comments/', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': getCsrfToken()
+                        },
+                        body: JSON.stringify({ scenario: scenarioId, content: content })
+                    });
+
+                    if (resp && resp.ok) {
+                        setStatus('Comment posted successfully.', 'success');
+                        if (typeof tinymce !== 'undefined' && tinymce.get('comment-content')) {
+                            tinymce.get('comment-content').setContent('');
+                        }
+                        addCommentForm.style.display = 'none';
+                        if (typeof tinymce !== 'undefined') {
+                            tinymce.remove('#comment-content');
+                        }
+                        await loadComments(scenarioId);
                     } else {
-                        // Create new comment
-                        if (!scenarioId) {
-                            setStatus('Please enter a comment.', 'error');
+                        const errorData = await resp.json().catch(() => ({}));
+                        setStatus(errorData.detail || 'Failed to save comment.', 'error');
+                    }
+                } catch (err) {
+                    console.error('Error saving comment:', err);
+                    setStatus('Error saving comment.', 'error');
+                }
+            });
+        }
+
+        // Handle inline comment form submission (for edit/reply)
+        const inlineCommentForm = document.getElementById('inline-comment-form');
+        if (inlineCommentForm) {
+            inlineCommentForm.addEventListener('submit', async (ev) => {
+                ev.preventDefault();
+
+                const mode = inlineCommentForm.getAttribute('data-mode');
+                const commentId = inlineCommentForm.getAttribute('data-comment-id');
+                const parentId = inlineCommentForm.getAttribute('data-parent-id');
+                const scenarioIdInput = document.getElementById('comment-scenario-id');
+                const scenarioId = scenarioIdInput ? scenarioIdInput.value : null;
+
+                let content = '';
+                if (typeof tinymce !== 'undefined' && tinymce.get('inline-comment-content')) {
+                    content = tinymce.get('inline-comment-content').getContent();
+                } else {
+                    const contentInput = document.getElementById('inline-comment-content');
+                    content = contentInput ? contentInput.value.trim() : '';
+                }
+
+                if (!content) {
+                    setStatus('Please enter a comment.', 'error');
+                    return;
+                }
+
+                try {
+                    let url, method, body;
+
+                    if (mode === 'edit') {
+                        url = `/api/core/scenario-comments/${commentId}/`;
+                        method = 'PATCH';
+                        body = JSON.stringify({ content: content });
+                    } else if (mode === 'reply') {
+                        if (!scenarioId || !parentId) {
+                            setStatus('Invalid reply target.', 'error');
                             return;
                         }
                         url = '/api/core/scenario-comments/';
                         method = 'POST';
+                        body = JSON.stringify({ scenario: scenarioId, content: content, parent: parentId });
                     }
-
-                    const body = editingCommentId
-                        ? JSON.stringify({ content: content })
-                        : JSON.stringify({ scenario: scenarioId, content: content });
 
                     const resp = await fetch(url, {
                         method: method,
@@ -4974,18 +5201,22 @@
                     });
 
                     if (resp && resp.ok) {
-                        setStatus(editingCommentId ? 'Comment updated successfully.' : 'Comment posted successfully.', 'success');
-                        // Clear TinyMCE content
-                        if (typeof tinymce !== 'undefined' && tinymce.get('comment-content')) {
-                            tinymce.get('comment-content').setContent('');
-                        } else {
-                            const contentInput = document.getElementById('comment-content');
-                            if (contentInput) contentInput.value = '';
+                        const statusMsg = mode === 'edit' ? 'Comment updated successfully.' : 'Reply posted successfully.';
+                        setStatus(statusMsg, 'success');
+
+                        // Hide and cleanup inline editor, then move it back to original position
+                        const inlineEditor = document.getElementById('inline-comment-editor');
+                        if (inlineEditor) {
+                            inlineEditor.style.display = 'none';
+                            // Move back to original position (after comments-list) to prevent being destroyed
+                            const commentsList = document.getElementById('comments-list');
+                            if (commentsList && commentsList.parentNode) {
+                                commentsList.parentNode.insertBefore(inlineEditor, commentsList.nextSibling);
+                            }
                         }
-                        // Reset form state
-                        if (scenarioIdInput) scenarioIdInput.removeAttribute('data-editing-comment-id');
-                        const submitBtn = addCommentForm.querySelector('button[type="submit"]');
-                        if (submitBtn) submitBtn.textContent = 'Post Comment';
+                        if (typeof tinymce !== 'undefined') {
+                            tinymce.remove('#inline-comment-content');
+                        }
 
                         await loadComments(scenarioId);
                     } else {
@@ -5003,4 +5234,5 @@
         window.openScenarioCommentsModal = openScenarioCommentsModal;
 
     });
+
 })();

@@ -358,6 +358,14 @@ class ScenarioComment(TimeStampedModel):
         related_name="scenario_comments",
     )
     content = models.TextField()
+    parent = models.ForeignKey(
+        'self',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='replies',
+        help_text="Parent comment if this is a reply"
+    )
 
     class Meta:
         ordering = ["-created_at"]
