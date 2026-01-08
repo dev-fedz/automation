@@ -346,6 +346,24 @@ class TestScenario(TimeStampedModel):
 
     def __str__(self) -> str:  # pragma: no cover
         return self.title
+
+
+class ScenarioComment(TimeStampedModel):
+    """Comments on test scenarios for collaboration and discussion."""
+
+    scenario = models.ForeignKey(TestScenario, on_delete=models.CASCADE, related_name="comments")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="scenario_comments",
+    )
+    content = models.TextField()
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"Comment by {self.user} on {self.scenario}"
     
 
 class TestCase(TimeStampedModel):

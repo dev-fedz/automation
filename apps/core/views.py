@@ -444,6 +444,27 @@ class TestScenarioViewSet(viewsets.ModelViewSet):
         return queryset
 
 
+class ScenarioCommentViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.ScenarioCommentSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = models.ScenarioComment.objects.select_related("user", "scenario").all()
+        scenario_id = self.request.query_params.get("scenario")
+        if scenario_id:
+            queryset = queryset.filter(scenario_id=scenario_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+    def perform_update(self, serializer):
+        # Only allow users to edit their own comments
+        if serializer.instance.user != self.request.user:
+            raise ValidationError("You can only edit your own comments.")
+        serializer.save()
+
+
 class TestCaseViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.TestCaseSerializer
     permission_classes = [IsAuthenticated]

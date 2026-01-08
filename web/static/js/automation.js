@@ -2980,7 +2980,7 @@
             // render into table body if present
             const tbody = els.scenarioTableBody;
             if (!plan) {
-                const emptyTableHtml = '<tr><td colspan="6" class="empty">Select a project to view scenarios.</td></tr>';
+                const emptyTableHtml = '<tr><td colspan="7" class="empty">Select a project to view scenarios.</td></tr>';
                 const emptyListHtml = '<p class="empty">Select a project to view scenarios.</p>';
                 if (tbody) tbody.innerHTML = emptyTableHtml;
                 if (els.scenarioList) els.scenarioList.innerHTML = emptyListHtml;
@@ -3016,12 +3016,12 @@
                 return true;
             });
             if (!filtered.length) {
-                if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="empty">No scenarios match the current filters for this project.</td></tr>';
+                if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="empty">No scenarios match the current filters for this project.</td></tr>';
                 else els.scenarioList.innerHTML = '<p class="empty">No scenarios match the current filters for this project.</p>';
                 return;
             }
             if (!scenarios.length) {
-                if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="empty">No scenarios created yet for this project.</td></tr>';
+                if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="empty">No scenarios created yet for this project.</td></tr>';
                 else els.scenarioList.innerHTML = '<p class="empty">No scenarios created yet for this project.</p>';
                 return;
             }
@@ -3029,6 +3029,10 @@
                 const rows = filtered.map((scenario) => {
                     const module = initialModules.find((m) => Number(m.id) === Number(scenario.module));
                     const moduleLabel = module ? (module.title || module.name || `Module ${module.id}`) : '';
+                    const isAutomated = (typeof scenario.is_automated !== 'undefined') ? scenario.is_automated : true;
+                    const automatedBadge = isAutomated
+                        ? '<span style="display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;background:#28a745;color:white;border-radius:4px;font-weight:bold;">✓</span>'
+                        : '<span style="display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;background:#dc3545;color:white;border-radius:4px;font-weight:bold;">✗</span>';
                     return `
                         <tr data-scenario-id="${scenario.id}">
                             <td>${escapeHtml(scenario.title || '')}</td>
@@ -3036,10 +3040,12 @@
                             <td>${escapeHtml(moduleLabel)}</td>
                             <td>${escapeHtml(formatDateTime(scenario.created_at || null))}</td>
                             <td>${escapeHtml(formatDateTime(scenario.updated_at || null))}</td>
+                            <td style="text-align:center;">${automatedBadge}</td>
                             <td>
                                 <div class="table-action-group">
                                     <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>
                                     <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>
+                                    <button type="button" class="action-button" data-action="comment-scenario" data-scenario-id="${scenario.id}">Comment</button>
                                     <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>
                                 </div>
                             </td>
@@ -3550,11 +3556,14 @@
                 if (!tableEl || !tableEl.contains(trigger)) return; // ignore clicks outside our table
                 const action = trigger.dataset && trigger.dataset.action ? trigger.dataset.action : null;
                 if (!action) return;
-                if (!['view-scenario', 'edit-scenario', 'add-case', 'delete-scenario'].includes(action)) return;
+                if (!['view-scenario', 'edit-scenario', 'add-case', 'delete-scenario', 'comment-scenario'].includes(action)) return;
                 const sid = trigger.dataset && trigger.dataset.scenarioId ? trigger.dataset.scenarioId : null;
                 if (!sid) return;
                 ev.preventDefault();
-                if (action === 'view-scenario' || action === 'edit-scenario') {
+                if (action === 'comment-scenario') {
+                    // Open comments modal
+                    openScenarioCommentsModal(sid);
+                } else if (action === 'view-scenario' || action === 'edit-scenario') {
                     // reuse existing openPlanModal / view handlers - for simplicity
                     // fetch scenario detail and open a simple modal via existing plan modal if present
                     try {
@@ -4752,5 +4761,246 @@
 
         // fire the direct scenarios loader unconditionally
         loadScenariosDirect();
+
+        // Scenario Comments functionality
+        const openScenarioCommentsModal = async (scenarioId) => {
+            const modal = document.querySelector('[data-role="scenario-comments-modal"]');
+            if (!modal) return;
+
+            const commentsList = document.getElementById('comments-list');
+            const commentScenarioIdInput = document.getElementById('comment-scenario-id');
+            const commentContentInput = document.getElementById('comment-content');
+
+            if (commentScenarioIdInput) commentScenarioIdInput.value = scenarioId;
+            if (commentContentInput) commentContentInput.value = '';
+
+            // Load existing comments
+            await loadComments(scenarioId);
+
+            modal.hidden = false;
+            body.classList.add('automation-modal-open');
+
+            // Initialize TinyMCE on the comment textarea
+            if (typeof tinymce !== 'undefined') {
+                tinymce.remove('#comment-content');
+                tinymce.init({
+                    selector: '#comment-content',
+                    height: 250,
+                    menubar: false,
+                    plugins: [
+                        'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
+                        'searchreplace', 'visualblocks', 'code', 'fullscreen',
+                        'insertdatetime', 'table', 'help', 'wordcount'
+                    ],
+                    toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
+                        'alignleft aligncenter alignright alignjustify | ' +
+                        'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
+                    content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }'
+                });
+            }
+        };
+
+        const loadComments = async (scenarioId) => {
+            const commentsList = document.getElementById('comments-list');
+            if (!commentsList) return;
+
+            try {
+                const url = `/api/core/scenario-comments/?scenario=${scenarioId}`;
+                const resp = await fetch(url, {
+                    credentials: 'same-origin',
+                    headers: { 'Accept': 'application/json' }
+                });
+
+                if (resp && resp.ok) {
+                    const comments = await resp.json();
+
+                    if (comments.length === 0) {
+                        commentsList.innerHTML = '<div class="comment-empty">No comments yet. Be the first to comment!</div>';
+                    } else {
+                        commentsList.innerHTML = comments.map(comment => `
+                            <div class="comment-item" data-comment-id="${comment.id}">
+                                <div class="comment-header">
+                                    <span class="comment-author">${escapeHtml(comment.user_name || 'Unknown')}${comment.is_edited ? ' (edited)' : ''}</span>
+                                    <span class="comment-date">${formatDateTime(comment.created_at)}</span>
+                                </div>
+                                <div class="comment-content" data-comment-content>${comment.content || ''}</div>
+                                <div class="comment-actions">
+                                    <button type="button" class="comment-action-btn" data-action="reply-comment" data-comment-id="${comment.id}" title="Reply">
+                                        <span>↩️</span>
+                                    </button>
+                                    <button type="button" class="comment-action-btn" data-action="thumbs-up-comment" data-comment-id="${comment.id}" title="Thumbs Up">
+                                        <span>👍</span>
+                                    </button>
+                                    <button type="button" class="comment-action-btn" data-action="add-reaction-comment" data-comment-id="${comment.id}" title="Add Reaction">
+                                        <span>😊</span>
+                                    </button>
+                                    <button type="button" class="comment-action-btn" data-action="edit-comment" data-comment-id="${comment.id}" title="Edit">
+                                        <span>✏️</span>
+                                    </button>
+                                    <button type="button" class="comment-action-btn" data-action="delete-comment" data-comment-id="${comment.id}" title="Delete">
+                                        <span>🗑️</span>
+                                    </button>
+                                </div>
+                            </div>
+                        `).join('');
+                    }
+                } else {
+                    commentsList.innerHTML = '<div class="comment-empty">Failed to load comments.</div>';
+                }
+            } catch (err) {
+                console.error('Error loading comments:', err);
+                commentsList.innerHTML = '<div class="comment-empty">Error loading comments.</div>';
+            }
+        };
+
+        const editComment = async (commentId) => {
+            // Find the comment element
+            const commentItem = document.querySelector(`[data-comment-id="${commentId}"]`);
+            if (!commentItem) return;
+
+            const contentDiv = commentItem.querySelector('[data-comment-content]');
+            if (!contentDiv) return;
+
+            const currentContent = contentDiv.innerHTML;
+
+            // Get the form textarea and populate with current content
+            const commentContentInput = document.getElementById('comment-content');
+            const commentScenarioIdInput = document.getElementById('comment-scenario-id');
+
+            if (commentContentInput) {
+                // Set content in TinyMCE if available
+                if (typeof tinymce !== 'undefined' && tinymce.get('comment-content')) {
+                    tinymce.get('comment-content').setContent(currentContent);
+                } else {
+                    commentContentInput.value = currentContent;
+                }
+            }
+
+            // Store the comment ID we're editing
+            if (commentScenarioIdInput) {
+                commentScenarioIdInput.setAttribute('data-editing-comment-id', commentId);
+            }
+
+            // Change button text
+            const submitBtn = document.querySelector('#add-comment-form button[type="submit"]');
+            if (submitBtn) {
+                submitBtn.textContent = 'Update Comment';
+            }
+        };
+
+        // Handle edit comment button clicks
+        document.addEventListener('click', (ev) => {
+            const target = ev.target;
+            if (target && target.dataset && target.dataset.action === 'edit-comment') {
+                ev.preventDefault();
+                const commentId = target.dataset.commentId;
+                if (commentId) editComment(commentId);
+            }
+        });
+
+        const closeScenarioCommentsModal = () => {
+            const modal = document.querySelector('[data-role="scenario-comments-modal"]');
+            if (modal) {
+                // Cleanup TinyMCE instance
+                if (typeof tinymce !== 'undefined') {
+                    tinymce.remove('#comment-content');
+                }
+                modal.hidden = true;
+                body.classList.remove('automation-modal-open');
+            }
+        };
+
+        // Handle close comments modal
+        document.addEventListener('click', (ev) => {
+            const target = ev.target;
+            if (target && target.dataset && target.dataset.action === 'close-scenario-comments-modal') {
+                ev.preventDefault();
+                closeScenarioCommentsModal();
+            }
+        });
+
+        // Handle add comment form submission
+        const addCommentForm = document.getElementById('add-comment-form');
+        if (addCommentForm) {
+            addCommentForm.addEventListener('submit', async (ev) => {
+                ev.preventDefault();
+
+                const scenarioIdInput = document.getElementById('comment-scenario-id');
+                const editingCommentId = scenarioIdInput ? scenarioIdInput.getAttribute('data-editing-comment-id') : null;
+
+                const scenarioId = scenarioIdInput ? scenarioIdInput.value : null;
+                // Get content from TinyMCE if available, otherwise from textarea
+                let content = '';
+                if (typeof tinymce !== 'undefined' && tinymce.get('comment-content')) {
+                    content = tinymce.get('comment-content').getContent();
+                } else {
+                    const contentInput = document.getElementById('comment-content');
+                    content = contentInput ? contentInput.value.trim() : '';
+                }
+
+                if (!content) {
+                    setStatus('Please enter a comment.', 'error');
+                    return;
+                }
+
+                try {
+                    let url, method;
+                    if (editingCommentId) {
+                        // Update existing comment
+                        url = `/api/core/scenario-comments/${editingCommentId}/`;
+                        method = 'PATCH';
+                    } else {
+                        // Create new comment
+                        if (!scenarioId) {
+                            setStatus('Please enter a comment.', 'error');
+                            return;
+                        }
+                        url = '/api/core/scenario-comments/';
+                        method = 'POST';
+                    }
+
+                    const body = editingCommentId
+                        ? JSON.stringify({ content: content })
+                        : JSON.stringify({ scenario: scenarioId, content: content });
+
+                    const resp = await fetch(url, {
+                        method: method,
+                        credentials: 'same-origin',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': getCsrfToken()
+                        },
+                        body: body
+                    });
+
+                    if (resp && resp.ok) {
+                        setStatus(editingCommentId ? 'Comment updated successfully.' : 'Comment posted successfully.', 'success');
+                        // Clear TinyMCE content
+                        if (typeof tinymce !== 'undefined' && tinymce.get('comment-content')) {
+                            tinymce.get('comment-content').setContent('');
+                        } else {
+                            const contentInput = document.getElementById('comment-content');
+                            if (contentInput) contentInput.value = '';
+                        }
+                        // Reset form state
+                        if (scenarioIdInput) scenarioIdInput.removeAttribute('data-editing-comment-id');
+                        const submitBtn = addCommentForm.querySelector('button[type="submit"]');
+                        if (submitBtn) submitBtn.textContent = 'Post Comment';
+
+                        await loadComments(scenarioId);
+                    } else {
+                        const errorData = await resp.json().catch(() => ({}));
+                        setStatus(errorData.detail || 'Failed to save comment.', 'error');
+                    }
+                } catch (err) {
+                    console.error('Error saving comment:', err);
+                    setStatus('Error saving comment.', 'error');
+                }
+            });
+        }
+
+        // Make openScenarioCommentsModal available globally
+        window.openScenarioCommentsModal = openScenarioCommentsModal;
+
     });
 })();

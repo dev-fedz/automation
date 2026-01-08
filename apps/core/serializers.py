@@ -600,6 +600,39 @@ class TestScenarioSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "cases", "created_at", "updated_at", "project_id"]
 
 
+class ScenarioCommentSerializer(serializers.ModelSerializer):
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+    user_name = serializers.SerializerMethodField()
+    is_edited = serializers.SerializerMethodField()
+
+    class Meta:
+        model = models.ScenarioComment
+        fields = [
+            "id",
+            "scenario",
+            "user",
+            "user_email",
+            "user_name",
+            "content",
+            "created_at",
+            "updated_at",
+            "is_edited",
+        ]
+        read_only_fields = ["id", "user", "created_at", "updated_at"]
+
+    def get_user_name(self, obj):
+        if obj.user:
+            return f"{obj.user.first_name} {obj.user.last_name}".strip() or obj.user.email
+        return "Unknown"
+
+    def get_is_edited(self, obj):
+        # Consider edited if updated_at is more than 1 second after created_at
+        if obj.updated_at and obj.created_at:
+            delta = (obj.updated_at - obj.created_at).total_seconds()
+            return delta > 1
+        return False
+
+
 class ProjectSerializer(serializers.ModelSerializer):
     description = serializers.CharField(allow_blank=True, required=False)
     test_modules = TestModulesSerializer(many=True, read_only=True)
