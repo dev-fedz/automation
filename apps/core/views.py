@@ -27,7 +27,7 @@ except ImportError:  # pragma: no cover - handled gracefully at runtime
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Count
 from django.http import Http404
 from django.shortcuts import render
 from django.urls import reverse
@@ -449,7 +449,12 @@ class ScenarioCommentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        queryset = models.ScenarioComment.objects.select_related("user", "scenario").prefetch_related("replies__user", "likes").all()
+        queryset = models.ScenarioComment.objects.select_related("user", "scenario").prefetch_related(
+            "replies__user",
+            "likes",
+            "reactions",
+            "replies__reactions",
+        ).all()
         scenario_id = self.request.query_params.get("scenario")
         if scenario_id:
             queryset = queryset.filter(scenario_id=scenario_id)
@@ -494,6 +499,49 @@ class ScenarioCommentViewSet(viewsets.ModelViewSet):
         return Response({
             'liked': liked,
             'likes_count': likes_count,
+        })
+
+    @action(detail=True, methods=['post'])
+    def set_reaction(self, request, pk=None):
+        """Set or remove the current user's reaction on a comment."""
+        comment = self.get_object()
+        reaction = (request.data.get('reaction') or '').strip()
+        if not reaction:
+            raise ValidationError({'reaction': 'Reaction is required.'})
+        if len(reaction) > 16:
+            raise ValidationError({'reaction': 'Reaction is too long.'})
+
+        obj, created = models.CommentReaction.objects.get_or_create(
+            comment=comment,
+            user=request.user,
+            defaults={'reaction': reaction}
+        )
+
+        if not created:
+            if obj.reaction == reaction:
+                obj.delete()
+                reacted = False
+                current_reaction = None
+            else:
+                obj.reaction = reaction
+                obj.save(update_fields=['reaction', 'updated_at'])
+                reacted = True
+                current_reaction = reaction
+        else:
+            reacted = True
+            current_reaction = reaction
+
+        reactions_summary = list(
+            models.CommentReaction.objects.filter(comment_id=comment.id)
+            .values('reaction')
+            .annotate(count=Count('id'))
+            .order_by('-count', 'reaction')
+        )
+
+        return Response({
+            'reacted': reacted,
+            'reaction': current_reaction,
+            'reactions_summary': reactions_summary,
         })
 
 

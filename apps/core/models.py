@@ -390,6 +390,25 @@ class CommentLike(TimeStampedModel):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"{self.user} liked comment {self.comment.id}"
+
+
+class CommentReaction(TimeStampedModel):
+    """Track a per-user reaction (emoji) on a comment."""
+
+    comment = models.ForeignKey(ScenarioComment, on_delete=models.CASCADE, related_name="reactions")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="comment_reactions",
+    )
+    reaction = models.CharField(max_length=16)
+
+    class Meta:
+        unique_together = ['comment', 'user']
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.user} reacted to comment {self.comment.id}"
     
 
 class TestCase(TimeStampedModel):

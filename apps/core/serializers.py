@@ -607,6 +607,8 @@ class ScenarioCommentSerializer(serializers.ModelSerializer):
     replies = serializers.SerializerMethodField()
     likes_count = serializers.SerializerMethodField()
     user_has_liked = serializers.SerializerMethodField()
+    user_reaction = serializers.SerializerMethodField()
+    reactions_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = models.ScenarioComment
@@ -624,8 +626,19 @@ class ScenarioCommentSerializer(serializers.ModelSerializer):
             "replies",
             "likes_count",
             "user_has_liked",
+            "user_reaction",
+            "reactions_summary",
         ]
-        read_only_fields = ["id", "user", "created_at", "updated_at", "likes_count", "user_has_liked"]
+        read_only_fields = [
+            "id",
+            "user",
+            "created_at",
+            "updated_at",
+            "likes_count",
+            "user_has_liked",
+            "user_reaction",
+            "reactions_summary",
+        ]
 
     def get_user_name(self, obj):
         if obj.user:
@@ -654,6 +667,42 @@ class ScenarioCommentSerializer(serializers.ModelSerializer):
         if request and request.user and request.user.is_authenticated:
             return obj.likes.filter(user=request.user).exists()
         return False
+
+    def get_user_reaction(self, obj):
+        request = self.context.get('request')
+        if request and request.user and request.user.is_authenticated:
+            try:
+                # Prefer prefetched reactions to avoid N+1 queries.
+                for item in obj.reactions.all():
+                    if getattr(item, 'user_id', None) == request.user.id:
+                        return getattr(item, 'reaction', None) or None
+            except Exception:
+                pass
+            reaction = obj.reactions.filter(user=request.user).values_list('reaction', flat=True).first()
+            return reaction or None
+        return None
+
+    def get_reactions_summary(self, obj):
+        counts = {}
+        try:
+            # Use prefetched reactions when present.
+            for item in obj.reactions.all():
+                key = getattr(item, 'reaction', None)
+                if not key:
+                    continue
+                counts[key] = counts.get(key, 0) + 1
+        except Exception:
+            # Fallback (may query)
+            for key in obj.reactions.values_list('reaction', flat=True):
+                if not key:
+                    continue
+                counts[key] = counts.get(key, 0) + 1
+
+        # Sort by count desc, then reaction for stable output
+        return [
+            {"reaction": reaction, "count": count}
+            for reaction, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
 
 
 class ProjectSerializer(serializers.ModelSerializer):

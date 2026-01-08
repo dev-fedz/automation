@@ -4821,6 +4821,14 @@
                         const thumbsUpIconStyle = isLiked ? '' : 'filter: grayscale(1); opacity: 0.45;';
                         const thumbsUpCountStyle = (isLiked && likesCount > 0) ? 'margin-left: 4px; font-weight: 600;' : 'display: none;';
 
+                        const userReaction = comment.user_reaction || '';
+                        const reactionsSummary = Array.isArray(comment.reactions_summary) ? comment.reactions_summary : [];
+                        const reactionsSummaryText = reactionsSummary
+                            .filter((x) => x && x.reaction && typeof x.count === 'number' && x.count > 0)
+                            .map((x) => `${x.reaction} ${x.count}`)
+                            .join(' ');
+                        const reactionDisplayText = reactionsSummaryText || '😊';
+
                         const repliesHtml = (!isReply && comment.replies && comment.replies.length > 0)
                             ? `<div class="comment-replies">${comment.replies.map(reply => renderComment(reply, true)).join('')}</div>`
                             : '';
@@ -4841,7 +4849,7 @@
                                         <span data-role="thumbs-up-count" style="${thumbsUpCountStyle}">${likesCount}</span>
                                     </button>
                                     <button type="button" class="comment-action-btn" data-action="add-reaction-comment" data-comment-id="${comment.id}" title="Add Reaction">
-                                        <span>😊</span>
+                                        <span data-role="reaction-display">${reactionDisplayText}</span>
                                     </button>
                                     ${editBtn}
                                     ${deleteBtn}
@@ -5065,6 +5073,312 @@
             }
         };
 
+        const handleAddReactionCommentClick = async (buttonEl, commentId) => {
+            if (!buttonEl || !commentId) return;
+
+            const displayEl = buttonEl.querySelector('[data-role="reaction-display"]');
+            const currentUserReaction = (buttonEl.dataset.userReaction || '').trim();
+            const reaction = await openEmojiPickerPopover(buttonEl, currentUserReaction || '😊');
+            if (!reaction) return;
+
+            try {
+                buttonEl.disabled = true;
+                const resp = await fetch(`/api/core/scenario-comments/${commentId}/set_reaction/`, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken(),
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({ reaction })
+                });
+
+                if (resp && resp.ok) {
+                    const data = await resp.json().catch(() => ({}));
+                    const nextUserReaction = data && data.reacted ? (data.reaction || reaction) : '';
+                    buttonEl.dataset.userReaction = nextUserReaction;
+
+                    if (displayEl) {
+                        const summary = (data && Array.isArray(data.reactions_summary)) ? data.reactions_summary : [];
+                        const summaryText = summary
+                            .filter((x) => x && x.reaction && typeof x.count === 'number' && x.count > 0)
+                            .map((x) => `${x.reaction} ${x.count}`)
+                            .join(' ');
+                        displayEl.textContent = summaryText || '😊';
+                    }
+
+                    setStatus(data && data.reacted ? 'Reaction saved.' : 'Reaction removed.', 'success');
+                } else {
+                    const errorData = await resp.json().catch(() => ({}));
+                    setStatus(errorData.detail || errorData.reaction || 'Failed to add reaction.', 'error');
+                }
+            } catch (err) {
+                console.error('Error adding reaction:', err);
+                setStatus('Error adding reaction.', 'error');
+            } finally {
+                buttonEl.disabled = false;
+            }
+        };
+
+        let activeEmojiPicker = null;
+
+        const openEmojiPickerPopover = (anchorEl, initialReaction = '😊') => {
+            return new Promise((resolve) => {
+                if (!anchorEl) return resolve(null);
+
+                // Close any existing picker
+                if (activeEmojiPicker && typeof activeEmojiPicker.close === 'function') {
+                    activeEmojiPicker.close();
+                }
+
+                const EMOJI_CATEGORIES = [
+                    { key: 'people', label: 'People', icon: '🙂' },
+                    { key: 'nature', label: 'Nature', icon: '🌲' },
+                    { key: 'food', label: 'Food', icon: '🍔' },
+                    { key: 'activity', label: 'Activity', icon: '⚽' },
+                    { key: 'objects', label: 'Objects', icon: '💡' },
+                    { key: 'symbols', label: 'Symbols', icon: '❤️' },
+                    { key: 'flags', label: 'Flags', icon: '🏳️' },
+                ];
+
+                const EMOJI_DATA = [
+                    // People
+                    { e: '😀', n: 'grinning face', c: 'people' },
+                    { e: '😃', n: 'grinning face with big eyes', c: 'people' },
+                    { e: '😄', n: 'grinning face with smiling eyes', c: 'people' },
+                    { e: '😁', n: 'beaming face with smiling eyes', c: 'people' },
+                    { e: '😆', n: 'grinning squinting face', c: 'people' },
+                    { e: '😅', n: 'grinning face with sweat', c: 'people' },
+                    { e: '😂', n: 'face with tears of joy', c: 'people' },
+                    { e: '🤣', n: 'rolling on the floor laughing', c: 'people' },
+                    { e: '😊', n: 'smiling face with smiling eyes', c: 'people' },
+                    { e: '🙂', n: 'slightly smiling face', c: 'people' },
+                    { e: '😉', n: 'winking face', c: 'people' },
+                    { e: '😍', n: 'smiling face with heart-eyes', c: 'people' },
+                    { e: '😘', n: 'face blowing a kiss', c: 'people' },
+                    { e: '😎', n: 'smiling face with sunglasses', c: 'people' },
+                    { e: '🤔', n: 'thinking face', c: 'people' },
+                    { e: '😮', n: 'face with open mouth', c: 'people' },
+                    { e: '😢', n: 'crying face', c: 'people' },
+                    { e: '😭', n: 'loudly crying face', c: 'people' },
+                    { e: '😡', n: 'pouting face', c: 'people' },
+                    { e: '👍', n: 'thumbs up', c: 'people' },
+                    { e: '👎', n: 'thumbs down', c: 'people' },
+                    { e: '👏', n: 'clapping hands', c: 'people' },
+                    { e: '🙏', n: 'folded hands', c: 'people' },
+                    { e: '👋', n: 'waving hand', c: 'people' },
+                    { e: '🔥', n: 'fire', c: 'people' },
+
+                    // Nature
+                    { e: '🌲', n: 'tree', c: 'nature' },
+                    { e: '🌿', n: 'herb', c: 'nature' },
+                    { e: '🌸', n: 'cherry blossom', c: 'nature' },
+                    { e: '🌼', n: 'blossom', c: 'nature' },
+                    { e: '🌞', n: 'sun with face', c: 'nature' },
+                    { e: '🌧️', n: 'cloud with rain', c: 'nature' },
+                    { e: '🌈', n: 'rainbow', c: 'nature' },
+
+                    // Food
+                    { e: '🍔', n: 'hamburger', c: 'food' },
+                    { e: '🍕', n: 'pizza', c: 'food' },
+                    { e: '🍟', n: 'french fries', c: 'food' },
+                    { e: '🍜', n: 'steaming bowl', c: 'food' },
+                    { e: '🍣', n: 'sushi', c: 'food' },
+                    { e: '☕', n: 'hot beverage', c: 'food' },
+
+                    // Activity
+                    { e: '⚽', n: 'soccer ball', c: 'activity' },
+                    { e: '🏀', n: 'basketball', c: 'activity' },
+                    { e: '🎾', n: 'tennis', c: 'activity' },
+                    { e: '🎮', n: 'video game', c: 'activity' },
+                    { e: '🎉', n: 'party popper', c: 'activity' },
+
+                    // Objects
+                    { e: '💡', n: 'light bulb', c: 'objects' },
+                    { e: '🖥️', n: 'desktop computer', c: 'objects' },
+                    { e: '📌', n: 'pushpin', c: 'objects' },
+                    { e: '📎', n: 'paperclip', c: 'objects' },
+                    { e: '🛠️', n: 'hammer and wrench', c: 'objects' },
+
+                    // Symbols
+                    { e: '❤️', n: 'red heart', c: 'symbols' },
+                    { e: '✅', n: 'check mark button', c: 'symbols' },
+                    { e: '❌', n: 'cross mark', c: 'symbols' },
+                    { e: '⭐', n: 'star', c: 'symbols' },
+                    { e: '🚀', n: 'rocket', c: 'symbols' },
+
+                    // Flags
+                    { e: '🏳️', n: 'white flag', c: 'flags' },
+                    { e: '🏁', n: 'chequered flag', c: 'flags' },
+                ];
+
+                const modalRoot = anchorEl.closest('[data-role="scenario-comments-modal"]') || document.body;
+                const pop = document.createElement('div');
+                pop.setAttribute('role', 'dialog');
+                pop.setAttribute('aria-label', 'Emoji picker');
+                pop.style.position = 'absolute';
+                pop.style.zIndex = '9999';
+                pop.style.background = '#fff';
+                pop.style.border = '1px solid rgba(0,0,0,0.12)';
+                pop.style.borderRadius = '10px';
+                pop.style.boxShadow = 'var(--automation-shadow, 0 10px 24px -12px rgba(0,0,0,0.25))';
+                pop.style.width = '320px';
+                pop.style.maxWidth = 'calc(100vw - 24px)';
+                pop.style.maxHeight = '360px';
+                pop.style.overflow = 'hidden';
+
+                const header = document.createElement('div');
+                header.style.padding = '10px';
+                header.style.borderBottom = '1px solid rgba(0,0,0,0.08)';
+                header.style.display = 'grid';
+                header.style.gap = '8px';
+
+                const search = document.createElement('input');
+                search.type = 'search';
+                search.placeholder = 'Search...';
+                search.value = '';
+                search.style.width = '100%';
+                search.style.padding = '8px 10px';
+                search.style.borderRadius = '8px';
+                search.style.border = '1px solid rgba(0,0,0,0.18)';
+
+                const cats = document.createElement('div');
+                cats.style.display = 'flex';
+                cats.style.alignItems = 'center';
+                cats.style.gap = '6px';
+                cats.style.overflowX = 'auto';
+                cats.style.paddingBottom = '2px';
+
+                const bodyEl = document.createElement('div');
+                bodyEl.style.padding = '10px';
+                bodyEl.style.overflow = 'auto';
+                bodyEl.style.maxHeight = '290px';
+
+                const grid = document.createElement('div');
+                grid.style.display = 'grid';
+                grid.style.gridTemplateColumns = 'repeat(8, 1fr)';
+                grid.style.gap = '6px';
+
+                let activeCategory = 'people';
+
+                const renderGrid = () => {
+                    const q = (search.value || '').trim().toLowerCase();
+                    grid.innerHTML = '';
+
+                    const filtered = EMOJI_DATA.filter((item) => {
+                        if (activeCategory && item.c !== activeCategory) return false;
+                        if (!q) return true;
+                        return item.n.includes(q) || item.e.includes(q);
+                    });
+
+                    filtered.forEach((item) => {
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.textContent = item.e;
+                        btn.title = item.n;
+                        btn.style.border = 'none';
+                        btn.style.background = 'transparent';
+                        btn.style.cursor = 'pointer';
+                        btn.style.fontSize = '20px';
+                        btn.style.lineHeight = '1';
+                        btn.style.padding = '6px';
+                        btn.style.borderRadius = '8px';
+                        btn.addEventListener('mouseenter', () => {
+                            btn.style.background = 'rgba(0,0,0,0.06)';
+                        });
+                        btn.addEventListener('mouseleave', () => {
+                            btn.style.background = 'transparent';
+                        });
+                        btn.addEventListener('click', () => {
+                            close(item.e);
+                        });
+                        grid.appendChild(btn);
+                    });
+                };
+
+                const setActiveCategory = (catKey) => {
+                    activeCategory = catKey;
+                    Array.from(cats.querySelectorAll('button[data-cat]')).forEach((b) => {
+                        const isActive = b.getAttribute('data-cat') === catKey;
+                        b.style.opacity = isActive ? '1' : '0.55';
+                        b.style.background = isActive ? 'rgba(0,0,0,0.06)' : 'transparent';
+                    });
+                    renderGrid();
+                };
+
+                EMOJI_CATEGORIES.forEach((cat) => {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.setAttribute('data-cat', cat.key);
+                    btn.title = cat.label;
+                    btn.textContent = cat.icon;
+                    btn.style.border = 'none';
+                    btn.style.background = 'transparent';
+                    btn.style.cursor = 'pointer';
+                    btn.style.padding = '6px';
+                    btn.style.borderRadius = '8px';
+                    btn.style.fontSize = '18px';
+                    btn.style.opacity = cat.key === activeCategory ? '1' : '0.55';
+                    btn.addEventListener('click', () => setActiveCategory(cat.key));
+                    cats.appendChild(btn);
+                });
+
+                header.appendChild(search);
+                header.appendChild(cats);
+                bodyEl.appendChild(grid);
+                pop.appendChild(header);
+                pop.appendChild(bodyEl);
+
+                const close = (value = null) => {
+                    cleanup();
+                    resolve(value);
+                };
+
+                const onDocMouseDown = (ev) => {
+                    const t = ev.target;
+                    if (!t) return;
+                    if (pop.contains(t) || anchorEl.contains(t)) return;
+                    close(null);
+                };
+
+                const onDocKeyDown = (ev) => {
+                    if (ev.key === 'Escape') {
+                        ev.preventDefault();
+                        close(null);
+                    }
+                };
+
+                const cleanup = () => {
+                    document.removeEventListener('mousedown', onDocMouseDown, true);
+                    document.removeEventListener('keydown', onDocKeyDown, true);
+                    if (pop && pop.parentNode) pop.parentNode.removeChild(pop);
+                    activeEmojiPicker = null;
+                };
+
+                // Position
+                modalRoot.appendChild(pop);
+                const r = anchorEl.getBoundingClientRect();
+                const rootR = modalRoot === document.body ? { left: 0, top: 0 } : modalRoot.getBoundingClientRect();
+                const left = Math.min(Math.max(8, r.left - rootR.left), (window.innerWidth - 340));
+                const top = Math.max(8, r.bottom - rootR.top + 8);
+                pop.style.left = `${left}px`;
+                pop.style.top = `${top}px`;
+
+                activeEmojiPicker = { close };
+                document.addEventListener('mousedown', onDocMouseDown, true);
+                document.addEventListener('keydown', onDocKeyDown, true);
+
+                // initial render
+                renderGrid();
+                setActiveCategory('people');
+                // focus search
+                setTimeout(() => {
+                    try { search.focus(); } catch (_) { }
+                }, 0);
+            });
+        };
+
         // Handle comment action button clicks (using event delegation)
         document.addEventListener('click', async (ev) => {
             const target = ev.target.closest('[data-action]');
@@ -5094,6 +5408,17 @@
 
             ev.preventDefault();
             await handleThumbsUpCommentClick(target, commentId);
+        });
+
+        // Handle add-reaction click separately to avoid impacting existing action handler logic
+        document.addEventListener('click', async (ev) => {
+            const target = ev.target.closest('[data-action="add-reaction-comment"]');
+            if (!target) return;
+            const commentId = target.dataset.commentId;
+            if (!commentId) return;
+
+            ev.preventDefault();
+            await handleAddReactionCommentClick(target, commentId);
         });
 
         const closeScenarioCommentsModal = () => {
