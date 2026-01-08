@@ -205,6 +205,27 @@
                         <label for="module-add-scenario-description">Description</label>
                         <textarea id="module-add-scenario-description" name="description" rows="12" placeholder="Short summary"></textarea>
                     </div>
+                    <div class="form-actions" id="module-view-scenario-save-row" hidden>
+                        <button type="button" class="btn-primary" data-action="submit-view-scenario-save">Save Scenario</button>
+                        <button type="button" class="btn-secondary" data-action="cancel-view-scenario-edit">Cancel</button>
+                    </div>
+                    <div class="form-row" id="module-view-scenario-comments-row" hidden>
+                        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px;">
+                            <span style="font-weight: 600;">COMMENTS</span>
+                            <button type="button" class="btn-primary" data-action="toggle-view-scenario-add-comment">Add Comment</button>
+                        </div>
+                        <div id="module-view-scenario-add-comment-form" class="automation-form" style="display:none; margin-bottom: 12px;">
+                            <input type="hidden" id="module-view-scenario-comment-scenario-id" name="scenario">
+                            <div class="form-row">
+                                <textarea id="module-view-scenario-comment-content" name="content" rows="6" placeholder="Write your comment here..." class="tinymce-editor"></textarea>
+                            </div>
+                            <div class="form-actions">
+                                <button type="button" class="btn-primary" data-action="post-view-scenario-add-comment">Post Comment</button>
+                                <button type="button" class="btn-secondary" data-action="cancel-view-scenario-add-comment">Cancel</button>
+                            </div>
+                        </div>
+                        <div id="module-view-scenario-comments" style="max-height: 260px; overflow-y: auto;"></div>
+                    </div>
                     <div class="form-row dependency-toggle">
                         <label class="dependency-toggle__label" for="module-add-scenario-is-automated">
                             <input type="checkbox" id="module-add-scenario-is-automated" name="is_automated" checked>

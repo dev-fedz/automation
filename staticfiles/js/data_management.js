@@ -456,7 +456,6 @@
     };
 
     document.addEventListener("DOMContentLoaded", () => {
-        try { console.info('[data-management] data_management.js DOMContentLoaded handler running'); } catch (e) { /* ignore */ }
         // support mounting the same module on both the dedicated Data Management
         // page (`data-management-app`) and the Test Plans page (`automation-app`).
         const root = document.getElementById("data-management-app") || document.getElementById("automation-app");
@@ -642,6 +641,52 @@
             els.status.hidden = false;
             els.status.dataset.variant = variant;
             els.status.textContent = message;
+        };
+
+        const setViewScenarioSaveVisible = (modalEl, visible) => {
+            try {
+                if (!modalEl) return;
+                const row = modalEl.querySelector('#module-view-scenario-save-row');
+                if (!row) return;
+                row.hidden = !visible;
+                try { row.style.display = visible ? '' : 'none'; } catch (e) { /* ignore */ }
+            } catch (e) { /* ignore */ }
+        };
+
+        const exitViewScenarioDescriptionEdit = (modalEl) => {
+            if (!modalEl) return;
+
+            let rawHtml = '';
+            try {
+                const descEl = modalEl.querySelector('#module-add-scenario-description') || document.getElementById('module-add-scenario-description');
+                if (descEl) {
+                    rawHtml = (descEl.dataset && typeof descEl.dataset.rawHtml === 'string')
+                        ? descEl.dataset.rawHtml
+                        : (descEl.value || '');
+                }
+            } catch (e) { /* ignore */ }
+
+            try { removeScenarioDescriptionEditor(); } catch (e) { /* ignore */ }
+            try {
+                const tox = modalEl.querySelector('.tox-tinymce');
+                if (tox && tox.parentNode) tox.parentNode.removeChild(tox);
+            } catch (e) { /* ignore */ }
+
+            try {
+                const descEl = modalEl.querySelector('#module-add-scenario-description') || document.getElementById('module-add-scenario-description');
+                if (descEl) {
+                    descEl.readOnly = true;
+                    descEl.disabled = false;
+                    descEl.value = htmlToFormattedText(rawHtml || '');
+                    autosizeTextareaToContent(descEl, { minRows: 12 });
+                }
+            } catch (e) { /* ignore */ }
+
+            try { setViewScenarioSaveVisible(modalEl, false); } catch (e) { /* ignore */ }
+            try {
+                const submit = modalEl.querySelector('button[type="submit"]');
+                if (submit) submit.hidden = true;
+            } catch (e) { /* ignore */ }
         };
 
         const highlightSection = (section) => {
@@ -1086,6 +1131,111 @@
         // TinyMCE for scenario description (Add/Edit Scenario modal)
         let scenarioDescriptionEditor = null;
 
+        // TinyMCE for inline "Add Comment" in View Scenario
+        let viewScenarioCommentEditor = null;
+
+        const removeViewScenarioCommentEditor = () => {
+            try {
+                if (typeof tinymce !== 'undefined') {
+                    try {
+                        const byId = tinymce.get && tinymce.get('module-view-scenario-comment-content');
+                        if (byId) tinymce.remove(byId);
+                    } catch (e) { /* ignore */ }
+                    try { tinymce.remove('#module-view-scenario-comment-content'); } catch (e) { /* ignore */ }
+                }
+            } catch (e) { /* ignore */ }
+            viewScenarioCommentEditor = null;
+            try {
+                const el = document.getElementById('module-view-scenario-comment-content');
+                if (el) {
+                    el.style.display = '';
+                    el.removeAttribute('aria-hidden');
+                }
+            } catch (e) { /* ignore */ }
+        };
+
+        const initViewScenarioCommentEditor = () => {
+            const el = document.getElementById('module-view-scenario-comment-content');
+            if (!el) return;
+            removeViewScenarioCommentEditor();
+            if (typeof tinymce === 'undefined') return;
+
+            tinymce.init({
+                target: el,
+                height: 200,
+                menubar: false,
+                branding: false,
+                plugins: [
+                    'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
+                    'searchreplace', 'visualblocks', 'code', 'fullscreen',
+                    'insertdatetime', 'table', 'help', 'wordcount'
+                ],
+                toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
+                    'alignleft aligncenter alignright alignjustify | ' +
+                    'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
+                content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }',
+                setup(editor) {
+                    viewScenarioCommentEditor = editor;
+                    const sync = () => {
+                        try { el.value = editor.getContent({ format: 'html' }) || ''; } catch (e) { /* ignore */ }
+                    };
+                    editor.on('change keyup paste blur setcontent', sync);
+                    editor.on('remove', () => {
+                        if (viewScenarioCommentEditor === editor) {
+                            viewScenarioCommentEditor = null;
+                        }
+                    });
+                },
+            });
+        };
+
+        const loadScenarioCommentsForViewModal = async (scenarioId) => {
+            const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
+            if (!modal) return;
+            const row = modal.querySelector('#module-view-scenario-comments-row');
+            const container = modal.querySelector('#module-view-scenario-comments');
+            if (!row || !container) return;
+
+            if (!scenarioId) {
+                row.hidden = true;
+                container.innerHTML = '';
+                return;
+            }
+
+            row.hidden = false;
+            container.innerHTML = '<div class="comment-empty">Loading comments…</div>';
+
+            try {
+                const url = `/api/core/scenario-comments/?scenario=${encodeURIComponent(String(scenarioId))}`;
+                const comments = await request(url, { method: 'GET' });
+                const list = Array.isArray(comments) ? comments : [];
+                if (!list.length) {
+                    container.innerHTML = '<div class="comment-empty">No comments yet.</div>';
+                    return;
+                }
+
+                const renderOne = (comment) => {
+                    if (!comment) return '';
+                    const author = escapeHtml(comment.user_name || comment.user_email || 'Unknown');
+                    const when = escapeHtml(formatDateTime(comment.created_at || null));
+                    const content = comment.content || '';
+                    return `
+                        <div class="comment-item" data-comment-id="${escapeHtml(comment.id || '')}">
+                            <div class="comment-header">
+                                <span class="comment-author">${author}</span>
+                                <span class="comment-date">${when}</span>
+                            </div>
+                            <div class="comment-content">${content}</div>
+                        </div>
+                    `;
+                };
+
+                container.innerHTML = list.map((c) => renderOne(c)).join('');
+            } catch (e) {
+                container.innerHTML = '<div class="comment-empty">Failed to load comments.</div>';
+            }
+        };
+
         const removeScenarioDescriptionEditor = () => {
             try {
                 if (typeof tinymce !== 'undefined') {
@@ -1110,7 +1260,7 @@
             } catch (e) { /* ignore */ }
         };
 
-        const initScenarioDescriptionEditor = ({ readOnly } = {}) => {
+        const initScenarioDescriptionEditor = ({ readOnly, onInit } = {}) => {
             const descEl = document.getElementById('module-add-scenario-description');
             if (!descEl) return;
             // Always remove existing instances first to avoid duplicate inits
@@ -1141,6 +1291,12 @@
                     editor.on('init', () => {
                         const initialValue = descEl.value || '';
                         editor.setContent(initialValue);
+
+                        try {
+                            if (typeof onInit === 'function') {
+                                onInit(editor);
+                            }
+                        } catch (e) { /* ignore */ }
                     });
                     const syncValue = () => {
                         try { descEl.value = editor.getContent({ format: 'html' }) || ''; } catch (e) { /* ignore */ }
@@ -1183,6 +1339,31 @@
             const automatedRow = modal.querySelector('.form-row.dependency-toggle') || modal.querySelector('.dependency-toggle');
             // view mode => readonly fields and hide submit
             const readOnly = mode === 'view';
+
+            // View Scenario has a dedicated Save row under Description.
+            // It should only be shown when the description is editable (TinyMCE).
+            setViewScenarioSaveVisible(modal, false);
+
+            // Comments are shown only in View Scenario.
+            try {
+                const row = modal.querySelector('#module-view-scenario-comments-row');
+                const container = modal.querySelector('#module-view-scenario-comments');
+                if (row && container) {
+                    row.hidden = !readOnly;
+                    if (!readOnly) container.innerHTML = '';
+                }
+            } catch (e) { /* ignore */ }
+
+            // Reset inline add-comment form (View Scenario only).
+            try {
+                const addForm = modal.querySelector('#module-view-scenario-add-comment-form');
+                const scenarioIdInput = modal.querySelector('#module-view-scenario-comment-scenario-id');
+                const contentTextarea = modal.querySelector('#module-view-scenario-comment-content');
+                if (addForm) addForm.style.display = 'none';
+                if (scenarioIdInput) scenarioIdInput.value = (readOnly && scenario && scenario.id) ? String(scenario.id) : '';
+                if (contentTextarea) contentTextarea.value = '';
+                removeViewScenarioCommentEditor();
+            } catch (e) { /* ignore */ }
 
             // Hard guarantee: View mode must never show/attach TinyMCE.
             if (readOnly) {
@@ -1252,6 +1433,13 @@
             // Enable rich-text editing for description on create/edit.
             // Keep plain textarea for view mode.
             try { initScenarioDescriptionEditor({ readOnly }); } catch (e) { /* ignore */ }
+
+            // Load comments under description in View mode.
+            try {
+                if (readOnly && scenario && scenario.id) {
+                    loadScenarioCommentsForViewModal(scenario.id);
+                }
+            } catch (e) { /* ignore */ }
             // focus first input when not viewing
             if (!readOnly && titleInput) titleInput.focus();
         };
@@ -1272,12 +1460,20 @@
                     // Ensure we have a scenario id to update.
                     if (!state.moduleScenarioCurrentId) return;
 
-                    // If already initialized, do nothing.
+                    // If already initialized, ensure the Save row is visible.
                     try {
                         if (typeof tinymce !== 'undefined' && tinymce.get && tinymce.get('module-add-scenario-description')) {
+                            setViewScenarioSaveVisible(modal, true);
                             return;
                         }
                     } catch (e) { /* ignore */ }
+
+                    // Only proceed if TinyMCE is available.
+                    if (typeof tinymce === 'undefined') {
+                        return;
+                    }
+
+                    setViewScenarioSaveVisible(modal, false);
 
                     // Swap back to raw HTML and initialize TinyMCE.
                     try {
@@ -1289,13 +1485,145 @@
                         descEl.style.overflowY = '';
                     } catch (e) { /* ignore */ }
 
-                    // Show Save button but keep the modal header as View Scenario.
+                    // Keep the modal header as View Scenario.
+                    // Keep the bottom form submit hidden; show the Save row under
+                    // Description once TinyMCE is actually active.
                     const submit = modal.querySelector('button[type="submit"]');
-                    if (submit) submit.hidden = false;
+                    if (submit) submit.hidden = true;
                     const cancelBtn = modal.querySelector('form#module-add-scenario-form [data-action="close-module-add-scenario-modal"]');
                     if (cancelBtn) cancelBtn.hidden = true;
 
-                    try { initScenarioDescriptionEditor({ readOnly: false }); } catch (e) { /* ignore */ }
+                    try {
+                        initScenarioDescriptionEditor({
+                            readOnly: false,
+                            onInit: () => {
+                                setViewScenarioSaveVisible(modal, true);
+                            },
+                        });
+                    } catch (e) { /* ignore */ }
+                });
+            }
+        } catch (e) { /* ignore */ }
+
+        // In View mode, inline Add Comment should behave like the Comments modal:
+        // show TinyMCE composer + Post + Cancel.
+        try {
+            const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
+            if (modal && !modal.dataset.viewScenarioInlineCommentBound) {
+                modal.dataset.viewScenarioInlineCommentBound = '1';
+
+                modal.addEventListener('click', (ev) => {
+                    const toggleBtn = ev && ev.target && ev.target.closest
+                        ? ev.target.closest('[data-action="toggle-view-scenario-add-comment"]')
+                        : null;
+                    const saveBtn = ev && ev.target && ev.target.closest
+                        ? ev.target.closest('[data-action="submit-view-scenario-save"]')
+                        : null;
+                    const cancelEditBtn = ev && ev.target && ev.target.closest
+                        ? ev.target.closest('[data-action="cancel-view-scenario-edit"]')
+                        : null;
+                    const cancelBtn = ev && ev.target && ev.target.closest
+                        ? ev.target.closest('[data-action="cancel-view-scenario-add-comment"]')
+                        : null;
+                    const postBtn = ev && ev.target && ev.target.closest
+                        ? ev.target.closest('[data-action="post-view-scenario-add-comment"]')
+                        : null;
+
+                    if (cancelEditBtn) {
+                        if (state.moduleScenarioModalMode !== 'view') return;
+                        exitViewScenarioDescriptionEdit(modal);
+                        return;
+                    }
+
+                    if (saveBtn) {
+                        if (state.moduleScenarioModalMode !== 'view') return;
+                        const form = modal.querySelector('#module-add-scenario-form') || document.getElementById('module-add-scenario-form');
+                        if (!form) return;
+                        try {
+                            if (typeof form.requestSubmit === 'function') {
+                                form.requestSubmit();
+                                return;
+                            }
+                        } catch (e) { /* ignore */ }
+                        try {
+                            const submitEl = form.querySelector('button[type="submit"], input[type="submit"]');
+                            if (submitEl && typeof submitEl.click === 'function') {
+                                submitEl.click();
+                                return;
+                            }
+                        } catch (e) { /* ignore */ }
+                        try {
+                            form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                        } catch (e) { /* ignore */ }
+                        return;
+                    }
+
+                    if (toggleBtn) {
+                        if (state.moduleScenarioModalMode !== 'view') return;
+                        if (!state.moduleScenarioCurrentId) return;
+                        const addForm = modal.querySelector('#module-view-scenario-add-comment-form');
+                        const scenarioIdInput = modal.querySelector('#module-view-scenario-comment-scenario-id');
+                        if (!addForm || !scenarioIdInput) return;
+                        scenarioIdInput.value = String(state.moduleScenarioCurrentId);
+                        addForm.style.display = '';
+                        try { initViewScenarioCommentEditor(); } catch (e) { /* ignore */ }
+                        return;
+                    }
+
+                    if (cancelBtn) {
+                        const addForm = modal.querySelector('#module-view-scenario-add-comment-form');
+                        const textarea = modal.querySelector('#module-view-scenario-comment-content');
+                        if (addForm) addForm.style.display = 'none';
+                        if (textarea) textarea.value = '';
+                        removeViewScenarioCommentEditor();
+                        return;
+                    }
+
+                    if (postBtn) {
+                        if (state.moduleScenarioModalMode !== 'view') return;
+                        if (!state.moduleScenarioCurrentId) return;
+
+                        const scenarioId = state.moduleScenarioCurrentId;
+                        const textarea = modal.querySelector('#module-view-scenario-comment-content');
+                        let contentHtml = textarea && textarea.value ? textarea.value : '';
+                        try {
+                            const ed = (typeof tinymce !== 'undefined' && tinymce.get)
+                                ? tinymce.get('module-view-scenario-comment-content')
+                                : null;
+                            if (ed && typeof ed.getContent === 'function') {
+                                try { if (typeof ed.save === 'function') ed.save(); } catch (e) { /* ignore */ }
+                                contentHtml = ed.getContent({ format: 'html' }) || '';
+                            }
+                        } catch (e) { /* ignore */ }
+
+                        if (!contentHtml || !String(contentHtml).trim()) {
+                            showToast('Comment content is required.', 'error');
+                            return;
+                        }
+
+                        (async () => {
+                            try {
+                                await request('/api/core/scenario-comments/', {
+                                    method: 'POST',
+                                    body: JSON.stringify({ scenario: scenarioId, content: contentHtml }),
+                                });
+
+                                // Reset composer
+                                try {
+                                    const addForm = modal.querySelector('#module-view-scenario-add-comment-form');
+                                    if (addForm) addForm.style.display = 'none';
+                                    if (textarea) textarea.value = '';
+                                    removeViewScenarioCommentEditor();
+                                } catch (e) { /* ignore */ }
+
+                                // Refresh comments list
+                                try { await loadScenarioCommentsForViewModal(scenarioId); } catch (e) { /* ignore */ }
+                                showToast('Comment posted.', 'success');
+                            } catch (e) {
+                                showToast('Failed to post comment.', 'error');
+                            }
+                        })();
+                    }
                 });
             }
         } catch (e) { /* ignore */ }
@@ -1332,6 +1660,8 @@
             body.classList.remove('automation-modal-open');
             // Cleanup TinyMCE instance for scenario description
             removeScenarioDescriptionEditor();
+            // Cleanup inline comment editor (View Scenario)
+            removeViewScenarioCommentEditor();
             const form = document.getElementById('module-add-scenario-form');
             if (form) form.reset();
         };
@@ -1574,6 +1904,10 @@
                                 const submit = modalEl ? modalEl.querySelector('button[type="submit"]') : null;
                                 if (submit) submit.hidden = true;
                             } catch (e) { /* ignore */ }
+
+                            // After saving, return to View state: hide the Save row
+                            // under Description until the user clicks to edit again.
+                            try { setViewScenarioSaveVisible(modalEl, false); } catch (e) { /* ignore */ }
                         } catch (e) { /* ignore */ }
                     }
                     const displayName = updated && updated.title ? updated.title : scenarioLabel;

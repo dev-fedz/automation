@@ -80,6 +80,14 @@ test.describe('Scenarios', () => {
         const scenario = await scenarioCreate.json();
         expect(scenario && scenario.id).toBeTruthy();
 
+        // Create a comment for the scenario (should appear in View Scenario below description).
+        const commentText = `E2E Comment ${nonce}`;
+        const commentCreate = await page.request.post('/api/core/scenario-comments/', {
+            headers: authHeaders,
+            data: { scenario: scenario.id, content: `<p>${commentText}</p>` },
+        });
+        expect(commentCreate.ok()).toBeTruthy();
+
         // Open Scenarios page.
         await page.goto('/automation/test-scenarios/');
 
@@ -93,6 +101,9 @@ test.describe('Scenarios', () => {
         const viewBtn = page.locator(`[data-action="view-scenario"][data-scenario-id="${scenario.id}"]`);
         await expect(viewBtn).toBeVisible({ timeout: 15000 });
 
+        // Ensure data_management.js has registered the shared modal helper.
+        await page.waitForFunction(() => typeof window.openModuleScenarioModal === 'function', null, { timeout: 15000 });
+
         await viewBtn.click();
 
         const modal = page.locator('[data-role="module-add-scenario-modal"]');
@@ -100,6 +111,35 @@ test.describe('Scenarios', () => {
 
         const header = modal.locator('#module-add-scenario-modal-title');
         await expect(header).toHaveText('View Scenario');
+
+        // Comments should appear below the description in View Scenario.
+        const commentsRow = modal.locator('#module-view-scenario-comments-row');
+        const commentsContainer = modal.locator('#module-view-scenario-comments');
+        await expect(commentsRow).toBeVisible({ timeout: 15000 });
+        await expect(commentsContainer).toContainText(commentText, { timeout: 15000 });
+
+        // Add Comment button should show the inline composer (TinyMCE + Post + Cancel).
+        const addCommentBtn = modal.locator('[data-action="toggle-view-scenario-add-comment"]');
+        await expect(addCommentBtn).toBeVisible();
+        await addCommentBtn.click();
+
+        const addCommentForm = modal.locator('#module-view-scenario-add-comment-form');
+        await expect(addCommentForm).toBeVisible({ timeout: 15000 });
+
+        // TinyMCE should initialize for the comment composer.
+        await expect(page.locator('#module-view-scenario-comment-content_ifr')).toHaveCount(1, { timeout: 15000 });
+
+        const newCommentText = `E2E Inline Comment ${nonce}`;
+        const commentIframe = page.frameLocator('#module-view-scenario-comment-content_ifr');
+        const commentBody = commentIframe.locator('body');
+        await expect(commentBody).toBeVisible({ timeout: 15000 });
+        await commentBody.click();
+        await commentBody.type(newCommentText);
+
+        // Post and verify it appears below the description.
+        await addCommentForm.locator('[data-action="post-view-scenario-add-comment"]').click();
+        await expect(commentsContainer).toContainText(newCommentText, { timeout: 15000 });
+        await expect(addCommentForm).toBeHidden({ timeout: 15000 });
 
         // The automated toggle row should not be shown in view mode.
         const automatedRow = modal.locator('.form-row.dependency-toggle');
