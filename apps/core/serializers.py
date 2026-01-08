@@ -605,6 +605,8 @@ class ScenarioCommentSerializer(serializers.ModelSerializer):
     user_name = serializers.SerializerMethodField()
     is_edited = serializers.SerializerMethodField()
     replies = serializers.SerializerMethodField()
+    likes_count = serializers.SerializerMethodField()
+    user_has_liked = serializers.SerializerMethodField()
 
     class Meta:
         model = models.ScenarioComment
@@ -620,8 +622,10 @@ class ScenarioCommentSerializer(serializers.ModelSerializer):
             "updated_at",
             "is_edited",
             "replies",
+            "likes_count",
+            "user_has_liked",
         ]
-        read_only_fields = ["id", "user", "created_at", "updated_at"]
+        read_only_fields = ["id", "user", "created_at", "updated_at", "likes_count", "user_has_liked"]
 
     def get_user_name(self, obj):
         if obj.user:
@@ -641,6 +645,15 @@ class ScenarioCommentSerializer(serializers.ModelSerializer):
             replies = obj.replies.all()
             return ScenarioCommentSerializer(replies, many=True, context=self.context).data
         return []
+
+    def get_likes_count(self, obj):
+        return obj.likes.count()
+
+    def get_user_has_liked(self, obj):
+        request = self.context.get('request')
+        if request and request.user and request.user.is_authenticated:
+            return obj.likes.filter(user=request.user).exists()
+        return False
 
 
 class ProjectSerializer(serializers.ModelSerializer):

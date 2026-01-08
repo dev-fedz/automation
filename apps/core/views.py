@@ -449,7 +449,7 @@ class ScenarioCommentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        queryset = models.ScenarioComment.objects.select_related("user", "scenario").prefetch_related("replies__user").all()
+        queryset = models.ScenarioComment.objects.select_related("user", "scenario").prefetch_related("replies__user", "likes").all()
         scenario_id = self.request.query_params.get("scenario")
         if scenario_id:
             queryset = queryset.filter(scenario_id=scenario_id)
@@ -472,6 +472,29 @@ class ScenarioCommentViewSet(viewsets.ModelViewSet):
         if instance.user != self.request.user:
             raise ValidationError("You can only delete your own comments.")
         instance.delete()
+
+    @action(detail=True, methods=['post'])
+    def toggle_like(self, request, pk=None):
+        """Toggle like on a comment. Returns the updated like status."""
+        comment = self.get_object()
+        like, created = models.CommentLike.objects.get_or_create(
+            comment=comment,
+            user=request.user
+        )
+        
+        if not created:
+            # If like already existed, delete it (unlike)
+            like.delete()
+            liked = False
+        else:
+            liked = True
+
+        # Return updated counts (compute fresh count; comment.likes may be prefetched/cached)
+        likes_count = models.CommentLike.objects.filter(comment_id=comment.id).count()
+        return Response({
+            'liked': liked,
+            'likes_count': likes_count,
+        })
 
 
 class TestCaseViewSet(viewsets.ModelViewSet):

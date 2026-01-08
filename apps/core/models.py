@@ -372,6 +372,24 @@ class ScenarioComment(TimeStampedModel):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Comment by {self.user} on {self.scenario}"
+
+
+class CommentLike(TimeStampedModel):
+    """Track likes/thumbs-up on comments."""
+
+    comment = models.ForeignKey(ScenarioComment, on_delete=models.CASCADE, related_name="likes")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="comment_likes",
+    )
+
+    class Meta:
+        unique_together = ['comment', 'user']
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.user} liked comment {self.comment.id}"
     
 
 class TestCase(TimeStampedModel):

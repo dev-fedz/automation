@@ -4816,6 +4816,11 @@
                                 <span>🗑️</span>
                             </button>` : '';
 
+                        const isLiked = !!comment.user_has_liked;
+                        const likesCount = typeof comment.likes_count === 'number' ? comment.likes_count : 0;
+                        const thumbsUpIconStyle = isLiked ? '' : 'filter: grayscale(1); opacity: 0.45;';
+                        const thumbsUpCountStyle = (isLiked && likesCount > 0) ? 'margin-left: 4px; font-weight: 600;' : 'display: none;';
+
                         const repliesHtml = (!isReply && comment.replies && comment.replies.length > 0)
                             ? `<div class="comment-replies">${comment.replies.map(reply => renderComment(reply, true)).join('')}</div>`
                             : '';
@@ -4831,8 +4836,9 @@
                                     ${!isReply ? `<button type="button" class="comment-action-btn" data-action="reply-comment" data-comment-id="${comment.id}" title="Reply">
                                         <span>↩️</span>
                                     </button>` : ''}
-                                    <button type="button" class="comment-action-btn" data-action="thumbs-up-comment" data-comment-id="${comment.id}" title="Thumbs Up">
-                                        <span>👍</span>
+                                    <button type="button" class="comment-action-btn" data-action="thumbs-up-comment" data-comment-id="${comment.id}" data-liked="${isLiked ? 'true' : 'false'}" data-likes-count="${likesCount}" aria-pressed="${isLiked ? 'true' : 'false'}" title="Thumbs Up">
+                                        <span data-role="thumbs-up-icon" style="${thumbsUpIconStyle}">👍</span>
+                                        <span data-role="thumbs-up-count" style="${thumbsUpCountStyle}">${likesCount}</span>
                                     </button>
                                     <button type="button" class="comment-action-btn" data-action="add-reaction-comment" data-comment-id="${comment.id}" title="Add Reaction">
                                         <span>😊</span>
@@ -4972,6 +4978,93 @@
             }
         };
 
+        const updateThumbsUpButtonIcon = (buttonEl, isActive, likesCount = null) => {
+            if (!buttonEl) return;
+            const iconEl = buttonEl.querySelector('[data-role="thumbs-up-icon"]');
+            if (!iconEl) return;
+
+            const countEl = buttonEl.querySelector('[data-role="thumbs-up-count"]');
+
+            buttonEl.dataset.liked = isActive ? 'true' : 'false';
+            buttonEl.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+
+            const existingCountRaw = buttonEl.dataset.likesCount;
+            const existingCount = Number.isFinite(parseInt(existingCountRaw, 10)) ? parseInt(existingCountRaw, 10) : null;
+            let displayCount = typeof likesCount === 'number' ? likesCount : existingCount;
+
+            // If the current user has liked, the total count should be >= 1.
+            if (isActive) {
+                if (displayCount === null) displayCount = 1;
+                if (displayCount < 1) displayCount = 1;
+            }
+
+            if (displayCount !== null && Number.isFinite(displayCount)) {
+                buttonEl.dataset.likesCount = String(displayCount);
+            }
+
+            if (isActive) {
+                iconEl.style.filter = '';
+                iconEl.style.opacity = '1';
+            } else {
+                iconEl.style.filter = 'grayscale(1)';
+                iconEl.style.opacity = '0.45';
+            }
+
+            if (countEl) {
+                if (isActive && displayCount !== null && displayCount > 0) {
+                    countEl.textContent = String(displayCount);
+                    countEl.style.display = '';
+                    countEl.style.marginLeft = '4px';
+                    countEl.style.fontWeight = '600';
+                } else {
+                    countEl.style.display = 'none';
+                }
+            }
+        };
+
+        const handleThumbsUpCommentClick = async (buttonEl, commentId) => {
+            if (!buttonEl || !commentId) return;
+
+            const url = `/api/core/scenario-comments/${commentId}/toggle_like/`;
+
+            // Optimistic UI update so the count changes immediately on click
+            const wasLiked = buttonEl.dataset.liked === 'true';
+            const wasLikesCountRaw = buttonEl.dataset.likesCount;
+            const wasLikesCount = Number.isFinite(parseInt(wasLikesCountRaw, 10)) ? parseInt(wasLikesCountRaw, 10) : 0;
+            const optimisticLiked = !wasLiked;
+            const optimisticCount = optimisticLiked ? Math.max(1, wasLikesCount + 1) : Math.max(0, wasLikesCount - 1);
+            updateThumbsUpButtonIcon(buttonEl, optimisticLiked, optimisticCount);
+
+            try {
+                buttonEl.disabled = true;
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'X-CSRFToken': getCsrfToken(),
+                        'Accept': 'application/json'
+                    }
+                });
+
+                if (resp && resp.ok) {
+                    const data = await resp.json().catch(() => ({}));
+                    updateThumbsUpButtonIcon(buttonEl, !!data.liked, typeof data.likes_count === 'number' ? data.likes_count : null);
+                } else {
+                    const errorData = await resp.json().catch(() => ({}));
+                    setStatus(errorData.detail || 'Failed to toggle thumbs up.', 'error');
+                    // Revert optimistic UI if server rejected
+                    updateThumbsUpButtonIcon(buttonEl, wasLiked, wasLikesCount);
+                }
+            } catch (err) {
+                console.error('Error toggling thumbs up:', err);
+                setStatus('Error toggling thumbs up.', 'error');
+                // Revert optimistic UI on network error
+                updateThumbsUpButtonIcon(buttonEl, wasLiked, wasLikesCount);
+            } finally {
+                buttonEl.disabled = false;
+            }
+        };
+
         // Handle comment action button clicks (using event delegation)
         document.addEventListener('click', async (ev) => {
             const target = ev.target.closest('[data-action]');
@@ -4990,6 +5083,17 @@
                 ev.preventDefault();
                 await deleteComment(commentId);
             }
+        });
+
+        // Handle thumbs-up click separately to avoid impacting existing action handler logic
+        document.addEventListener('click', async (ev) => {
+            const target = ev.target.closest('[data-action="thumbs-up-comment"]');
+            if (!target) return;
+            const commentId = target.dataset.commentId;
+            if (!commentId) return;
+
+            ev.preventDefault();
+            await handleThumbsUpCommentClick(target, commentId);
         });
 
         const closeScenarioCommentsModal = () => {
