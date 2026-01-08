@@ -928,49 +928,320 @@
             btn.textContent = '▾';
         };
 
+        const htmlToFormattedText = (value) => {
+            if (!value) {
+                return '';
+            }
+            if (typeof document === 'undefined' || !document.createElement) {
+                return String(value);
+            }
+
+            const container = document.createElement('div');
+            container.innerHTML = String(value);
+
+            const out = [];
+            const listStack = [];
+
+            const pushText = (text, { preserveWhitespace } = {}) => {
+                if (!text) return;
+                if (preserveWhitespace) {
+                    out.push(text);
+                    return;
+                }
+                out.push(String(text).replace(/[\t\f\v ]+/g, ' '));
+            };
+
+            const ensureNewline = (count = 1) => {
+                const joined = out.join('');
+                let existing = 0;
+                for (let i = joined.length - 1; i >= 0; i -= 1) {
+                    if (joined[i] === '\n') existing += 1;
+                    else if (joined[i] === ' ') continue;
+                    else break;
+                }
+                const needed = Math.max(0, count - existing);
+                if (needed) out.push('\n'.repeat(needed));
+            };
+
+            const renderNode = (node, opts = {}) => {
+                if (!node) return;
+                const preserveWhitespace = !!opts.preserveWhitespace;
+                if (node.nodeType === Node.TEXT_NODE) {
+                    pushText(node.nodeValue || '', { preserveWhitespace });
+                    return;
+                }
+                if (node.nodeType !== Node.ELEMENT_NODE) {
+                    return;
+                }
+
+                const tag = (node.tagName || '').toUpperCase();
+                if (tag === 'BR') {
+                    out.push('\n');
+                    return;
+                }
+
+                if (tag === 'PRE') {
+                    ensureNewline(1);
+                    pushText(node.textContent || '', { preserveWhitespace: true });
+                    ensureNewline(1);
+                    return;
+                }
+
+                if (tag === 'CODE') {
+                    pushText(node.textContent || '', { preserveWhitespace });
+                    return;
+                }
+
+                if (tag === 'UL' || tag === 'OL') {
+                    ensureNewline(1);
+                    listStack.push({ type: tag, counter: 0 });
+                    const items = Array.from(node.children || []).filter((c) => (c.tagName || '').toUpperCase() === 'LI');
+                    items.forEach((li) => {
+                        const top = listStack[listStack.length - 1];
+                        if (top.type === 'OL') {
+                            top.counter += 1;
+                        }
+                        const depth = Math.max(0, listStack.length - 1);
+                        const indent = '  '.repeat(depth);
+                        const marker = top.type === 'OL' ? `${top.counter}. ` : '• ';
+                        ensureNewline(1);
+                        out.push(indent + marker);
+                        let listMarkerPending = true;
+                        Array.from(li.childNodes || []).forEach((child) => {
+                            if (child && child.nodeType === Node.TEXT_NODE) {
+                                const raw = child.nodeValue || '';
+                                if (!raw.trim()) {
+                                    return;
+                                }
+                            }
+                            renderNode(child, { preserveWhitespace, listMarkerStart: listMarkerPending });
+                            listMarkerPending = false;
+                        });
+                        ensureNewline(1);
+                    });
+                    listStack.pop();
+                    ensureNewline(1);
+                    return;
+                }
+
+                const isBlock = ['P', 'DIV', 'SECTION', 'ARTICLE', 'HEADER', 'FOOTER', 'BLOCKQUOTE'].includes(tag);
+                if (isBlock) {
+                    if (!opts.listMarkerStart) {
+                        ensureNewline(1);
+                    }
+                    Array.from(node.childNodes || []).forEach((child) => {
+                        renderNode(child, { preserveWhitespace });
+                    });
+                    ensureNewline(opts.listMarkerStart ? 1 : 2);
+                    return;
+                }
+
+                Array.from(node.childNodes || []).forEach((child) => {
+                    renderNode(child, { preserveWhitespace });
+                });
+            };
+
+            Array.from(container.childNodes || []).forEach((child) => renderNode(child));
+
+            let text = out.join('');
+            text = text
+                .replace(/[ \t]+\n/g, '\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+            return text;
+        };
+
+        const autosizeTextareaToContent = (textareaEl, { minRows } = {}) => {
+            if (!textareaEl) return;
+            try {
+                textareaEl.style.height = 'auto';
+                textareaEl.style.overflowY = 'hidden';
+
+                let minHeightPx = 0;
+                if (minRows && typeof window !== 'undefined' && window.getComputedStyle) {
+                    const cs = window.getComputedStyle(textareaEl);
+                    let lineHeight = Number.parsefloat(cs.lineHeight);
+                    if (!Number.isFinite(lineHeight) || lineHeight <= 0) {
+                        const fontSize = Number.parseFloat(cs.fontSize) || 0;
+                        if (fontSize > 0) {
+                            // Typical browser default for "normal" line-height.
+                            lineHeight = fontSize * 1.2;
+                        }
+                    }
+                    lineHeight = Number.isFinite(lineHeight) ? lineHeight : 0;
+                    const paddingTop = Number.parseFloat(cs.paddingTop) || 0;
+                    const paddingBottom = Number.parseFloat(cs.paddingBottom) || 0;
+                    if (lineHeight > 0) {
+                        minHeightPx = (lineHeight * Number(minRows)) + paddingTop + paddingBottom;
+                    }
+                }
+
+                // Add a tiny buffer to avoid scrollbars due to rounding.
+                const contentHeight = textareaEl.scrollHeight + 2;
+                const targetHeight = Math.max(contentHeight, minHeightPx);
+                textareaEl.style.height = `${targetHeight}px`;
+            } catch (e) { /* ignore */ }
+        };
+
+        // TinyMCE for scenario description (Add/Edit Scenario modal)
+        let scenarioDescriptionEditor = null;
+
+        const removeScenarioDescriptionEditor = () => {
+            try {
+                if (typeof tinymce !== 'undefined') {
+                    try {
+                        const byId = tinymce.get && tinymce.get('module-add-scenario-description');
+                        if (byId) {
+                            tinymce.remove(byId);
+                        }
+                    } catch (e) { /* ignore */ }
+                    tinymce.remove('#module-add-scenario-description');
+                }
+            } catch (e) { /* ignore */ }
+            scenarioDescriptionEditor = null;
+
+            // Ensure the underlying textarea is visible/usable again.
+            try {
+                const descEl = document.getElementById('module-add-scenario-description');
+                if (descEl) {
+                    descEl.style.display = '';
+                    descEl.removeAttribute('aria-hidden');
+                }
+            } catch (e) { /* ignore */ }
+        };
+
+        const initScenarioDescriptionEditor = ({ readOnly } = {}) => {
+            const descEl = document.getElementById('module-add-scenario-description');
+            if (!descEl) return;
+            // Always remove existing instances first to avoid duplicate inits
+            removeScenarioDescriptionEditor();
+            if (readOnly) return;
+            if (typeof tinymce === 'undefined') return;
+
+            tinymce.init({
+                target: descEl,
+                height: 220,
+                min_height: 140,
+                menubar: false,
+                branding: false,
+                // Enable TinyMCE resize handle via the status bar.
+                statusbar: true,
+                resize: true,
+                plugins: [
+                    'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
+                    'searchreplace', 'visualblocks', 'code', 'fullscreen',
+                    'insertdatetime', 'table', 'help', 'wordcount'
+                ],
+                toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
+                    'alignleft aligncenter alignright alignjustify | ' +
+                    'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
+                content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }',
+                setup(editor) {
+                    scenarioDescriptionEditor = editor;
+                    editor.on('init', () => {
+                        const initialValue = descEl.value || '';
+                        editor.setContent(initialValue);
+                    });
+                    const syncValue = () => {
+                        try { descEl.value = editor.getContent({ format: 'html' }) || ''; } catch (e) { /* ignore */ }
+                    };
+                    editor.on('change keyup paste blur setcontent', syncValue);
+                    editor.on('remove', () => {
+                        if (scenarioDescriptionEditor === editor) {
+                            scenarioDescriptionEditor = null;
+                        }
+                    });
+                },
+            });
+        };
+
         // Open add/edit/view scenario modal for a given module id
         const openModuleScenarioModal = (mode, moduleId, scenario = null) => {
             const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
             if (!modal) return;
+            const dialog = modal.querySelector('.automation-modal__dialog');
             state.moduleScenarioModalMode = mode || 'create';
             state.moduleScenarioCurrentId = scenario && scenario.id ? scenario.id : null;
             // populate module hidden input
-            const moduleInput = document.getElementById('module-add-scenario-module-id');
+            const moduleInput = modal.querySelector('#module-add-scenario-module-id') || document.getElementById('module-add-scenario-module-id');
             if (moduleInput) moduleInput.value = moduleId || (scenario && scenario.module ? scenario.module : '');
             // populate fields
-            const titleInput = document.getElementById('module-add-scenario-title');
-            const descInput = document.getElementById('module-add-scenario-description');
-            const preInput = document.getElementById('module-add-scenario-precondition');
-            const postInput = document.getElementById('module-add-scenario-postconditions');
-            const tagsInput = document.getElementById('module-add-scenario-tags');
-            const isAutomatedInput = document.getElementById('module-add-scenario-is-automated');
+            const titleInput = modal.querySelector('#module-add-scenario-title') || document.getElementById('module-add-scenario-title');
+            const descInput = modal.querySelector('#module-add-scenario-description') || document.getElementById('module-add-scenario-description');
+            const isAutomatedInput = modal.querySelector('#module-add-scenario-is-automated') || document.getElementById('module-add-scenario-is-automated');
             if (scenario) {
                 if (titleInput) titleInput.value = scenario.title || '';
                 if (descInput) descInput.value = scenario.description || '';
-                if (preInput) preInput.value = scenario.preconditions || '';
-                if (postInput) postInput.value = scenario.postconditions || '';
-                if (tagsInput) tagsInput.value = Array.isArray(scenario.tags) ? scenario.tags.join(',') : (scenario.tags || '');
                 if (isAutomatedInput) isAutomatedInput.checked = (typeof scenario.is_automated !== 'undefined') ? Boolean(scenario.is_automated) : true;
             } else {
                 if (titleInput) titleInput.value = '';
                 if (descInput) descInput.value = '';
-                if (preInput) preInput.value = '';
-                if (postInput) postInput.value = '';
-                if (tagsInput) tagsInput.value = '';
                 if (isAutomatedInput) isAutomatedInput.checked = true;
             }
             const submit = modal.querySelector('button[type="submit"]');
+            const cancelBtn = modal.querySelector('form#module-add-scenario-form [data-action="close-module-add-scenario-modal"]');
+            const automatedRow = modal.querySelector('.form-row.dependency-toggle') || modal.querySelector('.dependency-toggle');
             // view mode => readonly fields and hide submit
             const readOnly = mode === 'view';
-            if (titleInput) { titleInput.readOnly = readOnly; titleInput.disabled = readOnly; }
-            if (descInput) { descInput.readOnly = readOnly; descInput.disabled = readOnly; }
-            if (preInput) { preInput.readOnly = readOnly; preInput.disabled = readOnly; }
-            if (postInput) { postInput.readOnly = readOnly; postInput.disabled = readOnly; }
-            if (tagsInput) { tagsInput.readOnly = readOnly; tagsInput.disabled = readOnly; }
-            if (isAutomatedInput) { isAutomatedInput.disabled = readOnly; }
+
+            // Hard guarantee: View mode must never show/attach TinyMCE.
+            if (readOnly) {
+                removeScenarioDescriptionEditor();
+                if (descInput) {
+                    try { descInput.classList.remove('tinymce-editor'); } catch (e) { /* ignore */ }
+                }
+            }
+
+            // View Scenario should be wider for readability.
+            if (dialog) {
+                try {
+                    dialog.style.width = readOnly ? '80vw' : '';
+                    dialog.style.maxWidth = readOnly ? '80vw' : '';
+                } catch (e) { /* ignore */ }
+            }
+            // For view mode, use readOnly (not disabled) so the field can still be
+            // scrolled/selected, but cannot be edited.
+            if (titleInput) { titleInput.readOnly = readOnly; titleInput.disabled = false; }
+            if (descInput) {
+                descInput.readOnly = readOnly;
+                descInput.disabled = false;
+                // Keep a comfortable baseline height across modes.
+                const rows = 12;
+                descInput.rows = rows;
+                descInput.setAttribute('rows', String(rows));
+            }
+            if (readOnly && descInput && scenario) {
+                // Keep the original HTML around so View mode can be promoted to Edit
+                // (TinyMCE expects HTML, not the formatted plain-text view rendering).
+                try { descInput.dataset.rawHtml = scenario.description || ''; } catch (e) { /* ignore */ }
+                // Render TinyMCE HTML as formatted plain text for the view modal.
+                descInput.value = htmlToFormattedText(scenario.description || '');
+                autosizeTextareaToContent(descInput, { minRows: 12 });
+            } else if (descInput) {
+                try { delete descInput.dataset.rawHtml; } catch (e) { /* ignore */ }
+                // Reset any previous autosize styles so TinyMCE/edit mode behaves normally.
+                try {
+                    descInput.style.height = '';
+                    descInput.style.overflowY = '';
+                } catch (e) { /* ignore */ }
+            }
+            if (isAutomatedInput) {
+                isAutomatedInput.disabled = readOnly;
+                // Hide the entire row in view mode.
+                const row = (isAutomatedInput.closest && (isAutomatedInput.closest('.form-row') || isAutomatedInput.closest('.dependency-toggle'))) || null;
+                if (row) {
+                    row.hidden = readOnly;
+                    try { row.style.display = readOnly ? 'none' : ''; } catch (e) { /* ignore */ }
+                }
+            }
+            if (automatedRow) {
+                automatedRow.hidden = readOnly;
+                try { automatedRow.style.display = readOnly ? 'none' : ''; } catch (e) { /* ignore */ }
+            }
             if (submit) submit.hidden = readOnly;
+            if (cancelBtn) cancelBtn.hidden = readOnly;
             // set header title
-            const header = document.getElementById('module-add-scenario-modal-title');
+            const header = modal.querySelector('#module-add-scenario-modal-title') || document.getElementById('module-add-scenario-modal-title');
             if (header) {
                 if (mode === 'edit') header.textContent = 'Edit Scenario';
                 else if (mode === 'view') header.textContent = 'View Scenario';
@@ -978,9 +1249,56 @@
             }
             modal.hidden = false;
             body.classList.add('automation-modal-open');
+            // Enable rich-text editing for description on create/edit.
+            // Keep plain textarea for view mode.
+            try { initScenarioDescriptionEditor({ readOnly }); } catch (e) { /* ignore */ }
             // focus first input when not viewing
             if (!readOnly && titleInput) titleInput.focus();
         };
+
+        // In View mode, clicking the description should open TinyMCE for the description
+        // while keeping the modal as "View Scenario" (no full switch to Edit UI).
+        try {
+            const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
+            if (modal && !modal.dataset.scenarioDescClickBound) {
+                modal.dataset.scenarioDescClickBound = '1';
+                modal.addEventListener('click', (ev) => {
+                    const target = ev && ev.target ? ev.target : null;
+                    if (!target) return;
+                    const descEl = target.closest && target.closest('#module-add-scenario-description');
+                    if (!descEl) return;
+                    if (state.moduleScenarioModalMode !== 'view') return;
+
+                    // Ensure we have a scenario id to update.
+                    if (!state.moduleScenarioCurrentId) return;
+
+                    // If already initialized, do nothing.
+                    try {
+                        if (typeof tinymce !== 'undefined' && tinymce.get && tinymce.get('module-add-scenario-description')) {
+                            return;
+                        }
+                    } catch (e) { /* ignore */ }
+
+                    // Swap back to raw HTML and initialize TinyMCE.
+                    try {
+                        const rawHtml = descEl.dataset && typeof descEl.dataset.rawHtml === 'string' ? descEl.dataset.rawHtml : '';
+                        descEl.value = rawHtml || '';
+                        descEl.readOnly = false;
+                        descEl.disabled = false;
+                        descEl.style.height = '';
+                        descEl.style.overflowY = '';
+                    } catch (e) { /* ignore */ }
+
+                    // Show Save button but keep the modal header as View Scenario.
+                    const submit = modal.querySelector('button[type="submit"]');
+                    if (submit) submit.hidden = false;
+                    const cancelBtn = modal.querySelector('form#module-add-scenario-form [data-action="close-module-add-scenario-modal"]');
+                    if (cancelBtn) cancelBtn.hidden = true;
+
+                    try { initScenarioDescriptionEditor({ readOnly: false }); } catch (e) { /* ignore */ }
+                });
+            }
+        } catch (e) { /* ignore */ }
 
         // expose for other modules (e.g., automation.js) to reuse
         try {
@@ -1012,6 +1330,8 @@
             if (!modal) return;
             modal.hidden = true;
             body.classList.remove('automation-modal-open');
+            // Cleanup TinyMCE instance for scenario description
+            removeScenarioDescriptionEditor();
             const form = document.getElementById('module-add-scenario-form');
             if (form) form.reset();
         };
@@ -1055,13 +1375,13 @@
                     }
                 }
             };
-            const moduleInput = document.getElementById('module-add-scenario-module-id');
-            const titleInput = document.getElementById('module-add-scenario-title');
-            const descInput = document.getElementById('module-add-scenario-description');
-            const preInput = document.getElementById('module-add-scenario-precondition');
-            const postInput = document.getElementById('module-add-scenario-postconditions');
-            const tagsInput = document.getElementById('module-add-scenario-tags');
-            const isAutomatedInput = document.getElementById('module-add-scenario-is-automated');
+            const scenarioModalEl = (() => {
+                try { return document.querySelector('[data-role="module-add-scenario-modal"]'); } catch (e) { return null; }
+            })();
+            const moduleInput = (scenarioModalEl && scenarioModalEl.querySelector('#module-add-scenario-module-id')) || document.getElementById('module-add-scenario-module-id');
+            const titleInput = (scenarioModalEl && scenarioModalEl.querySelector('#module-add-scenario-title')) || document.getElementById('module-add-scenario-title');
+            const descInput = (scenarioModalEl && scenarioModalEl.querySelector('#module-add-scenario-description')) || document.getElementById('module-add-scenario-description');
+            const isAutomatedInput = (scenarioModalEl && scenarioModalEl.querySelector('#module-add-scenario-is-automated')) || document.getElementById('module-add-scenario-is-automated');
             const moduleId = moduleInput && moduleInput.value ? Number(moduleInput.value) : null;
             // Require module selection: New Scenario must be opened with a
             // module selected. If missing, surface an error and abort save.
@@ -1074,11 +1394,51 @@
                 project: null,
                 title: (titleInput && titleInput.value || '').trim(),
                 description: descInput && descInput.value || '',
-                preconditions: preInput && preInput.value || '',
-                postconditions: postInput && postInput.value || '',
-                tags: tagsInput && tagsInput.value ? tagsInput.value.split(/[\,\n]/).map(s => s.trim()).filter(Boolean) : [],
                 is_automated: Boolean(isAutomatedInput ? isAutomatedInput.checked : true),
             };
+
+            // If the description editor is active, pull the latest HTML directly
+            // from TinyMCE to avoid relying on async textarea sync.
+            try {
+                if (descInput && descInput.id && typeof tinymce !== 'undefined') {
+                    const editorCandidates = [];
+                    try {
+                        if (scenarioDescriptionEditor && scenarioDescriptionEditor.id === descInput.id) {
+                            editorCandidates.push(scenarioDescriptionEditor);
+                        }
+                    } catch (e) { /* ignore */ }
+                    try {
+                        if (tinymce.get) {
+                            const byId = tinymce.get(descInput.id);
+                            if (byId) editorCandidates.push(byId);
+                        }
+                    } catch (e) { /* ignore */ }
+                    // Fallback: find editor by target element.
+                    try {
+                        if (Array.isArray(tinymce.editors)) {
+                            const byTarget = tinymce.editors.find((x) => x && x.targetElm && x.targetElm.id === descInput.id) || null;
+                            if (byTarget) editorCandidates.push(byTarget);
+                        }
+                    } catch (e) { /* ignore */ }
+
+                    const ed = editorCandidates.find((x) => x && typeof x.getContent === 'function') || null;
+                    if (ed) {
+                        try { if (typeof ed.save === 'function') ed.save(); } catch (e) { /* ignore */ }
+                        let html = '';
+                        try { html = ed.getContent({ format: 'html' }) || ''; } catch (e) { /* ignore */ }
+                        // Last-resort fallback: read the live iframe body.
+                        try {
+                            if (!html && typeof ed.getBody === 'function') {
+                                const body = ed.getBody();
+                                html = body && typeof body.innerHTML === 'string' ? body.innerHTML : html;
+                            }
+                        } catch (e) { /* ignore */ }
+                        payload.description = html || '';
+                        // Keep textarea in sync too (useful if editor is removed later)
+                        descInput.value = payload.description;
+                    }
+                }
+            } catch (e) { /* ignore */ }
             // Basic client-side validation: title required
             const titleVal = payload.title ? String(payload.title).trim() : '';
             if (!titleVal) {
@@ -1118,7 +1478,9 @@
                     }
                 }
             } catch (e) { /* ignore */ }
-            const scenarioMode = state.moduleScenarioModalMode === 'edit' ? 'edit' : 'create';
+            const isUpdateMode = (state.moduleScenarioModalMode === 'edit' || state.moduleScenarioModalMode === 'view')
+                && Boolean(state.moduleScenarioCurrentId);
+            const scenarioMode = isUpdateMode ? 'edit' : 'create';
             const scenarioLabel = payload.title || 'this scenario';
             let scenarioConfirmed = true;
             try {
@@ -1138,15 +1500,21 @@
                 setStatus('Saving scenario…', 'info');
                 try { console.info('[data-management] submitting scenario', { payloadPreview: { module: payload.module, title: payload.title, project: payload.project } }); } catch (e) { }
                 const urlBase = endpoints.scenarios || (apiEndpoints.scenarios ? ensureTrailingSlash(apiEndpoints.scenarios) : '/api/core/test-scenarios/');
-                if (state.moduleScenarioModalMode === 'edit' && state.moduleScenarioCurrentId) {
+                if (isUpdateMode && state.moduleScenarioCurrentId) {
                     // update existing scenario
                     const editUrl = `${urlBase}${state.moduleScenarioCurrentId}/`;
                     const updated = await request(editUrl, { method: 'PATCH', body: JSON.stringify(payload) });
-                    // close modal immediately to ensure it hides even if later
-                    // UI updates throw. Then refresh authoritative state first
-                    // and ensure the module stays expanded so the collapsible
-                    // does not close unexpectedly.
-                    try { closeModuleScenarioModal(); } catch (e) { /* ignore */ }
+
+                    const keepModalOpen = state.moduleScenarioModalMode === 'view';
+                    // Close the modal only for the explicit Edit flow.
+                    // For View Scenario, keep it open and refresh UI in-place.
+                    if (!keepModalOpen) {
+                        // close modal immediately to ensure it hides even if later
+                        // UI updates throw. Then refresh authoritative state first
+                        // and ensure the module stays expanded so the collapsible
+                        // does not close unexpectedly.
+                        try { closeModuleScenarioModal(); } catch (e) { /* ignore */ }
+                    }
                     try {
                         // Update the scenario in-place in local state so we don't
                         // replace the whole modules list (which can be filtered on
@@ -1167,6 +1535,46 @@
                         try { document.dispatchEvent(new CustomEvent('test-modules-changed', { detail: { moduleId } })); } catch (e) { }
                     } catch (e) {
                         try { console.info('[data-management] error updating state after update', { error: e && (e.message || e) }); } catch (err) { }
+                    }
+
+                    // Always return View Scenario back to textarea mode after a successful save.
+                    if (keepModalOpen) {
+                        try {
+                            const normalizedUpdated = normalizeScenario(updated);
+                            const modalEl = document.querySelector('[data-role="module-add-scenario-modal"]');
+                            const submittedHtml = typeof payload.description === 'string' ? payload.description : '';
+                            try { removeScenarioDescriptionEditor(); } catch (e) { /* ignore */ }
+                            // Fallback: if TinyMCE container still exists, remove it.
+                            try {
+                                const tox = modalEl ? modalEl.querySelector('.tox-tinymce') : null;
+                                if (tox && tox.parentNode) {
+                                    tox.parentNode.removeChild(tox);
+                                }
+                            } catch (e) { /* ignore */ }
+
+                            // TinyMCE teardown can replace the underlying textarea node;
+                            // always re-query it after removal before updating.
+                            const descEl = modalEl
+                                ? (modalEl.querySelector('#module-add-scenario-description') || document.getElementById('module-add-scenario-description'))
+                                : document.getElementById('module-add-scenario-description');
+                            if (descEl) {
+                                try {
+                                    // Prefer the just-submitted payload HTML, fall back to the response.
+                                    try {
+                                        descEl.dataset.rawHtml = submittedHtml || normalizedUpdated.description || '';
+                                    } catch (e) { /* ignore */ }
+                                    descEl.readOnly = true;
+                                    descEl.disabled = false;
+                                    descEl.value = htmlToFormattedText(descEl.dataset.rawHtml || '');
+                                    autosizeTextareaToContent(descEl, { minRows: 12 });
+                                } catch (e) { /* ignore */ }
+                            }
+                            try {
+                                const modalEl = document.querySelector('[data-role="module-add-scenario-modal"]');
+                                const submit = modalEl ? modalEl.querySelector('button[type="submit"]') : null;
+                                if (submit) submit.hidden = true;
+                            } catch (e) { /* ignore */ }
+                        } catch (e) { /* ignore */ }
                     }
                     const displayName = updated && updated.title ? updated.title : scenarioLabel;
                     setStatus('Scenario updated.', 'success');

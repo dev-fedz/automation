@@ -335,9 +335,6 @@ class TestScenario(TimeStampedModel):
     )
     title = models.CharField(max_length=150)
     description = models.TextField(blank=True)
-    preconditions = models.TextField(blank=True)
-    postconditions = models.TextField(blank=True)
-    tags = models.JSONField(default=list, blank=True)
     is_automated = models.BooleanField(default=True)
 
     class Meta:

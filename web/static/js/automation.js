@@ -76,6 +76,136 @@
         return (temp.textContent || temp.innerText || '').trim();
     };
 
+    const htmlToFormattedText = (value) => {
+        if (!value) {
+            return '';
+        }
+        if (typeof document === 'undefined' || !document.createElement) {
+            return String(value);
+        }
+
+        const container = document.createElement('div');
+        container.innerHTML = String(value);
+
+        const out = [];
+        const listStack = [];
+
+        const pushText = (text, { preserveWhitespace } = {}) => {
+            if (!text) return;
+            if (preserveWhitespace) {
+                out.push(text);
+                return;
+            }
+            // Collapse runs of whitespace but keep newlines managed by block tags.
+            out.push(String(text).replace(/[\t\f\v ]+/g, ' '));
+        };
+
+        const ensureNewline = (count = 1) => {
+            const joined = out.join('');
+            let existing = 0;
+            for (let i = joined.length - 1; i >= 0; i -= 1) {
+                if (joined[i] === '\n') existing += 1;
+                else if (joined[i] === ' ') continue;
+                else break;
+            }
+            const needed = Math.max(0, count - existing);
+            if (needed) out.push('\n'.repeat(needed));
+        };
+
+        const renderNode = (node, opts = {}) => {
+            if (!node) return;
+            const preserveWhitespace = !!opts.preserveWhitespace;
+            if (node.nodeType === Node.TEXT_NODE) {
+                pushText(node.nodeValue || '', { preserveWhitespace });
+                return;
+            }
+            if (node.nodeType !== Node.ELEMENT_NODE) {
+                return;
+            }
+
+            const tag = (node.tagName || '').toUpperCase();
+            if (tag === 'BR') {
+                out.push('\n');
+                return;
+            }
+
+            if (tag === 'PRE') {
+                ensureNewline(1);
+                pushText(node.textContent || '', { preserveWhitespace: true });
+                ensureNewline(1);
+                return;
+            }
+
+            if (tag === 'CODE') {
+                pushText(node.textContent || '', { preserveWhitespace });
+                return;
+            }
+
+            if (tag === 'UL' || tag === 'OL') {
+                ensureNewline(1);
+                listStack.push({ type: tag, counter: 0 });
+                const items = Array.from(node.children || []).filter((c) => (c.tagName || '').toUpperCase() === 'LI');
+                items.forEach((li) => {
+                    const top = listStack[listStack.length - 1];
+                    if (top.type === 'OL') {
+                        top.counter += 1;
+                    }
+                    const depth = Math.max(0, listStack.length - 1);
+                    const indent = '  '.repeat(depth);
+                    const marker = top.type === 'OL' ? `${top.counter}. ` : '• ';
+                    ensureNewline(1);
+                    out.push(indent + marker);
+                    // Render LI contents. TinyMCE often wraps list items in <p>,
+                    // so suppress leading block newlines for the first child.
+                    let listMarkerPending = true;
+                    Array.from(li.childNodes || []).forEach((child) => {
+                        // Ignore whitespace-only text nodes so they don't break marker formatting.
+                        if (child && child.nodeType === Node.TEXT_NODE) {
+                            const raw = child.nodeValue || '';
+                            if (!raw.trim()) {
+                                return;
+                            }
+                        }
+                        renderNode(child, { preserveWhitespace, listMarkerStart: listMarkerPending });
+                        listMarkerPending = false;
+                    });
+                    ensureNewline(1);
+                });
+                listStack.pop();
+                ensureNewline(1);
+                return;
+            }
+
+            // Treat common block containers as paragraph breaks.
+            const isBlock = ['P', 'DIV', 'SECTION', 'ARTICLE', 'HEADER', 'FOOTER', 'BLOCKQUOTE'].includes(tag);
+            if (isBlock) {
+                if (!opts.listMarkerStart) {
+                    ensureNewline(1);
+                }
+                Array.from(node.childNodes || []).forEach((child) => {
+                    renderNode(child, { preserveWhitespace });
+                });
+                ensureNewline(opts.listMarkerStart ? 1 : 2);
+                return;
+            }
+
+            // Default: recurse into children.
+            Array.from(node.childNodes || []).forEach((child) => {
+                renderNode(child, { preserveWhitespace });
+            });
+        };
+
+        Array.from(container.childNodes || []).forEach((child) => renderNode(child));
+
+        let text = out.join('');
+        // Normalize whitespace around newlines.
+        text = text
+            .replace(/[ \t]+\n/g, '\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+        return text;
+    };
+
     const getCsrfToken = () => {
         const name = "csrftoken=";
         const cookies = document.cookie ? document.cookie.split(";") : [];
@@ -653,9 +783,6 @@
             scenario: {
                 title: document.getElementById('scenario-title'),
                 description: document.getElementById('scenario-description'),
-                preconditions: document.getElementById('scenario-preconditions'),
-                postconditions: document.getElementById('scenario-postconditions'),
-                tags: document.getElementById('scenario-tags'),
             },
             case: {
                 title: document.getElementById('case-title'),
@@ -3004,7 +3131,8 @@
             const filtered = scenarios.filter((s) => {
                 if (q) {
                     const lower = q;
-                    const match = (s.title || '').toLowerCase().includes(lower) || (s.description || '').toLowerCase().includes(lower) || (Array.isArray(s.tags) ? s.tags.join(' ').toLowerCase().includes(lower) : false);
+                    const formattedDescription = htmlToFormattedText(s.description || '');
+                    const match = (s.title || '').toLowerCase().includes(lower) || formattedDescription.toLowerCase().includes(lower);
                     if (!match) return false;
                 }
                 if (moduleFilterVal) {
@@ -3036,7 +3164,7 @@
                     return `
                         <tr data-scenario-id="${scenario.id}">
                             <td>${escapeHtml(scenario.title || '')}</td>
-                            <td>${escapeHtml(scenario.description || '')}</td>
+                            <td style="white-space: pre-wrap;">${escapeHtml(htmlToFormattedText(scenario.description || ''))}</td>
                             <td>${escapeHtml(moduleLabel)}</td>
                             <td>${escapeHtml(formatDateTime(scenario.created_at || null))}</td>
                             <td>${escapeHtml(formatDateTime(scenario.updated_at || null))}</td>
@@ -3228,12 +3356,8 @@
                     els.caseSummary.innerHTML = '<p class="empty">Loading test cases…</p>';
                 } else {
                     const caseCount = scenario.cases.length;
-                    const pre = scenario.preconditions ? escapeHtml(scenario.preconditions) : '—';
-                    const post = scenario.postconditions ? escapeHtml(scenario.postconditions) : '—';
                     els.caseSummary.innerHTML = `
                         <strong>${caseCount} test case${caseCount === 1 ? '' : 's'} in scope.</strong>
-                        <div>Preconditions: ${pre}</div>
-                        <div>Postconditions: ${post}</div>
                     `;
                 }
             }
@@ -3584,19 +3708,87 @@
                                 } else {
                                     const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
                                     if (modal) {
+                                        const automatedRow = modal.querySelector('.form-row.dependency-toggle') || modal.querySelector('.dependency-toggle');
+                                        const dialog = modal.querySelector('.automation-modal__dialog');
                                         // populate fields as a graceful fallback
-                                        const moduleInput = document.getElementById('module-add-scenario-module-id'); if (moduleInput) moduleInput.value = normalizedScenario.module || '';
-                                        const titleInput = document.getElementById('module-add-scenario-title'); if (titleInput) titleInput.value = normalizedScenario.title || '';
-                                        const descInput = document.getElementById('module-add-scenario-description'); if (descInput) descInput.value = normalizedScenario.description || '';
-                                        const pre = document.getElementById('module-add-scenario-precondition'); if (pre) pre.value = normalizedScenario.preconditions || '';
-                                        const post = document.getElementById('module-add-scenario-postconditions'); if (post) post.value = normalizedScenario.postconditions || '';
-                                        const tags = document.getElementById('module-add-scenario-tags'); if (tags) tags.value = Array.isArray(normalizedScenario.tags) ? normalizedScenario.tags.join(',') : (normalizedScenario.tags || '');
-                                        const isAutomated = document.getElementById('module-add-scenario-is-automated'); if (isAutomated) isAutomated.checked = (typeof normalizedScenario.is_automated !== 'undefined') ? Boolean(normalizedScenario.is_automated) : true;
+                                        const moduleInput = modal.querySelector('#module-add-scenario-module-id') || document.getElementById('module-add-scenario-module-id'); if (moduleInput) moduleInput.value = normalizedScenario.module || '';
+                                        const titleInput = modal.querySelector('#module-add-scenario-title') || document.getElementById('module-add-scenario-title'); if (titleInput) titleInput.value = normalizedScenario.title || '';
+                                        const descInput = modal.querySelector('#module-add-scenario-description') || document.getElementById('module-add-scenario-description');
+                                        if (descInput) {
+                                            const isViewMode = mode === 'view';
+
+                                            // Hard guarantee: View mode must never show/attach TinyMCE.
+                                            if (isViewMode && typeof tinymce !== 'undefined') {
+                                                try { tinymce.remove('#module-add-scenario-description'); } catch (e) { /* ignore */ }
+                                            }
+                                            if (isViewMode) {
+                                                try { descInput.classList.remove('tinymce-editor'); } catch (e) { /* ignore */ }
+                                            }
+
+                                            const rows = 12;
+                                            descInput.rows = rows;
+                                            descInput.setAttribute('rows', String(rows));
+                                            descInput.value = isViewMode ? htmlToFormattedText(normalizedScenario.description || '') : (normalizedScenario.description || '');
+                                            if (isViewMode) {
+                                                try {
+                                                    descInput.style.height = 'auto';
+                                                    descInput.style.overflowY = 'hidden';
+                                                    let minHeightPx = 0;
+                                                    try {
+                                                        const cs = window.getComputedStyle ? window.getComputedStyle(descInput) : null;
+                                                        if (cs) {
+                                                            let lineHeight = Number.parseFloat(cs.lineHeight);
+                                                            if (!Number.isFinite(lineHeight) || lineHeight <= 0) {
+                                                                const fontSize = Number.parseFloat(cs.fontSize) || 0;
+                                                                if (fontSize > 0) {
+                                                                    lineHeight = fontSize * 1.2;
+                                                                }
+                                                            }
+                                                            lineHeight = Number.isFinite(lineHeight) ? lineHeight : 0;
+                                                            const paddingTop = Number.parseFloat(cs.paddingTop) || 0;
+                                                            const paddingBottom = Number.parseFloat(cs.paddingBottom) || 0;
+                                                            if (lineHeight > 0) {
+                                                                minHeightPx = (lineHeight * 12) + paddingTop + paddingBottom;
+                                                            }
+                                                        }
+                                                    } catch (e) { /* ignore */ }
+                                                    const targetHeight = Math.max((descInput.scrollHeight + 2), minHeightPx);
+                                                    descInput.style.height = `${targetHeight}px`;
+                                                } catch (e) { /* ignore */ }
+                                            } else {
+                                                try {
+                                                    descInput.style.height = '';
+                                                    descInput.style.overflowY = '';
+                                                } catch (e) { /* ignore */ }
+                                            }
+                                        }
+                                        const isAutomated = modal.querySelector('#module-add-scenario-is-automated') || document.getElementById('module-add-scenario-is-automated'); if (isAutomated) isAutomated.checked = (typeof normalizedScenario.is_automated !== 'undefined') ? Boolean(normalizedScenario.is_automated) : true;
                                         // set readonly for view
                                         const readOnly = mode === 'view';
-                                        [titleInput, descInput, pre, post, tags].forEach((n) => { if (n) { n.readOnly = readOnly; n.disabled = readOnly; } });
-                                        if (isAutomated) isAutomated.disabled = readOnly;
+
+                                        // View Scenario should be wider for readability.
+                                        if (dialog) {
+                                            try {
+                                                dialog.style.width = readOnly ? '80vw' : '';
+                                                dialog.style.maxWidth = readOnly ? '80vw' : '';
+                                            } catch (e) { /* ignore */ }
+                                        }
+                                        [titleInput, descInput].forEach((n) => { if (n) { n.readOnly = readOnly; n.disabled = false; } });
+                                        if (isAutomated) {
+                                            isAutomated.disabled = readOnly;
+                                            const row = (isAutomated.closest && (isAutomated.closest('.form-row') || isAutomated.closest('.dependency-toggle'))) || null;
+                                            if (row) {
+                                                row.hidden = readOnly;
+                                                try { row.style.display = readOnly ? 'none' : ''; } catch (e) { /* ignore */ }
+                                            }
+                                        }
+                                        if (automatedRow) {
+                                            automatedRow.hidden = readOnly;
+                                            try { automatedRow.style.display = readOnly ? 'none' : ''; } catch (e) { /* ignore */ }
+                                        }
                                         const submit = modal.querySelector('button[type="submit"]'); if (submit) submit.hidden = readOnly;
+                                        const cancelBtn = modal.querySelector('form#module-add-scenario-form [data-action="close-module-add-scenario-modal"]');
+                                        if (cancelBtn) cancelBtn.hidden = readOnly;
                                         modal.hidden = false; body.classList.add('automation-modal-open');
                                     }
                                 }
@@ -4446,9 +4638,6 @@
                     module: (document.getElementById('scenario-module') && document.getElementById('scenario-module').value) || null,
                     title: (inputs.scenario.title.value || '').trim(),
                     description: inputs.scenario.description.value || '',
-                    preconditions: inputs.scenario.preconditions.value || '',
-                    postconditions: inputs.scenario.postconditions.value || '',
-                    tags: splitList(inputs.scenario.tags.value),
                 };
                 if (!payload.title) {
                     throw new Error('Scenario title is required.');
