@@ -86,6 +86,12 @@
                         <label for="module-add-scenario-tags">Tags</label>
                         <input type="text" id="module-add-scenario-tags" name="tags" placeholder="comma,separated">
                     </div>
+                    <div class="form-row dependency-toggle">
+                        <label class="dependency-toggle__label" for="module-add-scenario-is-automated">
+                            <input type="checkbox" id="module-add-scenario-is-automated" name="is_automated" checked>
+                            <span>Automated scenario (included in RUN)</span>
+                        </label>
+                    </div>
                 </fieldset>
                 <div class="form-actions">
                     <button type="submit" class="btn-primary">Save Scenario</button>

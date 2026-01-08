@@ -364,6 +364,15 @@
                 next.project_id = next.plan_id;
             }
         } catch (e) { /* ignore */ }
+
+        // Scenario automation toggle (default True for backwards compatibility)
+        try {
+            if (typeof next.is_automated === 'undefined' || next.is_automated === null) {
+                next.is_automated = true;
+            } else {
+                next.is_automated = Boolean(next.is_automated);
+            }
+        } catch (e) { /* ignore */ }
         return next;
     };
 
@@ -934,18 +943,21 @@
             const preInput = document.getElementById('module-add-scenario-precondition');
             const postInput = document.getElementById('module-add-scenario-postconditions');
             const tagsInput = document.getElementById('module-add-scenario-tags');
+            const isAutomatedInput = document.getElementById('module-add-scenario-is-automated');
             if (scenario) {
                 if (titleInput) titleInput.value = scenario.title || '';
                 if (descInput) descInput.value = scenario.description || '';
                 if (preInput) preInput.value = scenario.preconditions || '';
                 if (postInput) postInput.value = scenario.postconditions || '';
                 if (tagsInput) tagsInput.value = Array.isArray(scenario.tags) ? scenario.tags.join(',') : (scenario.tags || '');
+                if (isAutomatedInput) isAutomatedInput.checked = (typeof scenario.is_automated !== 'undefined') ? Boolean(scenario.is_automated) : true;
             } else {
                 if (titleInput) titleInput.value = '';
                 if (descInput) descInput.value = '';
                 if (preInput) preInput.value = '';
                 if (postInput) postInput.value = '';
                 if (tagsInput) tagsInput.value = '';
+                if (isAutomatedInput) isAutomatedInput.checked = true;
             }
             const submit = modal.querySelector('button[type="submit"]');
             // view mode => readonly fields and hide submit
@@ -955,6 +967,7 @@
             if (preInput) { preInput.readOnly = readOnly; preInput.disabled = readOnly; }
             if (postInput) { postInput.readOnly = readOnly; postInput.disabled = readOnly; }
             if (tagsInput) { tagsInput.readOnly = readOnly; tagsInput.disabled = readOnly; }
+            if (isAutomatedInput) { isAutomatedInput.disabled = readOnly; }
             if (submit) submit.hidden = readOnly;
             // set header title
             const header = document.getElementById('module-add-scenario-modal-title');
@@ -1048,6 +1061,7 @@
             const preInput = document.getElementById('module-add-scenario-precondition');
             const postInput = document.getElementById('module-add-scenario-postconditions');
             const tagsInput = document.getElementById('module-add-scenario-tags');
+            const isAutomatedInput = document.getElementById('module-add-scenario-is-automated');
             const moduleId = moduleInput && moduleInput.value ? Number(moduleInput.value) : null;
             // Require module selection: New Scenario must be opened with a
             // module selected. If missing, surface an error and abort save.
@@ -1060,9 +1074,10 @@
                 project: null,
                 title: (titleInput && titleInput.value || '').trim(),
                 description: descInput && descInput.value || '',
-                precondition: preInput && preInput.value || '',
+                preconditions: preInput && preInput.value || '',
                 postconditions: postInput && postInput.value || '',
                 tags: tagsInput && tagsInput.value ? tagsInput.value.split(/[\,\n]/).map(s => s.trim()).filter(Boolean) : [],
+                is_automated: Boolean(isAutomatedInput ? isAutomatedInput.checked : true),
             };
             // Basic client-side validation: title required
             const titleVal = payload.title ? String(payload.title).trim() : '';

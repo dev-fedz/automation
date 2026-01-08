@@ -258,6 +258,8 @@ class ApiRunResultReport(TimeStampedModel):
 class AutomationReport(TimeStampedModel):
     """High level automation report grouping multiple API run reports."""
 
+    id = models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")
+
     report_id = models.CharField(max_length=12, unique=True, blank=True)
     triggered_in = models.CharField(max_length=500, blank=True)
     triggered_by = models.ForeignKey(
@@ -336,6 +338,7 @@ class TestScenario(TimeStampedModel):
     preconditions = models.TextField(blank=True)
     postconditions = models.TextField(blank=True)
     tags = models.JSONField(default=list, blank=True)
+    is_automated = models.BooleanField(default=True)
 
     class Meta:
         ordering = ["project", "title", "id"]

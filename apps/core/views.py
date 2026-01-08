@@ -35,6 +35,7 @@ from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -446,6 +447,7 @@ class TestScenarioViewSet(viewsets.ModelViewSet):
 class TestCaseViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.TestCaseSerializer
     permission_classes = [IsAuthenticated]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
 
     def update(self, request, *args, **kwargs):
         try:
@@ -681,8 +683,8 @@ class TestModulesViewSet(viewsets.ModelViewSet):
         return queryset
 
 
-def _prepare_automation_data() -> dict[str, Any]:
-    projects_qs = selectors.project_list()
+def _prepare_automation_data(*, automated_scenarios_only: bool = False) -> dict[str, Any]:
+    projects_qs = selectors.project_list(automated_scenarios_only=automated_scenarios_only)
     projects_payload = serializers.ProjectSerializer(projects_qs, many=True).data
     environments_qs = selectors.api_environment_list()
     environments_payload = serializers.ApiEnvironmentSerializer(environments_qs, many=True).data
@@ -773,7 +775,7 @@ def automation_overview(request):
 def automation_run(request):
     """Render the Automation run workspace with initial hierarchy data."""
 
-    data = _prepare_automation_data()
+    data = _prepare_automation_data(automated_scenarios_only=True)
     context = {
         "initial_projects": data["plans"],
         "api_endpoints": data["api_endpoints"],

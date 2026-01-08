@@ -4281,9 +4281,11 @@
                                         const pre = document.getElementById('module-add-scenario-precondition'); if (pre) pre.value = normalizedScenario.preconditions || '';
                                         const post = document.getElementById('module-add-scenario-postconditions'); if (post) post.value = normalizedScenario.postconditions || '';
                                         const tags = document.getElementById('module-add-scenario-tags'); if (tags) tags.value = Array.isArray(normalizedScenario.tags) ? normalizedScenario.tags.join(',') : (normalizedScenario.tags || '');
+                                        const isAutomated = document.getElementById('module-add-scenario-is-automated'); if (isAutomated) isAutomated.checked = (typeof normalizedScenario.is_automated !== 'undefined') ? Boolean(normalizedScenario.is_automated) : true;
                                         // set readonly for view
                                         const readOnly = mode === 'view';
                                         [titleInput, descInput, pre, post, tags].forEach((n) => { if (n) { n.readOnly = readOnly; n.disabled = readOnly; } });
+                                        if (isAutomated) isAutomated.disabled = readOnly;
                                         const submit = modal.querySelector('button[type="submit"]'); if (submit) submit.hidden = readOnly;
                                         modal.hidden = false; body.classList.add('automation-modal-open');
                                     }
@@ -4468,10 +4470,11 @@
                         const isEdit = testcaseIdInput && testcaseIdInput.value;
                         const method = isEdit ? 'PUT' : 'POST';
                         const url = isEdit ? `${base}${encodeURIComponent(testcaseIdInput.value)}/` : base;
+                        const headers = { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' };
                         const resp = await fetch(url, {
                             method,
                             credentials: 'same-origin',
-                            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
+                            headers,
                             body: JSON.stringify(payload),
                         });
                         if (!resp.ok) {

@@ -564,6 +564,7 @@ class TestCaseSerializer(serializers.ModelSerializer):
 class TestScenarioSerializer(serializers.ModelSerializer):
     cases = TestCaseSerializer(many=True, read_only=True)
     tags = serializers.ListField(child=serializers.CharField(), required=False)
+    is_automated = serializers.BooleanField(required=False, default=True)
     module = serializers.PrimaryKeyRelatedField(
         queryset=models.TestModules.objects.all(),
         write_only=True,
@@ -591,6 +592,7 @@ class TestScenarioSerializer(serializers.ModelSerializer):
             "preconditions",
             "postconditions",
             "tags",
+            "is_automated",
             "cases",
             "created_at",
             "updated_at",

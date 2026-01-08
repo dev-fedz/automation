@@ -44,12 +44,13 @@ def api_run_get(pk: int) -> models.ApiRun | None:
     return api_run_list().filter(pk=pk).first()
 
 
-def project_list() -> QuerySet[models.Project]:
-    scenario_qs = (
-        models.TestScenario.objects.select_related("module")
-        .prefetch_related(Prefetch("cases", queryset=models.TestCase.objects.order_by("testcase_id", "id")))
-        .order_by("title", "id")
-    )
+def project_list(*, automated_scenarios_only: bool = False) -> QuerySet[models.Project]:
+    cases_qs = models.TestCase.objects.order_by("testcase_id", "id")
+
+    scenario_qs = models.TestScenario.objects.select_related("module")
+    if automated_scenarios_only:
+        scenario_qs = scenario_qs.filter(is_automated=True)
+    scenario_qs = scenario_qs.prefetch_related(Prefetch("cases", queryset=cases_qs)).order_by("title", "id")
     modules_qs = models.TestModules.objects.order_by("title", "id")
     return (
         models.Project.objects.order_by("name", "id")
