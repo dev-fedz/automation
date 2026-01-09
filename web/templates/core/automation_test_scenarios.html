@@ -209,7 +209,7 @@
                         <button type="button" class="btn-primary" data-action="submit-view-scenario-save">Save Scenario</button>
                         <button type="button" class="btn-secondary" data-action="cancel-view-scenario-edit">Cancel</button>
                     </div>
-                    <div class="form-row" id="module-view-scenario-comments-row" hidden>
+                    <div class="form-row" id="module-view-scenario-comments-row" hidden style="height: 1000px; display: flex; flex-direction: column;">
                         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px;">
                             <span style="font-weight: 600;">COMMENTS</span>
                             <button type="button" class="btn-primary" data-action="toggle-view-scenario-add-comment">Add Comment</button>
@@ -224,7 +224,7 @@
                                 <button type="button" class="btn-secondary" data-action="cancel-view-scenario-add-comment">Cancel</button>
                             </div>
                         </div>
-                        <div id="module-view-scenario-comments" style="max-height: 260px; overflow-y: auto;"></div>
+                        <div id="module-view-scenario-comments" style="flex: 1 1 auto; overflow-y: auto;"></div>
                     </div>
                     <div class="form-row dependency-toggle">
                         <label class="dependency-toggle__label" for="module-add-scenario-is-automated">

@@ -1091,6 +1091,9 @@
             let text = out.join('');
             text = text
                 .replace(/[ \t]+\n/g, '\n')
+                // Avoid a blank line directly before list markers.
+                // Example: "Pre-conditions:\n\n1. Foo" -> "Pre-conditions:\n1. Foo"
+                .replace(/\n{2,}(?=\s*(?:\d+\.\s|•\s))/g, '\n')
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
             return text;
@@ -1105,7 +1108,7 @@
                 let minHeightPx = 0;
                 if (minRows && typeof window !== 'undefined' && window.getComputedStyle) {
                     const cs = window.getComputedStyle(textareaEl);
-                    let lineHeight = Number.parsefloat(cs.lineHeight);
+                    let lineHeight = Number.parseFloat(cs.lineHeight);
                     if (!Number.isFinite(lineHeight) || lineHeight <= 0) {
                         const fontSize = Number.parseFloat(cs.fontSize) || 0;
                         if (fontSize > 0) {
@@ -1133,6 +1136,9 @@
 
         // TinyMCE for inline "Add Comment" in View Scenario
         let viewScenarioCommentEditor = null;
+
+        // TinyMCE for inline Edit/Reply in View Scenario comments
+        let viewScenarioInlineCommentEditor = null;
 
         const removeViewScenarioCommentEditor = () => {
             try {
@@ -1189,6 +1195,449 @@
             });
         };
 
+        const removeViewScenarioInlineCommentEditor = () => {
+            try {
+                if (typeof tinymce !== 'undefined') {
+                    try {
+                        const byId = tinymce.get && tinymce.get('module-view-inline-comment-content');
+                        if (byId) tinymce.remove(byId);
+                    } catch (e) { /* ignore */ }
+                    try { tinymce.remove('#module-view-inline-comment-content'); } catch (e) { /* ignore */ }
+                }
+            } catch (e) { /* ignore */ }
+            viewScenarioInlineCommentEditor = null;
+        };
+
+        const ensureViewScenarioInlineEditor = (modalEl) => {
+            if (!modalEl) return null;
+            let editor = modalEl.querySelector('#module-view-inline-comment-editor');
+            if (editor) return editor;
+
+            editor = document.createElement('div');
+            editor.id = 'module-view-inline-comment-editor';
+            editor.className = 'automation-form';
+            editor.style.display = 'none';
+            editor.style.marginTop = '10px';
+            editor.innerHTML = `
+                <form id="module-view-inline-comment-form" data-mode="" data-comment-id="" data-parent-id="">
+                    <div class="form-row">
+                        <label id="module-view-inline-editor-label" for="module-view-inline-comment-content">Edit Comment</label>
+                        <textarea id="module-view-inline-comment-content" name="content" rows="6" class="tinymce-editor"></textarea>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn-primary" data-action="submit-view-scenario-inline-comment" id="module-view-inline-submit-btn">Save</button>
+                        <button type="button" class="btn-secondary" data-action="cancel-view-scenario-inline-comment" id="module-view-inline-cancel-btn">Cancel</button>
+                    </div>
+                </form>
+            `;
+
+            const commentsContainer = modalEl.querySelector('#module-view-scenario-comments');
+            if (commentsContainer && commentsContainer.parentNode) {
+                commentsContainer.parentNode.insertBefore(editor, commentsContainer.nextSibling);
+            } else {
+                modalEl.appendChild(editor);
+            }
+
+            return editor;
+        };
+
+        const initViewScenarioInlineCommentEditor = ({ modalEl, contentHtml }) => {
+            const editorWrapper = ensureViewScenarioInlineEditor(modalEl);
+            if (!editorWrapper) return;
+            const textarea = editorWrapper.querySelector('#module-view-inline-comment-content');
+            if (!textarea) return;
+
+            removeViewScenarioInlineCommentEditor();
+            editorWrapper.style.display = 'block';
+
+            if (typeof tinymce === 'undefined') {
+                textarea.value = contentHtml || '';
+                return;
+            }
+
+            tinymce.init({
+                target: textarea,
+                height: 200,
+                menubar: false,
+                branding: false,
+                plugins: [
+                    'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
+                    'searchreplace', 'visualblocks', 'code', 'fullscreen',
+                    'insertdatetime', 'table', 'help', 'wordcount'
+                ],
+                toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
+                    'alignleft aligncenter alignright alignjustify | ' +
+                    'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
+                content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }',
+                setup(editor) {
+                    viewScenarioInlineCommentEditor = editor;
+                    editor.on('init', () => {
+                        try { editor.setContent(contentHtml || ''); } catch (e) { /* ignore */ }
+                        try { editor.focus(); } catch (e) { /* ignore */ }
+                    });
+                    editor.on('remove', () => {
+                        if (viewScenarioInlineCommentEditor === editor) {
+                            viewScenarioInlineCommentEditor = null;
+                        }
+                    });
+                },
+            });
+        };
+
+        const updateThumbsUpButtonIcon = (buttonEl, isActive, likesCount = null) => {
+            if (!buttonEl) return;
+            const iconEl = buttonEl.querySelector('[data-role="thumbs-up-icon"]');
+            if (!iconEl) return;
+            const countEl = buttonEl.querySelector('[data-role="thumbs-up-count"]');
+
+            buttonEl.dataset.liked = isActive ? 'true' : 'false';
+            buttonEl.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+
+            const existingCountRaw = buttonEl.dataset.likesCount;
+            const existingCount = Number.isFinite(parseInt(existingCountRaw, 10)) ? parseInt(existingCountRaw, 10) : null;
+            let displayCount = typeof likesCount === 'number' ? likesCount : existingCount;
+
+            if (isActive) {
+                if (displayCount === null) displayCount = 1;
+                if (displayCount < 1) displayCount = 1;
+            }
+
+            if (displayCount !== null && Number.isFinite(displayCount)) {
+                buttonEl.dataset.likesCount = String(displayCount);
+            }
+
+            if (isActive) {
+                iconEl.style.filter = '';
+                iconEl.style.opacity = '1';
+            } else {
+                iconEl.style.filter = 'grayscale(1)';
+                iconEl.style.opacity = '0.45';
+            }
+
+            if (countEl) {
+                if (isActive && displayCount !== null && displayCount > 0) {
+                    countEl.textContent = String(displayCount);
+                    countEl.style.display = '';
+                    countEl.style.marginLeft = '4px';
+                    countEl.style.fontWeight = '600';
+                } else {
+                    countEl.style.display = 'none';
+                }
+            }
+        };
+
+        let activeEmojiPicker = null;
+
+        const openEmojiPickerPopover = (anchorEl, initialReaction = '😊') => {
+            return new Promise((resolve) => {
+                if (!anchorEl) return resolve(null);
+
+                // Close any existing picker
+                if (activeEmojiPicker && typeof activeEmojiPicker.close === 'function') {
+                    activeEmojiPicker.close();
+                }
+
+                const EMOJI_CATEGORIES = [
+                    { key: 'people', label: 'People', icon: '🙂' },
+                    { key: 'nature', label: 'Nature', icon: '🌲' },
+                    { key: 'food', label: 'Food', icon: '🍔' },
+                    { key: 'activity', label: 'Activity', icon: '⚽' },
+                    { key: 'objects', label: 'Objects', icon: '💡' },
+                    { key: 'symbols', label: 'Symbols', icon: '❤️' },
+                    { key: 'flags', label: 'Flags', icon: '🏳️' },
+                ];
+
+                const EMOJI_DATA = [
+                    // People
+                    { e: '😀', n: 'grinning face', c: 'people' },
+                    { e: '😃', n: 'grinning face with big eyes', c: 'people' },
+                    { e: '😄', n: 'grinning face with smiling eyes', c: 'people' },
+                    { e: '😁', n: 'beaming face with smiling eyes', c: 'people' },
+                    { e: '😆', n: 'grinning squinting face', c: 'people' },
+                    { e: '😅', n: 'grinning face with sweat', c: 'people' },
+                    { e: '😂', n: 'face with tears of joy', c: 'people' },
+                    { e: '🤣', n: 'rolling on the floor laughing', c: 'people' },
+                    { e: '😊', n: 'smiling face with smiling eyes', c: 'people' },
+                    { e: '🙂', n: 'slightly smiling face', c: 'people' },
+                    { e: '😉', n: 'winking face', c: 'people' },
+                    { e: '😍', n: 'smiling face with heart-eyes', c: 'people' },
+                    { e: '😘', n: 'face blowing a kiss', c: 'people' },
+                    { e: '😎', n: 'smiling face with sunglasses', c: 'people' },
+                    { e: '🤔', n: 'thinking face', c: 'people' },
+                    { e: '😮', n: 'face with open mouth', c: 'people' },
+                    { e: '😢', n: 'crying face', c: 'people' },
+                    { e: '😭', n: 'loudly crying face', c: 'people' },
+                    { e: '😡', n: 'pouting face', c: 'people' },
+                    { e: '👍', n: 'thumbs up', c: 'people' },
+                    { e: '👎', n: 'thumbs down', c: 'people' },
+                    { e: '👏', n: 'clapping hands', c: 'people' },
+                    { e: '🙏', n: 'folded hands', c: 'people' },
+                    { e: '👋', n: 'waving hand', c: 'people' },
+                    { e: '🔥', n: 'fire', c: 'people' },
+
+                    // Nature
+                    { e: '🌲', n: 'tree', c: 'nature' },
+                    { e: '🌿', n: 'herb', c: 'nature' },
+                    { e: '🌸', n: 'cherry blossom', c: 'nature' },
+                    { e: '🌼', n: 'blossom', c: 'nature' },
+                    { e: '🌞', n: 'sun with face', c: 'nature' },
+                    { e: '🌧️', n: 'cloud with rain', c: 'nature' },
+                    { e: '🌈', n: 'rainbow', c: 'nature' },
+
+                    // Food
+                    { e: '🍔', n: 'hamburger', c: 'food' },
+                    { e: '🍕', n: 'pizza', c: 'food' },
+                    { e: '🍟', n: 'french fries', c: 'food' },
+                    { e: '🍜', n: 'steaming bowl', c: 'food' },
+                    { e: '🍣', n: 'sushi', c: 'food' },
+                    { e: '☕', n: 'hot beverage', c: 'food' },
+
+                    // Activity
+                    { e: '⚽', n: 'soccer ball', c: 'activity' },
+                    { e: '🏀', n: 'basketball', c: 'activity' },
+                    { e: '🎾', n: 'tennis', c: 'activity' },
+                    { e: '🎮', n: 'video game', c: 'activity' },
+                    { e: '🎉', n: 'party popper', c: 'activity' },
+
+                    // Objects
+                    { e: '💡', n: 'light bulb', c: 'objects' },
+                    { e: '🖥️', n: 'desktop computer', c: 'objects' },
+                    { e: '📌', n: 'pushpin', c: 'objects' },
+                    { e: '📎', n: 'paperclip', c: 'objects' },
+                    { e: '🛠️', n: 'hammer and wrench', c: 'objects' },
+
+                    // Symbols
+                    { e: '❤️', n: 'red heart', c: 'symbols' },
+                    { e: '✅', n: 'check mark button', c: 'symbols' },
+                    { e: '❌', n: 'cross mark', c: 'symbols' },
+                    { e: '⭐', n: 'star', c: 'symbols' },
+                    { e: '🚀', n: 'rocket', c: 'symbols' },
+
+                    // Flags
+                    { e: '🏳️', n: 'white flag', c: 'flags' },
+                    { e: '🏁', n: 'chequered flag', c: 'flags' },
+                ];
+
+                const modalRoot = anchorEl.closest('[data-role="module-add-scenario-modal"]') || document.body;
+                const pop = document.createElement('div');
+                pop.setAttribute('role', 'dialog');
+                pop.setAttribute('aria-label', 'Emoji picker');
+                pop.style.position = 'absolute';
+                pop.style.zIndex = '9999';
+                pop.style.background = '#fff';
+                pop.style.border = '1px solid rgba(0,0,0,0.12)';
+                pop.style.borderRadius = '10px';
+                pop.style.boxShadow = 'var(--automation-shadow, 0 10px 24px -12px rgba(0,0,0,0.25))';
+                pop.style.width = '320px';
+                pop.style.maxWidth = 'calc(100vw - 24px)';
+                pop.style.maxHeight = '360px';
+                pop.style.overflow = 'hidden';
+
+                const header = document.createElement('div');
+                header.style.padding = '10px';
+                header.style.borderBottom = '1px solid rgba(0,0,0,0.08)';
+                header.style.display = 'grid';
+                header.style.gap = '8px';
+
+                const search = document.createElement('input');
+                search.type = 'search';
+                search.placeholder = 'Search...';
+                search.value = '';
+                search.style.width = '100%';
+                search.style.padding = '8px 10px';
+                search.style.borderRadius = '8px';
+                search.style.border = '1px solid rgba(0,0,0,0.18)';
+
+                const cats = document.createElement('div');
+                cats.style.display = 'flex';
+                cats.style.alignItems = 'center';
+                cats.style.gap = '6px';
+                cats.style.overflowX = 'auto';
+                cats.style.paddingBottom = '2px';
+
+                const bodyEl = document.createElement('div');
+                bodyEl.style.padding = '10px';
+                bodyEl.style.overflow = 'auto';
+                bodyEl.style.maxHeight = '290px';
+
+                const grid = document.createElement('div');
+                grid.style.display = 'grid';
+                grid.style.gridTemplateColumns = 'repeat(8, 1fr)';
+                grid.style.gap = '6px';
+
+                let activeCategory = 'people';
+
+                const renderGrid = () => {
+                    const q = (search.value || '').trim().toLowerCase();
+                    grid.innerHTML = '';
+
+                    const filtered = EMOJI_DATA.filter((item) => {
+                        if (activeCategory && item.c !== activeCategory) return false;
+                        if (!q) return true;
+                        return item.n.includes(q) || item.e.includes(q);
+                    });
+
+                    filtered.forEach((item) => {
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.textContent = item.e;
+                        btn.title = item.n;
+                        btn.style.border = 'none';
+                        btn.style.background = 'transparent';
+                        btn.style.cursor = 'pointer';
+                        btn.style.fontSize = '20px';
+                        btn.style.lineHeight = '1';
+                        btn.style.padding = '6px';
+                        btn.style.borderRadius = '8px';
+                        btn.addEventListener('mouseenter', () => {
+                            btn.style.background = 'rgba(0,0,0,0.06)';
+                        });
+                        btn.addEventListener('mouseleave', () => {
+                            btn.style.background = 'transparent';
+                        });
+                        btn.addEventListener('click', () => {
+                            close(item.e);
+                        });
+                        grid.appendChild(btn);
+                    });
+                };
+
+                const setActiveCategory = (catKey) => {
+                    activeCategory = catKey;
+                    Array.from(cats.querySelectorAll('button[data-cat]')).forEach((b) => {
+                        const isActive = b.getAttribute('data-cat') === catKey;
+                        b.style.opacity = isActive ? '1' : '0.55';
+                        b.style.background = isActive ? 'rgba(0,0,0,0.06)' : 'transparent';
+                    });
+                    renderGrid();
+                };
+
+                EMOJI_CATEGORIES.forEach((cat) => {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.setAttribute('data-cat', cat.key);
+                    btn.title = cat.label;
+                    btn.textContent = cat.icon;
+                    btn.style.border = 'none';
+                    btn.style.background = 'transparent';
+                    btn.style.cursor = 'pointer';
+                    btn.style.padding = '6px';
+                    btn.style.borderRadius = '8px';
+                    btn.style.fontSize = '18px';
+                    btn.style.opacity = cat.key === activeCategory ? '1' : '0.55';
+                    btn.addEventListener('click', () => setActiveCategory(cat.key));
+                    cats.appendChild(btn);
+                });
+
+                header.appendChild(search);
+                header.appendChild(cats);
+                bodyEl.appendChild(grid);
+                pop.appendChild(header);
+                pop.appendChild(bodyEl);
+
+                const close = (value = null) => {
+                    cleanup();
+                    resolve(value);
+                };
+
+                const onDocMouseDown = (ev) => {
+                    const t = ev.target;
+                    if (!t) return;
+                    if (pop.contains(t) || anchorEl.contains(t)) return;
+                    close(null);
+                };
+
+                const onDocKeyDown = (ev) => {
+                    if (ev.key === 'Escape') {
+                        ev.preventDefault();
+                        close(null);
+                    }
+                };
+
+                const cleanup = () => {
+                    document.removeEventListener('mousedown', onDocMouseDown, true);
+                    document.removeEventListener('keydown', onDocKeyDown, true);
+                    if (pop && pop.parentNode) pop.parentNode.removeChild(pop);
+                    activeEmojiPicker = null;
+                };
+
+                // Position
+                modalRoot.appendChild(pop);
+                const r = anchorEl.getBoundingClientRect();
+                const rootR = modalRoot === document.body ? { left: 0, top: 0 } : modalRoot.getBoundingClientRect();
+                const left = Math.min(Math.max(8, r.left - rootR.left), (window.innerWidth - 340));
+                const top = Math.max(8, r.bottom - rootR.top + 8);
+                pop.style.left = `${left}px`;
+                pop.style.top = `${top}px`;
+
+                activeEmojiPicker = { close };
+                document.addEventListener('mousedown', onDocMouseDown, true);
+                document.addEventListener('keydown', onDocKeyDown, true);
+
+                // initial render
+                renderGrid();
+                setActiveCategory('people');
+                try {
+                    void initialReaction;
+                } catch (e) { /* ignore */ }
+
+                // focus search
+                setTimeout(() => {
+                    try { search.focus(); } catch (_) { }
+                }, 0);
+            });
+        };
+
+        const normalizeCommentHtmlForDisplay = (value) => {
+            if (!value) return '';
+            try {
+                const html = String(value);
+                if (typeof document === 'undefined' || !document.createElement) return html;
+
+                const wrapper = document.createElement('div');
+                wrapper.innerHTML = html;
+
+                const isEmptyBlock = (el) => {
+                    if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
+                    const tag = (el.tagName || '').toUpperCase();
+                    if (!['P', 'DIV', 'SECTION', 'ARTICLE', 'BLOCKQUOTE'].includes(tag)) return false;
+
+                    // Consider a block empty if it contains only whitespace, NBSPs, and/or <br>.
+                    const clone = el.cloneNode(true);
+                    try {
+                        Array.from(clone.querySelectorAll('br')).forEach((br) => br.parentNode && br.parentNode.removeChild(br));
+                    } catch (e) { /* ignore */ }
+                    const hasRichChildren = !!(clone.querySelector && clone.querySelector('img,video,iframe,table,ul,ol'));
+                    if (hasRichChildren) return false;
+                    const text = (clone.textContent || '').replace(/\u00A0/g, ' ').trim();
+                    return !text;
+                };
+
+                Array.from(wrapper.querySelectorAll('p,div,section,article,blockquote')).forEach((el) => {
+                    if (isEmptyBlock(el)) {
+                        try { el.parentNode && el.parentNode.removeChild(el); } catch (e) { /* ignore */ }
+                    }
+                });
+
+                return wrapper.innerHTML;
+            } catch (e) {
+                return String(value);
+            }
+        };
+
+        const renderCommentPlainHtml = (rawHtml) => {
+            try {
+                const plain = htmlToFormattedText(rawHtml || '');
+                return escapeHtml(plain).replace(/\n/g, '<br>');
+            } catch (e) {
+                try {
+                    return escapeHtml(String(rawHtml || '')).replace(/\n/g, '<br>');
+                } catch (err) {
+                    return '';
+                }
+            }
+        };
+
         const loadScenarioCommentsForViewModal = async (scenarioId) => {
             const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
             if (!modal) return;
@@ -1214,23 +1663,76 @@
                     return;
                 }
 
-                const renderOne = (comment) => {
+                const currentUserId = (() => {
+                    try {
+                        const el = document.getElementById('automation-app') || document.getElementById('data-management-app');
+                        const raw = el && el.dataset ? el.dataset.currentUserId : null;
+                        if (!raw || raw === 'null') return null;
+                        const id = parseInt(raw, 10);
+                        return Number.isFinite(id) ? id : null;
+                    } catch (e) {
+                        return null;
+                    }
+                })();
+
+                const renderComment = (comment, isReply = false) => {
                     if (!comment) return '';
-                    const author = escapeHtml(comment.user_name || comment.user_email || 'Unknown');
-                    const when = escapeHtml(formatDateTime(comment.created_at || null));
-                    const content = comment.content || '';
+
+                    const canEdit = currentUserId && Number(comment.user) === Number(currentUserId);
+                    const editBtn = canEdit ? `
+                        <button type="button" class="comment-action-btn" data-action="view-scenario-edit-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Edit">
+                            <span>✏️</span>
+                        </button>` : '';
+                    const deleteBtn = canEdit ? `
+                        <button type="button" class="comment-action-btn" data-action="view-scenario-delete-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Delete">
+                            <span>🗑️</span>
+                        </button>` : '';
+
+                    const isLiked = !!comment.user_has_liked;
+                    const likesCount = typeof comment.likes_count === 'number' ? comment.likes_count : 0;
+                    const thumbsUpIconStyle = isLiked ? '' : 'filter: grayscale(1); opacity: 0.45;';
+                    const thumbsUpCountStyle = (isLiked && likesCount > 0) ? 'margin-left: 4px; font-weight: 600;' : 'display: none;';
+
+                    const userReaction = (comment.user_reaction || '').trim();
+                    const reactionsSummary = Array.isArray(comment.reactions_summary) ? comment.reactions_summary : [];
+                    const reactionsSummaryText = reactionsSummary
+                        .filter((x) => x && x.reaction && typeof x.count === 'number' && x.count > 0)
+                        .map((x) => `${x.reaction} ${x.count}`)
+                        .join(' ');
+                    const reactionDisplayText = reactionsSummaryText || '😊';
+
+                    const repliesHtml = (!isReply && Array.isArray(comment.replies) && comment.replies.length > 0)
+                        ? `<div class="comment-replies">${comment.replies.map((reply) => renderComment(reply, true)).join('')}</div>`
+                        : '';
+
+                    const rawCommentHtml = normalizeCommentHtmlForDisplay(comment.content || '');
+                    const commentDisplayHtml = renderCommentPlainHtml(rawCommentHtml);
+
                     return `
-                        <div class="comment-item" data-comment-id="${escapeHtml(comment.id || '')}">
+                        <div class="comment-item ${isReply ? 'comment-reply' : ''}" data-comment-id="${escapeHtml(comment.id || '')}" data-comment-user="${escapeHtml(comment.user || '')}">
                             <div class="comment-header">
-                                <span class="comment-author">${author}</span>
-                                <span class="comment-date">${when}</span>
+                                <span class="comment-author">${escapeHtml(comment.user_name || comment.user_email || 'Unknown')}${comment.is_edited ? ' (edited)' : ''}</span>
+                                <span class="comment-date">${escapeHtml(formatDateTime(comment.created_at || null))}</span>
                             </div>
-                            <div class="comment-content">${content}</div>
+                            <div class="comment-content" data-comment-content data-raw-html="${escapeHtml(rawCommentHtml)}">${commentDisplayHtml}</div>
+                            <div class="comment-actions">
+                                ${!isReply ? `<button type="button" class="comment-action-btn" data-action="view-scenario-reply-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Reply"><span>↩️</span></button>` : ''}
+                                <button type="button" class="comment-action-btn" data-action="view-scenario-thumbs-up-comment" data-comment-id="${escapeHtml(comment.id || '')}" data-liked="${isLiked ? 'true' : 'false'}" data-likes-count="${escapeHtml(String(likesCount))}" aria-pressed="${isLiked ? 'true' : 'false'}" title="Thumbs Up">
+                                    <span data-role="thumbs-up-icon" style="${thumbsUpIconStyle}">👍</span>
+                                    <span data-role="thumbs-up-count" style="${thumbsUpCountStyle}">${escapeHtml(String(likesCount))}</span>
+                                </button>
+                                <button type="button" class="comment-action-btn" data-action="view-scenario-add-reaction-comment" data-comment-id="${escapeHtml(comment.id || '')}" data-user-reaction="${escapeHtml(userReaction)}" title="Add Reaction">
+                                    <span data-role="reaction-display">${escapeHtml(reactionDisplayText)}</span>
+                                </button>
+                                ${editBtn}
+                                ${deleteBtn}
+                            </div>
+                            ${repliesHtml}
                         </div>
                     `;
                 };
 
-                container.innerHTML = list.map((c) => renderOne(c)).join('');
+                container.innerHTML = list.map((c) => renderComment(c, false)).join('');
             } catch (e) {
                 container.innerHTML = '<div class="comment-empty">Failed to load comments.</div>';
             }
@@ -1450,7 +1952,7 @@
             const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
             if (modal && !modal.dataset.scenarioDescClickBound) {
                 modal.dataset.scenarioDescClickBound = '1';
-                modal.addEventListener('click', (ev) => {
+                modal.addEventListener('click', async (ev) => {
                     const target = ev && ev.target ? ev.target : null;
                     if (!target) return;
                     const descEl = target.closest && target.closest('#module-add-scenario-description');
@@ -1468,7 +1970,8 @@
                         }
                     } catch (e) { /* ignore */ }
 
-                    // Only proceed if TinyMCE is available.
+                    // View Scenario: only allow showing Save when TinyMCE mode
+                    // can be activated (i.e., description becomes editable).
                     if (typeof tinymce === 'undefined') {
                         return;
                     }
@@ -1512,7 +2015,7 @@
             if (modal && !modal.dataset.viewScenarioInlineCommentBound) {
                 modal.dataset.viewScenarioInlineCommentBound = '1';
 
-                modal.addEventListener('click', (ev) => {
+                modal.addEventListener('click', async (ev) => {
                     const toggleBtn = ev && ev.target && ev.target.closest
                         ? ev.target.closest('[data-action="toggle-view-scenario-add-comment"]')
                         : null;
@@ -1528,6 +2031,236 @@
                     const postBtn = ev && ev.target && ev.target.closest
                         ? ev.target.closest('[data-action="post-view-scenario-add-comment"]')
                         : null;
+
+                    const editCommentBtn = ev && ev.target && ev.target.closest
+                        ? ev.target.closest('[data-action="view-scenario-edit-comment"]')
+                        : null;
+                    const replyCommentBtn = ev && ev.target && ev.target.closest
+                        ? ev.target.closest('[data-action="view-scenario-reply-comment"]')
+                        : null;
+                    const deleteCommentBtn = ev && ev.target && ev.target.closest
+                        ? ev.target.closest('[data-action="view-scenario-delete-comment"]')
+                        : null;
+                    const thumbsUpBtn = ev && ev.target && ev.target.closest
+                        ? ev.target.closest('[data-action="view-scenario-thumbs-up-comment"]')
+                        : null;
+                    const addReactionBtn = ev && ev.target && ev.target.closest
+                        ? ev.target.closest('[data-action="view-scenario-add-reaction-comment"]')
+                        : null;
+                    const cancelInlineBtn = ev && ev.target && ev.target.closest
+                        ? ev.target.closest('[data-action="cancel-view-scenario-inline-comment"]')
+                        : null;
+                    const submitInlineBtn = ev && ev.target && ev.target.closest
+                        ? ev.target.closest('[data-action="submit-view-scenario-inline-comment"]')
+                        : null;
+
+                    const handleCommentAction = async () => {
+                        const anyBtn = editCommentBtn || replyCommentBtn || deleteCommentBtn || thumbsUpBtn || addReactionBtn || cancelInlineBtn || submitInlineBtn;
+                        if (!anyBtn) return false;
+
+                        try {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                        } catch (e) { /* ignore */ }
+
+                        if (state.moduleScenarioModalMode !== 'view') return true;
+
+                        const cssEscape = (val) => {
+                            try {
+                                if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(String(val));
+                            } catch (e) { /* ignore */ }
+                            return String(val).replace(/[^a-zA-Z0-9_\-]/g, '\\$&');
+                        };
+
+                        const editorWrapper = ensureViewScenarioInlineEditor(modal);
+                        const inlineForm = editorWrapper ? editorWrapper.querySelector('#module-view-inline-comment-form') : null;
+                        const inlineLabel = editorWrapper ? editorWrapper.querySelector('#module-view-inline-editor-label') : null;
+                        const inlineSubmit = editorWrapper ? editorWrapper.querySelector('#module-view-inline-submit-btn') : null;
+
+                        if (cancelInlineBtn) {
+                            if (editorWrapper) editorWrapper.style.display = 'none';
+                            removeViewScenarioInlineCommentEditor();
+                            return true;
+                        }
+
+                        const commentId = anyBtn && anyBtn.dataset ? anyBtn.dataset.commentId : null;
+
+                        if (editCommentBtn && commentId) {
+                            const commentItem = modal.querySelector(`.comment-item[data-comment-id="${cssEscape(commentId)}"]`);
+                            const contentDiv = commentItem ? commentItem.querySelector('[data-comment-content]') : null;
+                            const currentContent = (contentDiv && contentDiv.dataset && typeof contentDiv.dataset.rawHtml === 'string')
+                                ? contentDiv.dataset.rawHtml
+                                : (contentDiv ? (contentDiv.innerHTML || '') : '');
+
+                            if (inlineForm) {
+                                inlineForm.setAttribute('data-mode', 'edit');
+                                inlineForm.setAttribute('data-comment-id', String(commentId));
+                                inlineForm.setAttribute('data-parent-id', '');
+                            }
+                            if (inlineLabel) inlineLabel.textContent = 'Edit Comment';
+                            if (inlineSubmit) inlineSubmit.textContent = 'Update Comment';
+
+                            try {
+                                const actionsDiv = commentItem ? commentItem.querySelector('.comment-actions') : null;
+                                if (actionsDiv && editorWrapper) actionsDiv.after(editorWrapper);
+                            } catch (e) { /* ignore */ }
+
+                            initViewScenarioInlineCommentEditor({ modalEl: modal, contentHtml: currentContent });
+                            return true;
+                        }
+
+                        if (replyCommentBtn && commentId) {
+                            const commentItem = modal.querySelector(`.comment-item[data-comment-id="${cssEscape(commentId)}"]`);
+
+                            if (inlineForm) {
+                                inlineForm.setAttribute('data-mode', 'reply');
+                                inlineForm.setAttribute('data-comment-id', '');
+                                inlineForm.setAttribute('data-parent-id', String(commentId));
+                            }
+                            if (inlineLabel) inlineLabel.textContent = 'Reply to Comment';
+                            if (inlineSubmit) inlineSubmit.textContent = 'Post Reply';
+
+                            try {
+                                const actionsDiv = commentItem ? commentItem.querySelector('.comment-actions') : null;
+                                if (actionsDiv && editorWrapper) actionsDiv.after(editorWrapper);
+                            } catch (e) { /* ignore */ }
+
+                            initViewScenarioInlineCommentEditor({ modalEl: modal, contentHtml: '' });
+                            return true;
+                        }
+
+                        if (submitInlineBtn) {
+                            if (!state.moduleScenarioCurrentId) return true;
+                            if (!inlineForm) return true;
+                            const mode = inlineForm.getAttribute('data-mode') || '';
+                            const editId = inlineForm.getAttribute('data-comment-id') || '';
+                            const parentId = inlineForm.getAttribute('data-parent-id') || '';
+
+                            let content = '';
+                            try {
+                                if (typeof tinymce !== 'undefined' && tinymce.get) {
+                                    const editor = tinymce.get('module-view-inline-comment-content');
+                                    if (editor) content = editor.getContent() || '';
+                                }
+                            } catch (e) { /* ignore */ }
+
+                            if (!content) {
+                                const textarea = inlineForm.querySelector('#module-view-inline-comment-content');
+                                content = textarea ? (textarea.value || '').trim() : '';
+                            }
+
+                            if (!content) {
+                                showToast('Please enter a comment.', 'error');
+                                return true;
+                            }
+
+                            try {
+                                let url = '';
+                                let method = 'POST';
+                                let body = null;
+
+                                if (mode === 'edit') {
+                                    if (!editId) return true;
+                                    url = `/api/core/scenario-comments/${encodeURIComponent(String(editId))}/`;
+                                    method = 'PATCH';
+                                    body = JSON.stringify({ content });
+                                } else if (mode === 'reply') {
+                                    if (!parentId) return true;
+                                    url = '/api/core/scenario-comments/';
+                                    method = 'POST';
+                                    body = JSON.stringify({ scenario: state.moduleScenarioCurrentId, content, parent: parentId });
+                                } else {
+                                    return true;
+                                }
+
+                                submitInlineBtn.disabled = true;
+                                await request(url, { method, body });
+                                showToast(mode === 'edit' ? 'Comment updated.' : 'Reply posted.', 'success');
+                                if (editorWrapper) editorWrapper.style.display = 'none';
+                                removeViewScenarioInlineCommentEditor();
+                                await loadScenarioCommentsForViewModal(state.moduleScenarioCurrentId);
+                            } catch (e) {
+                                showToast(e instanceof Error ? e.message : 'Failed to save comment.', 'error');
+                            } finally {
+                                submitInlineBtn.disabled = false;
+                            }
+                            return true;
+                        }
+
+                        if (deleteCommentBtn && commentId) {
+                            try {
+                                if (!window.confirm('Are you sure you want to delete this comment?')) return true;
+                            } catch (e) { /* ignore */ }
+                            try {
+                                await request(`/api/core/scenario-comments/${encodeURIComponent(String(commentId))}/`, { method: 'DELETE' });
+                                showToast('Comment deleted.', 'success');
+                                await loadScenarioCommentsForViewModal(state.moduleScenarioCurrentId);
+                            } catch (e) {
+                                showToast(e instanceof Error ? e.message : 'Failed to delete comment.', 'error');
+                            }
+                            return true;
+                        }
+
+                        if (thumbsUpBtn && commentId) {
+                            const url = `/api/core/scenario-comments/${encodeURIComponent(String(commentId))}/toggle_like/`;
+                            const wasLiked = thumbsUpBtn.dataset.liked === 'true';
+                            const wasLikesCountRaw = thumbsUpBtn.dataset.likesCount;
+                            const wasLikesCount = Number.isFinite(parseInt(wasLikesCountRaw, 10)) ? parseInt(wasLikesCountRaw, 10) : 0;
+                            const optimisticLiked = !wasLiked;
+                            const optimisticCount = optimisticLiked ? Math.max(1, wasLikesCount + 1) : Math.max(0, wasLikesCount - 1);
+                            updateThumbsUpButtonIcon(thumbsUpBtn, optimisticLiked, optimisticCount);
+                            try {
+                                thumbsUpBtn.disabled = true;
+                                const data = await request(url, { method: 'POST' });
+                                updateThumbsUpButtonIcon(thumbsUpBtn, !!(data && data.liked), data && typeof data.likes_count === 'number' ? data.likes_count : null);
+                            } catch (e) {
+                                updateThumbsUpButtonIcon(thumbsUpBtn, wasLiked, wasLikesCount);
+                                showToast(e instanceof Error ? e.message : 'Failed to toggle thumbs up.', 'error');
+                            } finally {
+                                thumbsUpBtn.disabled = false;
+                            }
+                            return true;
+                        }
+
+                        if (addReactionBtn && commentId) {
+                            const current = (addReactionBtn.dataset.userReaction || '').trim() || '😊';
+                            const reaction = await openEmojiPickerPopover(addReactionBtn, current);
+                            if (!reaction) return true;
+                            try {
+                                addReactionBtn.disabled = true;
+                                const data = await request(`/api/core/scenario-comments/${encodeURIComponent(String(commentId))}/set_reaction/`, {
+                                    method: 'POST',
+                                    body: JSON.stringify({ reaction }),
+                                });
+
+                                const displayEl = addReactionBtn.querySelector('[data-role="reaction-display"]');
+                                const nextUserReaction = data && data.reacted ? (data.reaction || reaction) : '';
+                                addReactionBtn.dataset.userReaction = nextUserReaction;
+
+                                if (displayEl) {
+                                    const summary = (data && Array.isArray(data.reactions_summary)) ? data.reactions_summary : [];
+                                    const summaryText = summary
+                                        .filter((x) => x && x.reaction && typeof x.count === 'number' && x.count > 0)
+                                        .map((x) => `${x.reaction} ${x.count}`)
+                                        .join(' ');
+                                    displayEl.textContent = summaryText || '😊';
+                                }
+                                showToast(data && data.reacted ? 'Reaction saved.' : 'Reaction removed.', 'success');
+                            } catch (e) {
+                                showToast(e instanceof Error ? e.message : 'Failed to add reaction.', 'error');
+                            } finally {
+                                addReactionBtn.disabled = false;
+                            }
+                            return true;
+                        }
+
+                        return true;
+                    };
+
+                    try {
+                        const handled = await handleCommentAction();
+                        if (handled) return;
+                    } catch (e) { /* ignore */ }
 
                     if (cancelEditBtn) {
                         if (state.moduleScenarioModalMode !== 'view') return;
@@ -1662,6 +2395,11 @@
             removeScenarioDescriptionEditor();
             // Cleanup inline comment editor (View Scenario)
             removeViewScenarioCommentEditor();
+            removeViewScenarioInlineCommentEditor();
+            try {
+                const editorWrapper = modal.querySelector('#module-view-inline-comment-editor');
+                if (editorWrapper) editorWrapper.style.display = 'none';
+            } catch (e) { /* ignore */ }
             const form = document.getElementById('module-add-scenario-form');
             if (form) form.reset();
         };
