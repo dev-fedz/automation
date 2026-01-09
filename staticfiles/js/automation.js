@@ -1094,6 +1094,163 @@
             return { html: sanitized, plain };
         };
 
+        // TinyMCE for Test Case Description (module-add-case-modal)
+        let caseDescriptionEditor = null;
+
+        const getCaseDescriptionEditor = () => {
+            try {
+                if (typeof window !== 'undefined' && window.tinymce && typeof window.tinymce.get === 'function') {
+                    const byId = window.tinymce.get('module-add-case-description');
+                    if (byId) return byId;
+                }
+            } catch (_e) {
+                /* ignore */
+            }
+            return caseDescriptionEditor;
+        };
+
+        const setTinyMceReadOnly = (editor, readOnly) => {
+            if (!editor) return;
+            try {
+                if (typeof editor.setMode === 'function') {
+                    editor.setMode(readOnly ? 'readonly' : 'design');
+                    return;
+                }
+            } catch (_e) {
+                /* ignore */
+            }
+            try {
+                if (editor.mode && typeof editor.mode.set === 'function') {
+                    editor.mode.set(readOnly ? 'readonly' : 'design');
+                }
+            } catch (_e) {
+                /* ignore */
+            }
+        };
+
+        const removeCaseDescriptionEditor = () => {
+            try {
+                if (typeof tinymce !== 'undefined') {
+                    try {
+                        const byId = tinymce.get && tinymce.get('module-add-case-description');
+                        if (byId) tinymce.remove(byId);
+                    } catch (_e) {
+                        /* ignore */
+                    }
+                    try {
+                        tinymce.remove('#module-add-case-description');
+                    } catch (_e) {
+                        /* ignore */
+                    }
+                }
+            } catch (_e) {
+                /* ignore */
+            }
+            caseDescriptionEditor = null;
+            try {
+                const el = document.getElementById('module-add-case-description');
+                if (el) {
+                    el.style.display = '';
+                    el.removeAttribute('aria-hidden');
+                }
+            } catch (_e) {
+                /* ignore */
+            }
+        };
+
+        const initCaseDescriptionEditor = ({ readOnly } = {}) => {
+            const textarea = document.getElementById('module-add-case-description');
+            if (!textarea) return;
+
+            // Avoid duplicate editors when reopening modals.
+            removeCaseDescriptionEditor();
+
+            if (typeof window.tinymce === 'undefined') {
+                return;
+            }
+
+            const initialValue = sanitizeRichText(textarea.value || '');
+
+            window.tinymce.init({
+                target: textarea,
+                height: 200,
+                menubar: false,
+                branding: false,
+                plugins: [
+                    'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
+                    'searchreplace', 'visualblocks', 'code', 'fullscreen',
+                    'insertdatetime', 'table', 'help', 'wordcount'
+                ],
+                toolbar:
+                    'undo redo | formatselect | bold italic underline strikethrough | ' +
+                    'alignleft aligncenter alignright alignjustify | ' +
+                    'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
+                content_style:
+                    'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }',
+                setup(editor) {
+                    caseDescriptionEditor = editor;
+                    editor.on('init', () => {
+                        try {
+                            editor.setContent(initialValue || '');
+                            textarea.value = initialValue || '';
+                        } catch (_e) {
+                            /* ignore */
+                        }
+                        setTinyMceReadOnly(editor, Boolean(readOnly));
+                    });
+                    const sync = () => {
+                        try {
+                            const html = sanitizeRichText(editor.getContent({ format: 'html' }) || '');
+                            textarea.value = html;
+                        } catch (_e) {
+                            /* ignore */
+                        }
+                    };
+                    editor.on('change keyup paste blur setcontent', sync);
+                    editor.on('remove', () => {
+                        if (caseDescriptionEditor === editor) {
+                            caseDescriptionEditor = null;
+                        }
+                    });
+                },
+            });
+        };
+
+        const syncCaseDescriptionFromEditor = () => {
+            const textarea = document.getElementById('module-add-case-description');
+            if (!textarea) return '';
+            const editor = getCaseDescriptionEditor();
+            if (editor && typeof editor.getContent === 'function') {
+                try {
+                    const html = sanitizeRichText(editor.getContent({ format: 'html' }) || '');
+                    textarea.value = html;
+                    return html;
+                } catch (_e) {
+                    /* ignore */
+                }
+            }
+            textarea.value = sanitizeRichText(textarea.value || '');
+            return textarea.value;
+        };
+
+        const applyCaseModalLayout = (modalEl, { isDetails } = {}) => {
+            if (!modalEl) return;
+            try {
+                const dialog = modalEl.querySelector('.automation-modal__dialog');
+                if (dialog) {
+                    dialog.style.width = isDetails ? '80%' : '';
+                    dialog.style.maxWidth = isDetails ? '80%' : '';
+                }
+            } catch (e) { /* ignore */ }
+
+            try {
+                const descEl = document.getElementById('module-add-case-description');
+                if (descEl) {
+                    descEl.rows = isDetails ? 12 : 3;
+                }
+            } catch (e) { /* ignore */ }
+        };
+
         // Normalize scenario shape returned by the API so client-side code can
         // reliably compare module and plan ids. Some API responses include
         // nested objects for `module` or `plan` which breaks equality checks.
@@ -1601,12 +1758,60 @@
 
         const getSelectedPlan = () => state.plans.find((plan) => Number(plan.id) === Number(state.selectedPlanId)) || null;
 
+        const findScenarioById = (scenarioId) => {
+            if (!scenarioId && scenarioId !== 0) return null;
+            const sid = toNumericId(scenarioId);
+            if (sid === null || sid === undefined) return null;
+            for (const plan of (state.plans || [])) {
+                if (!plan || !Array.isArray(plan.scenarios)) continue;
+                const found = plan.scenarios.find((s) => Number(s.id) === Number(sid));
+                if (found) return found;
+            }
+            return null;
+        };
+
         const getSelectedScenario = () => {
             const plan = getSelectedPlan();
             if (!plan || !Array.isArray(plan.scenarios)) {
                 return null;
             }
             return plan.scenarios.find((scenario) => Number(scenario.id) === Number(state.selectedScenarioId)) || null;
+        };
+
+        const applyScenarioAutomationToCaseModal = ({ modalEl, scenario, scenarioId } = {}) => {
+            try {
+                if (!modalEl) return;
+                const resolvedScenario = scenario || findScenarioById(scenarioId);
+                const isAutomated = !(resolvedScenario && Object.prototype.hasOwnProperty.call(resolvedScenario, 'is_automated') && resolvedScenario.is_automated === false);
+
+                const titleInput = document.getElementById('module-add-case-title');
+                const descInput = document.getElementById('module-add-case-description');
+                const titleRow = titleInput && titleInput.closest ? titleInput.closest('.form-row') : null;
+                const descRow = descInput && descInput.closest ? descInput.closest('.form-row') : null;
+                const fieldset = modalEl.querySelector('form#module-add-case-form fieldset') || modalEl.querySelector('fieldset');
+                if (fieldset) {
+                    const rows = Array.from(fieldset.querySelectorAll('.form-row'));
+                    rows.forEach((row) => {
+                        if (!row) return;
+                        const keep = (titleRow && row === titleRow) || (descRow && row === descRow);
+                        const hide = !isAutomated && !keep;
+                        row.hidden = hide;
+                        try { row.style.display = hide ? 'none' : ''; } catch (e) { /* ignore */ }
+                    });
+                }
+
+                // Disable API request selection when scenario is not automated.
+                try {
+                    const apiBtn = document.getElementById('module-open-api-explorer');
+                    if (apiBtn) {
+                        apiBtn.disabled = !isAutomated;
+                        apiBtn.setAttribute('aria-disabled', (!isAutomated).toString());
+                        apiBtn.title = !isAutomated
+                            ? 'Disabled: this scenario is not for automation.'
+                            : 'Choose related API request';
+                    }
+                } catch (e) { /* ignore */ }
+            } catch (e) { /* ignore */ }
         };
 
         const getScenarioModuleId = (scenario) => {
@@ -2019,6 +2224,16 @@
                             if (sid && typeof loadDependencyOptions === 'function') {
                                 loadDependencyOptions(sid);
                             }
+                            try {
+                                const testcaseId = document.getElementById('module-add-case-testcase-id');
+                                if (testcaseId) testcaseId.value = '';
+                            } catch (_e) { /* ignore */ }
+                            try {
+                                const descEl = document.getElementById('module-add-case-description');
+                                if (descEl) descEl.value = '';
+                            } catch (_e) { /* ignore */ }
+                            try { applyCaseModalLayout(caseModal, { isDetails: false }); } catch (_e) { /* ignore */ }
+                            try { initCaseDescriptionEditor({ readOnly: false }); } catch (_e) { /* ignore */ }
                             caseModal.hidden = false;
                             body.classList.add('automation-modal-open');
                             const titleInput = document.getElementById('module-add-case-title');
@@ -3433,7 +3648,7 @@
                             cases = cases.filter((c) => {
                                 const idLabel = (c.testcase_id || String(c.id || '')).toLowerCase();
                                 const title = (c.title || '').toLowerCase();
-                                const desc = (c.description || '').toLowerCase();
+                                const desc = htmlToFormattedText(c.description || '').toLowerCase();
                                 return idLabel.includes(lower) || title.includes(lower) || desc.includes(lower);
                             });
                         }
@@ -3446,7 +3661,7 @@
                 const rows = cases.map((testCase) => {
                     const idLabel = escapeHtml(testCase.testcase_id || testCase.id || '');
                     const title = escapeHtml(testCase.title || 'Untitled case');
-                    const desc = escapeHtml(testCase.description || '');
+                    const desc = escapeHtml(htmlToFormattedText(testCase.description || ''));
                     const created = escapeHtml(formatDateTime(testCase.created_at || null));
                     const updated = escapeHtml(formatDateTime(testCase.updated_at || null));
                     const requiresDependency = Boolean(testCase.requires_dependency);
@@ -3455,7 +3670,13 @@
                     const dependencyKeyAttr = escapeHtml(testCase.dependency_response_key || '');
                     const expectedAttr = escapeHtml(JSON.stringify(testCase.expected_results || []));
                     const responseEncryptedAttr = testCase.is_response_encrypted ? 'true' : 'false';
+                    const scenarioIdForCase = (testCase.scenario || testCase.scenario_id || (scenario && scenario.id) || null);
+                    const scenarioForCase = findScenarioById(scenarioIdForCase);
+                    const scenarioIsAutomated = !(scenarioForCase && Object.prototype.hasOwnProperty.call(scenarioForCase, 'is_automated') && scenarioForCase.is_automated === false);
                     const runBlockedTitle = 'Run disabled: this test case requires a dependency to execute individually.';
+                    const runNotAutomatedTitle = requiresDependency
+                        ? 'Run disabled: this scenario is not for automation, and this test case requires a dependency.'
+                        : 'Run disabled: this scenario is not for automation.';
                     const runAllowedTitle = 'Run related API request';
                     return `
                         <tr data-case-id="${testCase.id || ''}" data-scenario-id="${testCase.scenario || testCase.scenario_id || ''}" data-requires-dependency="${requiresDependencyAttr}" data-dependency-id="${dependencyIdAttr}" data-dependency-key="${dependencyKeyAttr}" data-expected-results="${expectedAttr}" data-response-encrypted="${responseEncryptedAttr}">
@@ -3467,14 +3688,18 @@
                             </td>
                             <td>${idLabel}</td>
                             <td>${title}</td>
-                            <td>${desc}</td>
+                            <td style="white-space: pre-wrap;">${desc}</td>
                             <td>${created}</td>
                             <td>${updated}</td>
                             <td>
                                 <div class="table-action-group">
                                     <button type="button" class="action-button" data-action="view-case" data-case-id="${testCase.id || ''}" data-related-api-request-name="${escapeHtml(testCase.related_api_request_name || '')}">View</button>
                                     <button type="button" class="action-button" data-action="edit-case" data-case-id="${testCase.id || ''}" data-related-api-request-name="${escapeHtml(testCase.related_api_request_name || '')}">Edit</button>
-                                    ${testCase.related_api_request ? `<button type="button" class="action-button" data-action="run-case" data-case-id="${testCase.id || ''}" data-request-id="${testCase.related_api_request || ''}" data-expected-results="${expectedAttr}" data-response-encrypted="${responseEncryptedAttr}" data-requires-dependency="${requiresDependencyAttr}" data-dependency-id="${dependencyIdAttr}" data-dependency-key="${dependencyKeyAttr}" ${requiresDependency ? 'disabled aria-disabled="true" data-dependency-tooltip="Requires dependency" title="' + escapeHtml(runBlockedTitle) + '"' : 'title="' + escapeHtml(runAllowedTitle) + '" onclick="if (window.__automationTestcaseControls) { window.__automationTestcaseControls.runCaseFromElement(this); }"'}>Run</button>` : ''}
+                                    ${testCase.related_api_request ? `<button type="button" class="action-button" data-action="run-case" data-case-id="${testCase.id || ''}" data-request-id="${testCase.related_api_request || ''}" data-expected-results="${expectedAttr}" data-response-encrypted="${responseEncryptedAttr}" data-requires-dependency="${requiresDependencyAttr}" data-dependency-id="${dependencyIdAttr}" data-dependency-key="${dependencyKeyAttr}" ${(!scenarioIsAutomated)
+                            ? 'disabled aria-disabled="true" title="' + escapeHtml(runNotAutomatedTitle) + '"'
+                            : (requiresDependency
+                                ? 'disabled aria-disabled="true" data-dependency-tooltip="Requires dependency" title="' + escapeHtml(runBlockedTitle) + '"'
+                                : 'title="' + escapeHtml(runAllowedTitle) + '" onclick="if (window.__automationTestcaseControls) { window.__automationTestcaseControls.runCaseFromElement(this); }"')}>Run</button>` : ''}
                                     <button type="button" class="action-button" data-action="delete-case" data-case-id="${testCase.id || ''}" data-variant="danger">Delete</button>
                                 </div>
                             </td>
@@ -3805,6 +4030,16 @@
                     const caseModal = document.querySelector('[data-role="module-add-case-modal"]');
                     if (caseModal) {
                         const hid = document.getElementById('module-add-case-scenario-id'); if (hid) hid.value = sid;
+                        try { applyScenarioAutomationToCaseModal({ modalEl: caseModal, scenarioId: sid }); } catch (e) { /* ignore */ }
+                        try {
+                            const testcaseId = document.getElementById('module-add-case-testcase-id');
+                            if (testcaseId) testcaseId.value = '';
+                        } catch (e) { /* ignore */ }
+                        try {
+                            const descEl = document.getElementById('module-add-case-description');
+                            if (descEl) descEl.value = '';
+                        } catch (e) { /* ignore */ }
+                        try { initCaseDescriptionEditor({ readOnly: false }); } catch (e) { /* ignore */ }
                         // If the trigger included a related API request name, show it
                         try {
                             const name = trigger && trigger.dataset && trigger.dataset.relatedApiRequestName ? trigger.dataset.relatedApiRequestName : null;
@@ -3888,6 +4123,16 @@
                 const caseModal = document.querySelector('[data-role="module-add-case-modal"]');
                 if (caseModal) {
                     const hid = document.getElementById('module-add-case-scenario-id'); if (hid) hid.value = sid || '';
+                    try { applyScenarioAutomationToCaseModal({ modalEl: caseModal, scenarioId: sid }); } catch (e) { /* ignore */ }
+                    try {
+                        const testcaseId = document.getElementById('module-add-case-testcase-id');
+                        if (testcaseId) testcaseId.value = '';
+                    } catch (e) { /* ignore */ }
+                    try {
+                        const descEl = document.getElementById('module-add-case-description');
+                        if (descEl) descEl.value = '';
+                    } catch (e) { /* ignore */ }
+                    try { initCaseDescriptionEditor({ readOnly: false }); } catch (e) { /* ignore */ }
                     caseModal.hidden = false; body.classList.add('automation-modal-open');
                     const titleInput = document.getElementById('module-add-case-title'); if (titleInput) titleInput.focus();
                     setStatus('', 'info');
@@ -3932,7 +4177,7 @@
                         const payload = {
                             scenario: sid,
                             title: (titleInput && titleInput.value || '').trim(),
-                            description: descInput && descInput.value || '',
+                            description: syncCaseDescriptionFromEditor(),
                             steps: stepsInput && stepsInput.value ? stepsInput.value.split(/\n/).map((s) => s.trim()).filter(Boolean) : [],
                             expected_results: expectedEntries,
                             priority: priorityInput && priorityInput.value ? priorityInput.value : '',
@@ -4001,6 +4246,7 @@
                         if (modal) {
                             modal.hidden = true; body.classList.remove('automation-modal-open');
                         }
+                        try { removeCaseDescriptionEditor(); } catch (e) { /* ignore */ }
                         // clear edit marker if present
                         if (testcaseIdInput) testcaseIdInput.value = '';
                         moduleAddCaseForm.reset();
@@ -4093,7 +4339,25 @@
                         const scenarioInput = document.getElementById('module-add-case-scenario-id'); if (scenarioInput) scenarioInput.value = data && (data.scenario || data.scenario_id) ? (data.scenario || data.scenario_id) : '';
                         if (scenarioInput && typeof loadDependencyOptions === 'function') await loadDependencyOptions(Number(scenarioInput.value || data.scenario || data.scenario_id || 0), data && data.id);
                         const titleInput = document.getElementById('module-add-case-title'); if (titleInput) titleInput.value = data && data.title ? data.title : '';
-                        const descInput = document.getElementById('module-add-case-description'); if (descInput) descInput.value = data && data.description ? data.description : '';
+                        const descInput = document.getElementById('module-add-case-description');
+                        if (descInput) {
+                            const rawHtml = (data && data.description) ? data.description : '';
+                            try { descInput.dataset.rawHtml = rawHtml || ''; } catch (e) { /* ignore */ }
+                            // For view mode, render like View Scenario description: formatted plain text.
+                            if (action === 'view-case') {
+                                descInput.value = htmlToFormattedText(rawHtml || '');
+                                try {
+                                    descInput.rows = 12;
+                                    descInput.style.whiteSpace = 'pre-wrap';
+                                    // Let rows control the baseline height for details view.
+                                    descInput.style.height = '';
+                                    descInput.style.overflowY = '';
+                                } catch (e) { /* ignore */ }
+                            } else {
+                                // For edit mode, keep raw HTML so TinyMCE can edit it.
+                                descInput.value = rawHtml || '';
+                            }
+                        }
                         const stepsInput = document.getElementById('module-add-case-steps'); if (stepsInput) stepsInput.value = Array.isArray(data && data.steps ? data.steps : []) ? (data.steps || []).join('\n') : (data.steps || '');
                         const expectedInput = document.getElementById('module-add-case-expected'); if (expectedInput) {
                             const normalizedExpected = Array.isArray(data && data.expected_results ? data.expected_results : [])
@@ -4142,6 +4406,17 @@
                         caseModal.hidden = false; body.classList.add('automation-modal-open');
                         // set read-only if view
                         const isView = action === 'view-case';
+                        try { applyCaseModalLayout(caseModal, { isDetails: isView }); } catch (e) { /* ignore */ }
+                        // For view mode: do not mount TinyMCE (match View Scenario description behaviour).
+                        // For edit mode: mount TinyMCE editor.
+                        try {
+                            if (isView) {
+                                removeCaseDescriptionEditor();
+                            } else {
+                                initCaseDescriptionEditor({ readOnly: false });
+                            }
+                        } catch (e) { /* ignore */ }
+                        try { applyScenarioAutomationToCaseModal({ modalEl: caseModal, scenarioId: data && (data.scenario || data.scenario_id) ? (data.scenario || data.scenario_id) : null }); } catch (e) { /* ignore */ }
                         // hide API Explorer button when viewing a case and update label format
                         try {
                             const openApiBtn = document.getElementById('module-open-api-explorer');
@@ -4158,7 +4433,22 @@
                             }
                         } catch (e) { /* ignore */ }
                         const editableFields = [titleInput, descInput, stepsInput, expectedInput, priorityInput, preconditionsInput, requirementsInput, dependencySelect, dependencyKeyInput, responseEncryptedInput];
-                        editableFields.forEach((n) => { if (n) { if (n.tagName === 'SELECT') { n.disabled = isView; } else { n.readOnly = isView; n.disabled = isView; } } });
+                        editableFields.forEach((n) => {
+                            if (!n) return;
+                            // If TinyMCE is attached to description, control read-only via TinyMCE mode.
+                            if (n.id === 'module-add-case-description') {
+                                try { setTinyMceReadOnly(getCaseDescriptionEditor(), Boolean(isView)); } catch (e) { /* ignore */ }
+                                n.readOnly = isView;
+                                n.disabled = false;
+                                return;
+                            }
+                            if (n.tagName === 'SELECT') {
+                                n.disabled = isView;
+                            } else {
+                                n.readOnly = isView;
+                                n.disabled = isView;
+                            }
+                        });
                         if (dependencyCheckbox) dependencyCheckbox.disabled = isView;
                         const submit = form.querySelector('button[type="submit"]'); if (submit) submit.hidden = isView;
                     } catch (err) {
@@ -4184,6 +4474,9 @@
                 }
                 const form = document.getElementById('module-add-case-form');
                 if (form) form.reset();
+                try { removeCaseDescriptionEditor(); } catch (e) { /* ignore */ }
+                try { if (modal) applyCaseModalLayout(modal, { isDetails: false }); } catch (e) { /* ignore */ }
+                try { if (modal) applyScenarioAutomationToCaseModal({ modalEl: modal, scenario: { is_automated: true } }); } catch (e) { /* ignore */ }
             } catch (e) { /* ignore */ }
         });
 

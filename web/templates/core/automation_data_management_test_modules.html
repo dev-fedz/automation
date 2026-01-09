@@ -224,5 +224,6 @@ response.json.project: premium
 
 {% block body_js %}
     {{ block.super }}
+    <script src="{% static 'tinymce/tinymce.min.js' %}"></script>
     <script src="{% static 'js/data_management.js' %}"></script>
 {% endblock %}

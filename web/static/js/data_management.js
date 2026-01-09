@@ -1134,6 +1134,9 @@
         // TinyMCE for scenario description (Add/Edit Scenario modal)
         let scenarioDescriptionEditor = null;
 
+        // TinyMCE for Test Case Description (Add Test Case modal)
+        let moduleCaseDescriptionEditor = null;
+
         // TinyMCE for inline "Add Comment" in View Scenario
         let viewScenarioCommentEditor = null;
 
@@ -1206,6 +1209,77 @@
                 }
             } catch (e) { /* ignore */ }
             viewScenarioInlineCommentEditor = null;
+        };
+
+        const removeModuleCaseDescriptionEditor = () => {
+            try {
+                if (typeof tinymce !== 'undefined') {
+                    try {
+                        const byId = tinymce.get && tinymce.get('module-add-case-description');
+                        if (byId) tinymce.remove(byId);
+                    } catch (e) { /* ignore */ }
+                    try { tinymce.remove('#module-add-case-description'); } catch (e) { /* ignore */ }
+                }
+            } catch (e) { /* ignore */ }
+            moduleCaseDescriptionEditor = null;
+            try {
+                const el = document.getElementById('module-add-case-description');
+                if (el) {
+                    el.style.display = '';
+                    el.removeAttribute('aria-hidden');
+                }
+            } catch (e) { /* ignore */ }
+        };
+
+        const initModuleCaseDescriptionEditor = () => {
+            const el = document.getElementById('module-add-case-description');
+            if (!el) return;
+            removeModuleCaseDescriptionEditor();
+            if (typeof tinymce === 'undefined') return;
+
+            tinymce.init({
+                target: el,
+                height: 200,
+                menubar: false,
+                branding: false,
+                plugins: [
+                    'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
+                    'searchreplace', 'visualblocks', 'code', 'fullscreen',
+                    'insertdatetime', 'table', 'help', 'wordcount'
+                ],
+                toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
+                    'alignleft aligncenter alignright alignjustify | ' +
+                    'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
+                content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }',
+                setup(editor) {
+                    moduleCaseDescriptionEditor = editor;
+                    editor.on('init', () => {
+                        try {
+                            editor.setContent(el.value || '');
+                        } catch (e) { /* ignore */ }
+                    });
+                    const sync = () => {
+                        try { el.value = editor.getContent({ format: 'html' }) || ''; } catch (e) { /* ignore */ }
+                    };
+                    editor.on('change keyup paste blur setcontent', sync);
+                    editor.on('remove', () => {
+                        if (moduleCaseDescriptionEditor === editor) {
+                            moduleCaseDescriptionEditor = null;
+                        }
+                    });
+                },
+            });
+        };
+
+        const syncModuleCaseDescriptionFromEditor = () => {
+            const el = document.getElementById('module-add-case-description');
+            if (!el) return '';
+            try {
+                if (typeof tinymce !== 'undefined' && tinymce.get && tinymce.get('module-add-case-description')) {
+                    el.value = tinymce.get('module-add-case-description').getContent({ format: 'html' }) || '';
+                }
+            } catch (e) { /* ignore */ }
+            return el.value || '';
         };
 
         const ensureViewScenarioInlineEditor = (modalEl) => {
@@ -3798,6 +3872,11 @@
                         // ensure modal title reflects creation
                         const modalTitle = document.getElementById('module-add-case-modal-title');
                         if (modalTitle) modalTitle.textContent = 'Add Test Case';
+                        try {
+                            const desc = document.getElementById('module-add-case-description');
+                            if (desc) desc.value = '';
+                        } catch (e) { /* ignore */ }
+                        try { initModuleCaseDescriptionEditor(); } catch (e) { /* ignore */ }
                         modal.hidden = false;
                         body.classList.add('automation-modal-open');
                         const title = document.getElementById('module-add-case-title');
@@ -3814,6 +3893,7 @@
                         const form = document.getElementById('module-add-case-form');
                         if (form) form.reset();
                         toggleDependencyFields(false);
+                        try { removeModuleCaseDescriptionEditor(); } catch (e) { /* ignore */ }
                     }
                     break;
                 }
@@ -4509,7 +4589,7 @@
                 const payload = {
                     scenario: sid,
                     title: (titleInput && titleInput.value || '').trim(),
-                    description: descInput && descInput.value || '',
+                    description: syncModuleCaseDescriptionFromEditor(),
                     steps: stepsInput && stepsInput.value ? stepsInput.value.split(/\n/).map((s) => s.trim()).filter(Boolean) : [],
                     expected_results: expectedEntries,
                     priority: priorityInput && priorityInput.value ? priorityInput.value : '',
@@ -4570,6 +4650,7 @@
                         modal.hidden = true;
                         body.classList.remove('automation-modal-open');
                     }
+                    try { removeModuleCaseDescriptionEditor(); } catch (e) { /* ignore */ }
                     moduleAddCaseForm.reset();
                     toggleDependencyFields(false);
                     dependencyOptionsCache.delete(Number.isFinite(Number(sid)) ? Number(sid) : String(sid));
