@@ -4289,7 +4289,6 @@
                             <td>
                                 <div class="table-action-group">
                                     <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>
-                                    <button type="button" class="action-button" data-action="comment-scenario" data-scenario-id="${scenario.id}">Comment</button>
                                     <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>
                                 </div>
                             </td>
@@ -4804,14 +4803,11 @@
                 if (!tableEl || !tableEl.contains(trigger)) return; // ignore clicks outside our table
                 const action = trigger.dataset && trigger.dataset.action ? trigger.dataset.action : null;
                 if (!action) return;
-                if (!['view-scenario', 'edit-scenario', 'add-case', 'delete-scenario', 'comment-scenario'].includes(action)) return;
+                if (!['view-scenario', 'edit-scenario', 'add-case', 'delete-scenario'].includes(action)) return;
                 const sid = trigger.dataset && trigger.dataset.scenarioId ? trigger.dataset.scenarioId : null;
                 if (!sid) return;
                 ev.preventDefault();
-                if (action === 'comment-scenario') {
-                    // Open comments modal
-                    openScenarioCommentsModal(sid);
-                } else if (action === 'view-scenario' || action === 'edit-scenario') {
+                if (action === 'view-scenario' || action === 'edit-scenario') {
                     // reuse existing openPlanModal / view handlers - for simplicity
                     // fetch scenario detail and open a simple modal via existing plan modal if present
                     try {
