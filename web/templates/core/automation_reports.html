@@ -212,9 +212,6 @@
                     </div>
                 </div>
             </div>
-            <footer class="automation-modal__footer" style="padding:0.75rem 1rem; text-align:right;">
-                <button type="button" class="btn btn-sm" data-action="close-testcase-view">Close</button>
-            </footer>
         </div>
     </div>
 </div>
@@ -745,7 +742,7 @@
                     // focus the close button (or dialog) and trap focus
                     var cleanup = trapFocus(modal.querySelector('.automation-modal__dialog'));
                     modal._focusCleanup = cleanup;
-                    var closeBtn = modal.querySelector('[data-action="close-testcase-view"]');
+                    var closeBtn = modal.querySelector('.automation-modal__close[data-action="close-testcase-view"]');
                     if (closeBtn && typeof closeBtn.focus === 'function') closeBtn.focus();
                 }
 

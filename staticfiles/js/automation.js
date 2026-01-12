@@ -1249,6 +1249,375 @@
                     descEl.rows = isDetails ? 12 : 3;
                 }
             } catch (e) { /* ignore */ }
+
+            // Comments should only appear in details view.
+            try { setViewCaseCommentsVisible(modalEl, Boolean(isDetails)); } catch (e) { /* ignore */ }
+        };
+
+        // Test Case Details: Comments (mirrors View Scenario comments)
+        let viewCaseCommentEditor = null;
+        let viewCaseInlineCommentEditor = null;
+        let activeViewCaseId = null;
+        let viewCaseCommentsCache = new Map();
+        let viewCaseCommentEditorAttempts = 0;
+        const MAX_VIEW_CASE_COMMENT_EDITOR_ATTEMPTS = 20;
+
+        const ensureTinyMceLoaded = (onReady) => {
+            try {
+                if (typeof window.tinymce !== 'undefined') {
+                    if (typeof onReady === 'function') onReady();
+                    return;
+                }
+            } catch (e) { /* ignore */ }
+
+            // TinyMCE should normally be loaded via a script tag in the template,
+            // but in case it isn't (or didn't load), inject it and retry.
+            try {
+                const existing = document.querySelector('script[data-role="tinymce-loader"]');
+                if (existing) {
+                    existing.addEventListener('load', () => { try { if (typeof onReady === 'function') onReady(); } catch (e) { /* ignore */ } }, { once: true });
+                    return;
+                }
+
+                const anyTinyScript = document.querySelector('script[src*="tinymce" i]');
+                const src = anyTinyScript && anyTinyScript.getAttribute ? anyTinyScript.getAttribute('src') : null;
+                const scriptSrc = src || '/static/tinymce/tinymce.min.js';
+
+                const s = document.createElement('script');
+                s.src = scriptSrc;
+                s.async = true;
+                s.dataset.role = 'tinymce-loader';
+                s.onload = () => { try { if (typeof onReady === 'function') onReady(); } catch (e) { /* ignore */ } };
+                document.head.appendChild(s);
+            } catch (e) {
+                // If injection fails, just give up quietly.
+            }
+        };
+
+        const renderCommentPlainHtml = (rawHtml) => {
+            try {
+                const plain = htmlToFormattedText(rawHtml || '');
+                return escapeHtml(plain).replace(/\n/g, '<br>');
+            } catch (e) {
+                try { return escapeHtml(String(rawHtml || '')).replace(/\n/g, '<br>'); } catch (_e) { return ''; }
+            }
+        };
+
+        const setViewCaseCommentsVisible = (modalEl, visible) => {
+            try {
+                if (!modalEl) return;
+                const row = modalEl.querySelector('#module-view-case-comments-row');
+                if (!row) return;
+                row.hidden = !visible;
+                try { row.style.display = visible ? 'flex' : 'none'; } catch (e) { /* ignore */ }
+            } catch (e) { /* ignore */ }
+        };
+
+        const removeViewCaseCommentEditor = () => {
+            try {
+                if (typeof tinymce !== 'undefined') {
+                    try {
+                        const byId = tinymce.get && tinymce.get('module-view-case-comment-content');
+                        if (byId) tinymce.remove(byId);
+                    } catch (e) { /* ignore */ }
+                    try { tinymce.remove('#module-view-case-comment-content'); } catch (e) { /* ignore */ }
+                }
+            } catch (e) { /* ignore */ }
+            viewCaseCommentEditor = null;
+            try {
+                const el = document.getElementById('module-view-case-comment-content');
+                if (el) {
+                    el.style.display = '';
+                    el.removeAttribute('aria-hidden');
+                }
+            } catch (e) { /* ignore */ }
+        };
+
+        const initViewCaseCommentEditor = () => {
+            const el = document.getElementById('module-view-case-comment-content');
+            if (!el) return;
+
+            ensureTinyMceLoaded(() => {
+                // If TinyMCE isn't loaded yet, retry a few times.
+                if (typeof window.tinymce === 'undefined') {
+                    if (viewCaseCommentEditorAttempts < MAX_VIEW_CASE_COMMENT_EDITOR_ATTEMPTS) {
+                        viewCaseCommentEditorAttempts += 1;
+                        window.setTimeout(initViewCaseCommentEditor, 150 * viewCaseCommentEditorAttempts);
+                    }
+                    return;
+                }
+
+                // If an editor is already attached, reuse it.
+                try {
+                    if (window.tinymce && typeof window.tinymce.get === 'function') {
+                        const existing = window.tinymce.get(el.id);
+                        if (existing) {
+                            viewCaseCommentEditor = existing;
+                            return;
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+
+                // If the textarea is still hidden, defer until it's visible.
+                try {
+                    const cs = window.getComputedStyle ? window.getComputedStyle(el) : null;
+                    const hidden = !el.isConnected || (cs && (cs.display === 'none' || cs.visibility === 'hidden'));
+                    if (hidden) {
+                        if (viewCaseCommentEditorAttempts < MAX_VIEW_CASE_COMMENT_EDITOR_ATTEMPTS) {
+                            viewCaseCommentEditorAttempts += 1;
+                            window.setTimeout(initViewCaseCommentEditor, 100 * viewCaseCommentEditorAttempts);
+                        }
+                        return;
+                    }
+                } catch (e) { /* ignore */ }
+
+                viewCaseCommentEditorAttempts = 0;
+                removeViewCaseCommentEditor();
+
+                try {
+                    window.tinymce.init({
+                        target: el,
+                        height: 200,
+                        menubar: false,
+                        branding: false,
+                        plugins: [
+                            'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
+                            'searchreplace', 'visualblocks', 'code', 'fullscreen',
+                            'insertdatetime', 'table', 'help', 'wordcount'
+                        ],
+                        toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
+                            'alignleft aligncenter alignright alignjustify | ' +
+                            'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
+                        content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }',
+                        setup(editor) {
+                            viewCaseCommentEditor = editor;
+                            const sync = () => {
+                                try { el.value = editor.getContent({ format: 'html' }) || ''; } catch (e) { /* ignore */ }
+                            };
+                            editor.on('change keyup paste blur setcontent', sync);
+                            editor.on('remove', () => {
+                                if (viewCaseCommentEditor === editor) {
+                                    viewCaseCommentEditor = null;
+                                }
+                            });
+                        },
+                    });
+
+                    // If init was called but editor didn't attach, retry.
+                    window.setTimeout(() => {
+                        try {
+                            const created = window.tinymce && typeof window.tinymce.get === 'function' ? window.tinymce.get(el.id) : null;
+                            if (!created && viewCaseCommentEditorAttempts < MAX_VIEW_CASE_COMMENT_EDITOR_ATTEMPTS) {
+                                viewCaseCommentEditorAttempts += 1;
+                                initViewCaseCommentEditor();
+                            }
+                        } catch (e) { /* ignore */ }
+                    }, 50);
+                } catch (e) {
+                    if (viewCaseCommentEditorAttempts < MAX_VIEW_CASE_COMMENT_EDITOR_ATTEMPTS) {
+                        viewCaseCommentEditorAttempts += 1;
+                        window.setTimeout(initViewCaseCommentEditor, 150 * viewCaseCommentEditorAttempts);
+                    }
+                }
+            });
+        };
+
+        const removeViewCaseInlineCommentEditor = () => {
+            try {
+                if (typeof tinymce !== 'undefined') {
+                    try {
+                        const byId = tinymce.get && tinymce.get('module-view-case-inline-comment-content');
+                        if (byId) tinymce.remove(byId);
+                    } catch (e) { /* ignore */ }
+                    try { tinymce.remove('#module-view-case-inline-comment-content'); } catch (e) { /* ignore */ }
+                }
+            } catch (e) { /* ignore */ }
+            viewCaseInlineCommentEditor = null;
+        };
+
+        const ensureViewCaseInlineEditor = (modalEl) => {
+            if (!modalEl) return null;
+            let editor = modalEl.querySelector('#module-view-case-inline-comment-editor');
+            if (editor) return editor;
+
+            editor = document.createElement('div');
+            editor.id = 'module-view-case-inline-comment-editor';
+            editor.className = 'automation-form';
+            editor.style.display = 'none';
+            editor.style.marginTop = '10px';
+            editor.innerHTML = `
+                <form id="module-view-case-inline-comment-form" data-mode="" data-comment-id="" data-parent-id="">
+                    <div class="form-row">
+                        <label id="module-view-case-inline-editor-label" for="module-view-case-inline-comment-content">Edit Comment</label>
+                        <textarea id="module-view-case-inline-comment-content" name="content" rows="6" class="tinymce-editor"></textarea>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn-primary" data-action="submit-view-case-inline-comment" id="module-view-case-inline-submit-btn">Save</button>
+                        <button type="button" class="btn-secondary" data-action="cancel-view-case-inline-comment" id="module-view-case-inline-cancel-btn">Cancel</button>
+                    </div>
+                </form>
+            `;
+
+            const commentsContainer = modalEl.querySelector('#module-view-case-comments');
+            if (commentsContainer && commentsContainer.parentNode) {
+                commentsContainer.parentNode.insertBefore(editor, commentsContainer.nextSibling);
+            } else {
+                modalEl.appendChild(editor);
+            }
+
+            return editor;
+        };
+
+        const initViewCaseInlineCommentEditor = ({ modalEl, contentHtml }) => {
+            const editorWrapper = ensureViewCaseInlineEditor(modalEl);
+            if (!editorWrapper) return;
+            const textarea = editorWrapper.querySelector('#module-view-case-inline-comment-content');
+            if (!textarea) return;
+
+            removeViewCaseInlineCommentEditor();
+            editorWrapper.style.display = 'block';
+
+            if (typeof tinymce === 'undefined') {
+                textarea.value = contentHtml || '';
+                return;
+            }
+
+            tinymce.init({
+                target: textarea,
+                height: 200,
+                menubar: false,
+                branding: false,
+                plugins: [
+                    'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
+                    'searchreplace', 'visualblocks', 'code', 'fullscreen',
+                    'insertdatetime', 'table', 'help', 'wordcount'
+                ],
+                toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
+                    'alignleft aligncenter alignright alignjustify | ' +
+                    'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
+                content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }',
+                setup(editor) {
+                    viewCaseInlineCommentEditor = editor;
+                    editor.on('init', () => {
+                        try { editor.setContent(contentHtml || ''); } catch (e) { /* ignore */ }
+                        try { editor.focus(); } catch (e) { /* ignore */ }
+                    });
+                    editor.on('remove', () => {
+                        if (viewCaseInlineCommentEditor === editor) {
+                            viewCaseInlineCommentEditor = null;
+                        }
+                    });
+                },
+            });
+        };
+
+        const loadTestCaseCommentsForViewModal = async (testCaseId) => {
+            const modal = document.querySelector('[data-role="module-add-case-modal"]');
+            if (!modal) return;
+            const row = modal.querySelector('#module-view-case-comments-row');
+            const container = modal.querySelector('#module-view-case-comments');
+            const hiddenId = modal.querySelector('#module-view-case-comment-case-id');
+            if (!row || !container) return;
+
+            try {
+                const addForm = modal.querySelector('#module-view-case-add-comment-form');
+                if (addForm) addForm.style.display = 'none';
+                const inlineEditor = modal.querySelector('#module-view-case-inline-comment-editor');
+                if (inlineEditor) inlineEditor.style.display = 'none';
+                removeViewCaseCommentEditor();
+                removeViewCaseInlineCommentEditor();
+            } catch (e) { /* ignore */ }
+
+            if (!testCaseId) {
+                setViewCaseCommentsVisible(modal, false);
+                return;
+            }
+
+            activeViewCaseId = String(testCaseId);
+            if (hiddenId) hiddenId.value = String(testCaseId);
+
+            setViewCaseCommentsVisible(modal, true);
+            container.innerHTML = '<div class="comment-empty">Loading comments…</div>';
+
+            try {
+                const url = `/api/core/test-case-comments/?test_case=${encodeURIComponent(String(testCaseId))}`;
+                const resp = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                if (!resp.ok) {
+                    container.innerHTML = '<div class="comment-empty">Failed to load comments.</div>';
+                    return;
+                }
+                const comments = await resp.json();
+                const appElement = document.getElementById('automation-app');
+                const currentUserId = appElement && appElement.dataset.currentUserId !== 'null'
+                    ? parseInt(appElement.dataset.currentUserId, 10)
+                    : null;
+
+                viewCaseCommentsCache = new Map();
+                const stash = (c) => {
+                    if (!c || !c.id) return;
+                    viewCaseCommentsCache.set(String(c.id), c);
+                    if (Array.isArray(c.replies)) {
+                        c.replies.forEach(stash);
+                    }
+                };
+                (Array.isArray(comments) ? comments : []).forEach(stash);
+
+                const renderComment = (comment, isReply = false) => {
+                    const canEdit = currentUserId && comment.user === currentUserId;
+                    const editBtn = canEdit ? `
+                        <button type="button" class="comment-action-btn" data-action="view-case-edit-comment" data-comment-id="${escapeHtml(String(comment.id || ''))}" title="Edit"><span>✏️</span></button>` : '';
+                    const deleteBtn = canEdit ? `
+                        <button type="button" class="comment-action-btn" data-action="view-case-delete-comment" data-comment-id="${escapeHtml(String(comment.id || ''))}" title="Delete"><span>🗑️</span></button>` : '';
+
+                    const isLiked = !!comment.user_has_liked;
+                    const likesCount = typeof comment.likes_count === 'number' ? comment.likes_count : 0;
+                    const thumbsUpIconStyle = isLiked ? '' : 'filter: grayscale(1); opacity: 0.45;';
+                    const thumbsUpCountStyle = (isLiked && likesCount > 0) ? 'margin-left: 4px; font-weight: 600;' : 'display: none;';
+
+                    const userReaction = comment.user_reaction || '';
+                    const reactionsSummary = Array.isArray(comment.reactions_summary) ? comment.reactions_summary : [];
+                    const reactionsSummaryText = reactionsSummary
+                        .filter((x) => x && x.reaction && typeof x.count === 'number' && x.count > 0)
+                        .map((x) => `${x.reaction} ${x.count}`)
+                        .join(' ');
+                    const reactionDisplayText = reactionsSummaryText || '😊';
+
+                    const repliesHtml = (!isReply && comment.replies && comment.replies.length > 0)
+                        ? `<div class="comment-replies">${comment.replies.map(reply => renderComment(reply, true)).join('')}</div>`
+                        : '';
+
+                    return `
+                        <div class="comment-item ${isReply ? 'comment-reply' : ''}" data-comment-id="${escapeHtml(String(comment.id || ''))}" data-comment-user="${escapeHtml(String(comment.user || ''))}">
+                            <div class="comment-header">
+                                <span class="comment-author">${escapeHtml(comment.user_name || 'Unknown')}${comment.is_edited ? ' (edited)' : ''}</span>
+                                <span class="comment-date">${escapeHtml(formatDateTime(comment.created_at))}</span>
+                            </div>
+                            <div class="comment-content" data-comment-content>${renderCommentPlainHtml(comment.content || '')}</div>
+                            <div class="comment-actions">
+                                ${!isReply ? `<button type="button" class="comment-action-btn" data-action="view-case-reply-comment" data-comment-id="${escapeHtml(String(comment.id || ''))}" title="Reply"><span>↩️</span></button>` : ''}
+                                <button type="button" class="comment-action-btn" data-action="view-case-thumbs-up-comment" data-comment-id="${escapeHtml(String(comment.id || ''))}" data-liked="${isLiked ? 'true' : 'false'}" data-likes-count="${escapeHtml(String(likesCount))}" aria-pressed="${isLiked ? 'true' : 'false'}" title="Thumbs Up">
+                                    <span data-role="thumbs-up-icon" style="${thumbsUpIconStyle}">👍</span>
+                                    <span data-role="thumbs-up-count" style="${thumbsUpCountStyle}">${escapeHtml(String(likesCount))}</span>
+                                </button>
+                                <button type="button" class="comment-action-btn" data-action="view-case-add-reaction-comment" data-comment-id="${escapeHtml(String(comment.id || ''))}" data-user-reaction="${escapeHtml(String(userReaction))}" title="Add Reaction">
+                                    <span data-role="reaction-display">${escapeHtml(reactionDisplayText)}</span>
+                                </button>
+                                ${editBtn}
+                                ${deleteBtn}
+                            </div>
+                            ${repliesHtml}
+                        </div>
+                    `;
+                };
+
+                if (!Array.isArray(comments) || comments.length === 0) {
+                    container.innerHTML = '<div class="comment-empty">No comments yet. Be the first to comment!</div>';
+                } else {
+                    container.innerHTML = comments.map((c) => renderComment(c, false)).join('');
+                }
+            } catch (e) {
+                container.innerHTML = '<div class="comment-empty">Error loading comments.</div>';
+            }
         };
 
         // Normalize scenario shape returned by the API so client-side code can
@@ -1778,7 +2147,7 @@
             return plan.scenarios.find((scenario) => Number(scenario.id) === Number(state.selectedScenarioId)) || null;
         };
 
-        const applyScenarioAutomationToCaseModal = ({ modalEl, scenario, scenarioId } = {}) => {
+        const applyScenarioAutomationToCaseModal = ({ modalEl, scenario, scenarioId, isDetails = false } = {}) => {
             try {
                 if (!modalEl) return;
                 const resolvedScenario = scenario || findScenarioById(scenarioId);
@@ -1788,11 +2157,19 @@
                 const descInput = document.getElementById('module-add-case-description');
                 const titleRow = titleInput && titleInput.closest ? titleInput.closest('.form-row') : null;
                 const descRow = descInput && descInput.closest ? descInput.closest('.form-row') : null;
+                const commentsRow = modalEl.querySelector('#module-view-case-comments-row');
                 const fieldset = modalEl.querySelector('form#module-add-case-form fieldset') || modalEl.querySelector('fieldset');
                 if (fieldset) {
                     const rows = Array.from(fieldset.querySelectorAll('.form-row'));
                     rows.forEach((row) => {
                         if (!row) return;
+                        // Comments are a details-view feature; never show them in Add/Update.
+                        if (commentsRow && (row === commentsRow || commentsRow.contains(row))) {
+                            const hideComments = !isDetails;
+                            row.hidden = hideComments;
+                            try { row.style.display = hideComments ? 'none' : 'flex'; } catch (e) { /* ignore */ }
+                            return;
+                        }
                         const keep = (titleRow && row === titleRow) || (descRow && row === descRow);
                         const hide = !isAutomated && !keep;
                         row.hidden = hide;
@@ -1809,6 +2186,23 @@
                         apiBtn.title = !isAutomated
                             ? 'Disabled: this scenario is not for automation.'
                             : 'Choose related API request';
+                    }
+                } catch (e) { /* ignore */ }
+
+                // Position the comments row based on scenario automation status:
+                // - automated: directly below "Selected API Request" row
+                // - not automated: directly below Description
+                try {
+                    if (commentsRow && isDetails) {
+                        const apiLabel = (modalEl.querySelector('#module-related-api-request-label') || document.getElementById('module-related-api-request-label'));
+                        const apiRow = apiLabel && apiLabel.closest ? apiLabel.closest('.form-row') : null;
+                        const anchorRow = isAutomated ? apiRow : descRow;
+                        if (anchorRow && anchorRow.insertAdjacentElement) {
+                            // Avoid re-inserting if it's already in the right place.
+                            if (anchorRow.nextElementSibling !== commentsRow) {
+                                anchorRow.insertAdjacentElement('afterend', commentsRow);
+                            }
+                        }
                     }
                 } catch (e) { /* ignore */ }
             } catch (e) { /* ignore */ }
@@ -4029,8 +4423,21 @@
                     // open add case modal and prefill scenario id
                     const caseModal = document.querySelector('[data-role="module-add-case-modal"]');
                     if (caseModal) {
+                        try {
+                            activeViewCaseId = null;
+                            viewCaseCommentsCache = new Map();
+                            removeViewCaseCommentEditor();
+                            removeViewCaseInlineCommentEditor();
+                            setViewCaseCommentsVisible(caseModal, false);
+                            const addForm = caseModal.querySelector('#module-view-case-add-comment-form');
+                            if (addForm) addForm.style.display = 'none';
+                            const comments = caseModal.querySelector('#module-view-case-comments');
+                            if (comments) comments.innerHTML = '';
+                            const inlineEditor = caseModal.querySelector('#module-view-case-inline-comment-editor');
+                            if (inlineEditor) inlineEditor.style.display = 'none';
+                        } catch (e) { /* ignore */ }
                         const hid = document.getElementById('module-add-case-scenario-id'); if (hid) hid.value = sid;
-                        try { applyScenarioAutomationToCaseModal({ modalEl: caseModal, scenarioId: sid }); } catch (e) { /* ignore */ }
+                        try { applyScenarioAutomationToCaseModal({ modalEl: caseModal, scenarioId: sid, isDetails: false }); } catch (e) { /* ignore */ }
                         try {
                             const testcaseId = document.getElementById('module-add-case-testcase-id');
                             if (testcaseId) testcaseId.value = '';
@@ -4040,6 +4447,7 @@
                             if (descEl) descEl.value = '';
                         } catch (e) { /* ignore */ }
                         try { initCaseDescriptionEditor({ readOnly: false }); } catch (e) { /* ignore */ }
+                        try { applyCaseModalLayout(caseModal, { isDetails: false }); } catch (e) { /* ignore */ }
                         // If the trigger included a related API request name, show it
                         try {
                             const name = trigger && trigger.dataset && trigger.dataset.relatedApiRequestName ? trigger.dataset.relatedApiRequestName : null;
@@ -4123,7 +4531,7 @@
                 const caseModal = document.querySelector('[data-role="module-add-case-modal"]');
                 if (caseModal) {
                     const hid = document.getElementById('module-add-case-scenario-id'); if (hid) hid.value = sid || '';
-                    try { applyScenarioAutomationToCaseModal({ modalEl: caseModal, scenarioId: sid }); } catch (e) { /* ignore */ }
+                    try { applyScenarioAutomationToCaseModal({ modalEl: caseModal, scenarioId: sid, isDetails: false }); } catch (e) { /* ignore */ }
                     try {
                         const testcaseId = document.getElementById('module-add-case-testcase-id');
                         if (testcaseId) testcaseId.value = '';
@@ -4407,6 +4815,14 @@
                         // set read-only if view
                         const isView = action === 'view-case';
                         try { applyCaseModalLayout(caseModal, { isDetails: isView }); } catch (e) { /* ignore */ }
+                        // Comments are only shown in details view.
+                        try {
+                            if (isView) {
+                                await loadTestCaseCommentsForViewModal(data && (data.id || data.pk) ? (data.id || data.pk) : cid);
+                            } else {
+                                setViewCaseCommentsVisible(caseModal, false);
+                            }
+                        } catch (e) { /* ignore */ }
                         // For view mode: do not mount TinyMCE (match View Scenario description behaviour).
                         // For edit mode: mount TinyMCE editor.
                         try {
@@ -4416,7 +4832,7 @@
                                 initCaseDescriptionEditor({ readOnly: false });
                             }
                         } catch (e) { /* ignore */ }
-                        try { applyScenarioAutomationToCaseModal({ modalEl: caseModal, scenarioId: data && (data.scenario || data.scenario_id) ? (data.scenario || data.scenario_id) : null }); } catch (e) { /* ignore */ }
+                        try { applyScenarioAutomationToCaseModal({ modalEl: caseModal, scenarioId: data && (data.scenario || data.scenario_id) ? (data.scenario || data.scenario_id) : null, isDetails: isView }); } catch (e) { /* ignore */ }
                         // hide API Explorer button when viewing a case and update label format
                         try {
                             const openApiBtn = document.getElementById('module-open-api-explorer');
@@ -4475,9 +4891,368 @@
                 const form = document.getElementById('module-add-case-form');
                 if (form) form.reset();
                 try { removeCaseDescriptionEditor(); } catch (e) { /* ignore */ }
+                try {
+                    activeViewCaseId = null;
+                    viewCaseCommentsCache = new Map();
+                    removeViewCaseCommentEditor();
+                    removeViewCaseInlineCommentEditor();
+                    setViewCaseCommentsVisible(modal, false);
+                    const addForm = modal ? modal.querySelector('#module-view-case-add-comment-form') : null;
+                    if (addForm) addForm.style.display = 'none';
+                    const comments = modal ? modal.querySelector('#module-view-case-comments') : null;
+                    if (comments) comments.innerHTML = '';
+                    const inlineEditor = modal ? modal.querySelector('#module-view-case-inline-comment-editor') : null;
+                    if (inlineEditor) inlineEditor.style.display = 'none';
+                } catch (e) { /* ignore */ }
                 try { if (modal) applyCaseModalLayout(modal, { isDetails: false }); } catch (e) { /* ignore */ }
-                try { if (modal) applyScenarioAutomationToCaseModal({ modalEl: modal, scenario: { is_automated: true } }); } catch (e) { /* ignore */ }
+                try { if (modal) applyScenarioAutomationToCaseModal({ modalEl: modal, scenario: { is_automated: true }, isDetails: false }); } catch (e) { /* ignore */ }
             } catch (e) { /* ignore */ }
+        });
+
+        // Test Case Details comments: delegated handlers
+        document.addEventListener('click', async (ev) => {
+            const target = ev.target && ev.target.closest ? ev.target.closest('[data-action]') : null;
+            if (!target) return;
+
+            const modal = document.querySelector('[data-role="module-add-case-modal"]');
+            if (!modal || modal.hidden) return;
+            if (!modal.contains(target)) return;
+
+            const action = target.dataset.action;
+            const commentId = target.dataset.commentId;
+
+            const safeGetReactionPicker = async (buttonEl, initialReaction) => {
+                try {
+                    if (typeof openEmojiPickerPopover === 'function') {
+                        return await openEmojiPickerPopover(buttonEl, initialReaction);
+                    }
+                } catch (e) { /* ignore */ }
+                return null;
+            };
+
+            const safeUpdateThumbs = (btn, isActive, count) => {
+                try {
+                    if (typeof updateThumbsUpButtonIcon === 'function') {
+                        updateThumbsUpButtonIcon(btn, isActive, count);
+                        return;
+                    }
+                } catch (e) { /* ignore */ }
+                // minimal fallback
+                try {
+                    btn.dataset.liked = isActive ? 'true' : 'false';
+                    const icon = btn.querySelector('[data-role="thumbs-up-icon"]');
+                    const countEl = btn.querySelector('[data-role="thumbs-up-count"]');
+                    if (icon) {
+                        icon.style.filter = isActive ? '' : 'grayscale(1)';
+                        icon.style.opacity = isActive ? '1' : '0.45';
+                    }
+                    if (countEl) {
+                        if (isActive && typeof count === 'number' && count > 0) {
+                            countEl.textContent = String(count);
+                            countEl.style.display = '';
+                        } else {
+                            countEl.style.display = 'none';
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+            };
+
+            if (action === 'toggle-view-case-add-comment') {
+                ev.preventDefault();
+                const addForm = modal.querySelector('#module-view-case-add-comment-form');
+                if (!addForm) return;
+                // hide inline editor if visible
+                try {
+                    const inlineEditor = modal.querySelector('#module-view-case-inline-comment-editor');
+                    if (inlineEditor) inlineEditor.style.display = 'none';
+                    removeViewCaseInlineCommentEditor();
+                } catch (e) { /* ignore */ }
+                addForm.style.display = 'block';
+                try {
+                    const textarea = modal.querySelector('#module-view-case-comment-content');
+                    if (textarea) textarea.value = '';
+                } catch (e) { /* ignore */ }
+                // Defer init until after layout so TinyMCE can measure properly.
+                try { window.setTimeout(() => { try { initViewCaseCommentEditor(); } catch (e) { /* ignore */ } }, 0); } catch (e) { /* ignore */ }
+                return;
+            }
+
+            if (action === 'cancel-view-case-add-comment') {
+                ev.preventDefault();
+                const addForm = modal.querySelector('#module-view-case-add-comment-form');
+                if (addForm) addForm.style.display = 'none';
+                try { removeViewCaseCommentEditor(); } catch (e) { /* ignore */ }
+                return;
+            }
+
+            if (action === 'post-view-case-add-comment') {
+                ev.preventDefault();
+                const caseId = activeViewCaseId || (modal.querySelector('#module-view-case-comment-case-id') ? modal.querySelector('#module-view-case-comment-case-id').value : null);
+                if (!caseId) {
+                    setStatus('Invalid test case.', 'error');
+                    return;
+                }
+                let content = '';
+                try {
+                    if (typeof tinymce !== 'undefined' && tinymce.get && tinymce.get('module-view-case-comment-content')) {
+                        content = tinymce.get('module-view-case-comment-content').getContent({ format: 'html' }) || '';
+                    } else {
+                        const textarea = modal.querySelector('#module-view-case-comment-content');
+                        content = textarea ? (textarea.value || '') : '';
+                    }
+                } catch (e) { /* ignore */ }
+                if (!String(content || '').trim()) {
+                    setStatus('Please enter a comment.', 'error');
+                    return;
+                }
+                try {
+                    const resp = await fetch('/api/core/test-case-comments/', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
+                        body: JSON.stringify({ test_case: caseId, content })
+                    });
+                    if (!resp.ok) {
+                        const errorData = await resp.json().catch(() => ({}));
+                        setStatus(errorData.detail || 'Failed to save comment.', 'error');
+                        return;
+                    }
+                    setStatus('Comment posted successfully.', 'success');
+                    const addForm = modal.querySelector('#module-view-case-add-comment-form');
+                    if (addForm) addForm.style.display = 'none';
+                    try { removeViewCaseCommentEditor(); } catch (e) { /* ignore */ }
+                    await loadTestCaseCommentsForViewModal(caseId);
+                } catch (e) {
+                    setStatus('Error saving comment.', 'error');
+                }
+                return;
+            }
+
+            if (action === 'view-case-edit-comment' && commentId) {
+                ev.preventDefault();
+                const comment = viewCaseCommentsCache.get(String(commentId));
+                if (!comment) return;
+                const editorWrapper = ensureViewCaseInlineEditor(modal);
+                if (!editorWrapper) return;
+                const form = editorWrapper.querySelector('#module-view-case-inline-comment-form');
+                const label = editorWrapper.querySelector('#module-view-case-inline-editor-label');
+                const btn = editorWrapper.querySelector('#module-view-case-inline-submit-btn');
+                if (form) {
+                    form.dataset.mode = 'edit';
+                    form.dataset.commentId = String(commentId);
+                    form.dataset.parentId = '';
+                }
+                if (label) label.textContent = 'Edit Comment';
+                if (btn) btn.textContent = 'Save';
+                // position under the comment actions
+                try {
+                    const item = modal.querySelector(`[data-comment-id="${CSS.escape(String(commentId))}"]`);
+                    const actionsRow = item ? item.querySelector('.comment-actions') : null;
+                    if (actionsRow) actionsRow.after(editorWrapper);
+                } catch (e) { /* ignore */ }
+                initViewCaseInlineCommentEditor({ modalEl: modal, contentHtml: comment.content || '' });
+                return;
+            }
+
+            if (action === 'view-case-reply-comment' && commentId) {
+                ev.preventDefault();
+                const editorWrapper = ensureViewCaseInlineEditor(modal);
+                if (!editorWrapper) return;
+                const form = editorWrapper.querySelector('#module-view-case-inline-comment-form');
+                const label = editorWrapper.querySelector('#module-view-case-inline-editor-label');
+                const btn = editorWrapper.querySelector('#module-view-case-inline-submit-btn');
+                if (form) {
+                    form.dataset.mode = 'reply';
+                    form.dataset.commentId = '';
+                    form.dataset.parentId = String(commentId);
+                }
+                if (label) label.textContent = 'Reply to Comment';
+                if (btn) btn.textContent = 'Save';
+                try {
+                    const item = modal.querySelector(`[data-comment-id="${CSS.escape(String(commentId))}"]`);
+                    const actionsRow = item ? item.querySelector('.comment-actions') : null;
+                    if (actionsRow) actionsRow.after(editorWrapper);
+                } catch (e) { /* ignore */ }
+                initViewCaseInlineCommentEditor({ modalEl: modal, contentHtml: '' });
+                return;
+            }
+
+            if (action === 'cancel-view-case-inline-comment') {
+                ev.preventDefault();
+                try {
+                    const editorWrapper = modal.querySelector('#module-view-case-inline-comment-editor');
+                    if (editorWrapper) editorWrapper.style.display = 'none';
+                    removeViewCaseInlineCommentEditor();
+                } catch (e) { /* ignore */ }
+                return;
+            }
+
+            if (action === 'submit-view-case-inline-comment') {
+                ev.preventDefault();
+                const editorWrapper = modal.querySelector('#module-view-case-inline-comment-editor');
+                const form = editorWrapper ? editorWrapper.querySelector('#module-view-case-inline-comment-form') : null;
+                if (!form) return;
+                const mode = (form.dataset.mode || '').trim();
+                const editId = (form.dataset.commentId || '').trim();
+                const parentId = (form.dataset.parentId || '').trim();
+                const caseId = activeViewCaseId;
+                if (!caseId) {
+                    setStatus('Invalid test case.', 'error');
+                    return;
+                }
+                let content = '';
+                try {
+                    if (typeof tinymce !== 'undefined' && tinymce.get && tinymce.get('module-view-case-inline-comment-content')) {
+                        content = tinymce.get('module-view-case-inline-comment-content').getContent({ format: 'html' }) || '';
+                    } else {
+                        const textarea = form.querySelector('#module-view-case-inline-comment-content');
+                        content = textarea ? (textarea.value || '') : '';
+                    }
+                } catch (e) { /* ignore */ }
+                if (!String(content || '').trim()) {
+                    setStatus('Please enter a comment.', 'error');
+                    return;
+                }
+                try {
+                    let url = '';
+                    let method = 'POST';
+                    let body = null;
+                    if (mode === 'edit') {
+                        if (!editId) {
+                            setStatus('Invalid comment.', 'error');
+                            return;
+                        }
+                        url = `/api/core/test-case-comments/${encodeURIComponent(String(editId))}/`;
+                        method = 'PATCH';
+                        body = JSON.stringify({ content });
+                    } else if (mode === 'reply') {
+                        if (!parentId) {
+                            setStatus('Invalid reply target.', 'error');
+                            return;
+                        }
+                        url = '/api/core/test-case-comments/';
+                        method = 'POST';
+                        body = JSON.stringify({ test_case: caseId, content, parent: parentId });
+                    } else {
+                        setStatus('Invalid comment mode.', 'error');
+                        return;
+                    }
+                    const resp = await fetch(url, {
+                        method,
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
+                        body,
+                    });
+                    if (!resp.ok) {
+                        const errorData = await resp.json().catch(() => ({}));
+                        setStatus(errorData.detail || 'Failed to save comment.', 'error');
+                        return;
+                    }
+                    setStatus(mode === 'edit' ? 'Comment updated successfully.' : 'Reply posted successfully.', 'success');
+                    try {
+                        if (editorWrapper) editorWrapper.style.display = 'none';
+                        removeViewCaseInlineCommentEditor();
+                    } catch (e) { /* ignore */ }
+                    await loadTestCaseCommentsForViewModal(caseId);
+                } catch (e) {
+                    setStatus('Error saving comment.', 'error');
+                }
+                return;
+            }
+
+            if (action === 'view-case-delete-comment' && commentId) {
+                ev.preventDefault();
+                if (!confirm('Are you sure you want to delete this comment?')) return;
+                try {
+                    const resp = await fetch(`/api/core/test-case-comments/${encodeURIComponent(String(commentId))}/`, {
+                        method: 'DELETE',
+                        credentials: 'same-origin',
+                        headers: { 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
+                    });
+                    if (!(resp && (resp.status === 204 || resp.ok))) {
+                        const errorData = await resp.json().catch(() => ({}));
+                        setStatus(errorData.detail || 'Failed to delete comment.', 'error');
+                        return;
+                    }
+                    setStatus('Comment deleted successfully.', 'success');
+                    if (activeViewCaseId) await loadTestCaseCommentsForViewModal(activeViewCaseId);
+                } catch (e) {
+                    setStatus('Error deleting comment.', 'error');
+                }
+                return;
+            }
+
+            if (action === 'view-case-thumbs-up-comment' && commentId) {
+                ev.preventDefault();
+                const btn = target;
+                const wasLiked = btn.dataset.liked === 'true';
+                const wasLikesCount = Number.isFinite(parseInt(btn.dataset.likesCount, 10)) ? parseInt(btn.dataset.likesCount, 10) : 0;
+                const optimisticLiked = !wasLiked;
+                const optimisticCount = optimisticLiked ? Math.max(1, wasLikesCount + 1) : Math.max(0, wasLikesCount - 1);
+                safeUpdateThumbs(btn, optimisticLiked, optimisticCount);
+                try {
+                    btn.disabled = true;
+                    const resp = await fetch(`/api/core/test-case-comments/${encodeURIComponent(String(commentId))}/toggle_like/`, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
+                    });
+                    if (!resp.ok) {
+                        const errorData = await resp.json().catch(() => ({}));
+                        setStatus(errorData.detail || 'Failed to toggle thumbs up.', 'error');
+                        safeUpdateThumbs(btn, wasLiked, wasLikesCount);
+                        return;
+                    }
+                    const data = await resp.json().catch(() => ({}));
+                    safeUpdateThumbs(btn, !!data.liked, typeof data.likes_count === 'number' ? data.likes_count : null);
+                } catch (e) {
+                    setStatus('Error toggling thumbs up.', 'error');
+                    safeUpdateThumbs(btn, wasLiked, wasLikesCount);
+                } finally {
+                    try { btn.disabled = false; } catch (e) { /* ignore */ }
+                }
+                return;
+            }
+
+            if (action === 'view-case-add-reaction-comment' && commentId) {
+                ev.preventDefault();
+                const btn = target;
+                const displayEl = btn.querySelector('[data-role="reaction-display"]');
+                const currentUserReaction = (btn.dataset.userReaction || '').trim();
+                const reaction = await safeGetReactionPicker(btn, currentUserReaction || '😊');
+                if (!reaction) return;
+                try {
+                    btn.disabled = true;
+                    const resp = await fetch(`/api/core/test-case-comments/${encodeURIComponent(String(commentId))}/set_reaction/`, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
+                        body: JSON.stringify({ reaction }),
+                    });
+                    if (!resp.ok) {
+                        const errorData = await resp.json().catch(() => ({}));
+                        setStatus(errorData.detail || errorData.reaction || 'Failed to add reaction.', 'error');
+                        return;
+                    }
+                    const data = await resp.json().catch(() => ({}));
+                    const nextUserReaction = data && data.reacted ? (data.reaction || reaction) : '';
+                    btn.dataset.userReaction = nextUserReaction;
+                    if (displayEl) {
+                        const summary = (data && Array.isArray(data.reactions_summary)) ? data.reactions_summary : [];
+                        const summaryText = summary
+                            .filter((x) => x && x.reaction && typeof x.count === 'number' && x.count > 0)
+                            .map((x) => `${x.reaction} ${x.count}`)
+                            .join(' ');
+                        displayEl.textContent = summaryText || '😊';
+                    }
+                    setStatus(data && data.reacted ? 'Reaction saved.' : 'Reaction removed.', 'success');
+                } catch (e) {
+                    setStatus('Error adding reaction.', 'error');
+                } finally {
+                    try { btn.disabled = false; } catch (e) { /* ignore */ }
+                }
+                return;
+            }
         });
 
         // API Explorer: modal to browse collections/directories/requests and select one

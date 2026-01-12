@@ -408,6 +408,69 @@ class CommentReaction(TimeStampedModel):
         return f"{self.user} reacted to comment {self.comment.id}"
     
 
+class TestCaseComment(TimeStampedModel):
+    """Comments on test cases for collaboration and discussion."""
+
+    test_case = models.ForeignKey('TestCase', on_delete=models.CASCADE, related_name="comments")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="test_case_comments",
+    )
+    content = models.TextField()
+    parent = models.ForeignKey(
+        'self',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='replies',
+        help_text="Parent comment if this is a reply",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"Comment by {self.user} on {self.test_case}"
+
+
+class TestCaseCommentLike(TimeStampedModel):
+    """Track likes/thumbs-up on test case comments."""
+
+    comment = models.ForeignKey(TestCaseComment, on_delete=models.CASCADE, related_name="likes")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="test_case_comment_likes",
+    )
+
+    class Meta:
+        unique_together = ['comment', 'user']
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.user} liked test case comment {self.comment.id}"
+
+
+class TestCaseCommentReaction(TimeStampedModel):
+    """Track a per-user reaction (emoji) on a test case comment."""
+
+    comment = models.ForeignKey(TestCaseComment, on_delete=models.CASCADE, related_name="reactions")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="test_case_comment_reactions",
+    )
+    reaction = models.CharField(max_length=16)
+
+    class Meta:
+        unique_together = ['comment', 'user']
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.user} reacted to test case comment {self.comment.id}"
+
+
 class TestCase(TimeStampedModel):
     """Executable test case with dynamic variables for API validation."""
 

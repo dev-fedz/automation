@@ -14,6 +14,7 @@ router.register(r"directories", views.ApiCollectionDirectoryViewSet, basename="c
 router.register(r"test-plans", views.ProjectViewSet, basename="core-test-plans")
 router.register(r"test-scenarios", views.TestScenarioViewSet, basename="core-test-scenarios")
 router.register(r"scenario-comments", views.ScenarioCommentViewSet, basename="core-scenario-comments")
+router.register(r"test-case-comments", views.TestCaseCommentViewSet, basename="core-test-case-comments")
 router.register(r"test-cases", views.TestCaseViewSet, basename="core-test-cases")
 router.register(r"test-modules", views.TestModulesViewSet, basename="core-test-modules")
 

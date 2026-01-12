@@ -545,6 +545,100 @@ class ScenarioCommentViewSet(viewsets.ModelViewSet):
         })
 
 
+class TestCaseCommentViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.TestCaseCommentSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = models.TestCaseComment.objects.select_related("user", "test_case").prefetch_related(
+            "replies__user",
+            "likes",
+            "reactions",
+            "replies__reactions",
+        ).all()
+        test_case_id = self.request.query_params.get("test_case")
+        if test_case_id:
+            queryset = queryset.filter(test_case_id=test_case_id)
+        if self.action == 'list':
+            queryset = queryset.filter(parent__isnull=True)
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+    def perform_update(self, serializer):
+        if serializer.instance.user != self.request.user:
+            raise ValidationError("You can only edit your own comments.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.user != self.request.user:
+            raise ValidationError("You can only delete your own comments.")
+        instance.delete()
+
+    @action(detail=True, methods=['post'])
+    def toggle_like(self, request, pk=None):
+        comment = self.get_object()
+        like, created = models.TestCaseCommentLike.objects.get_or_create(
+            comment=comment,
+            user=request.user
+        )
+
+        if not created:
+            like.delete()
+            liked = False
+        else:
+            liked = True
+
+        likes_count = models.TestCaseCommentLike.objects.filter(comment_id=comment.id).count()
+        return Response({
+            'liked': liked,
+            'likes_count': likes_count,
+        })
+
+    @action(detail=True, methods=['post'])
+    def set_reaction(self, request, pk=None):
+        comment = self.get_object()
+        reaction = (request.data.get('reaction') or '').strip()
+        if not reaction:
+            raise ValidationError({'reaction': 'Reaction is required.'})
+        if len(reaction) > 16:
+            raise ValidationError({'reaction': 'Reaction is too long.'})
+
+        obj, created = models.TestCaseCommentReaction.objects.get_or_create(
+            comment=comment,
+            user=request.user,
+            defaults={'reaction': reaction}
+        )
+
+        if not created:
+            if obj.reaction == reaction:
+                obj.delete()
+                reacted = False
+                current_reaction = None
+            else:
+                obj.reaction = reaction
+                obj.save(update_fields=['reaction', 'updated_at'])
+                reacted = True
+                current_reaction = reaction
+        else:
+            reacted = True
+            current_reaction = reaction
+
+        reactions_summary = list(
+            models.TestCaseCommentReaction.objects.filter(comment_id=comment.id)
+            .values('reaction')
+            .annotate(count=Count('id'))
+            .order_by('-count', 'reaction')
+        )
+
+        return Response({
+            'reacted': reacted,
+            'reaction': current_reaction,
+            'reactions_summary': reactions_summary,
+        })
+
+
 class TestCaseViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.TestCaseSerializer
     permission_classes = [IsAuthenticated]

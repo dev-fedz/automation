@@ -701,6 +701,105 @@ class ScenarioCommentSerializer(serializers.ModelSerializer):
         ]
 
 
+class TestCaseCommentSerializer(serializers.ModelSerializer):
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+    user_name = serializers.SerializerMethodField()
+    is_edited = serializers.SerializerMethodField()
+    replies = serializers.SerializerMethodField()
+    likes_count = serializers.SerializerMethodField()
+    user_has_liked = serializers.SerializerMethodField()
+    user_reaction = serializers.SerializerMethodField()
+    reactions_summary = serializers.SerializerMethodField()
+
+    class Meta:
+        model = models.TestCaseComment
+        fields = [
+            "id",
+            "test_case",
+            "user",
+            "user_email",
+            "user_name",
+            "content",
+            "parent",
+            "created_at",
+            "updated_at",
+            "is_edited",
+            "replies",
+            "likes_count",
+            "user_has_liked",
+            "user_reaction",
+            "reactions_summary",
+        ]
+        read_only_fields = [
+            "id",
+            "user",
+            "created_at",
+            "updated_at",
+            "likes_count",
+            "user_has_liked",
+            "user_reaction",
+            "reactions_summary",
+        ]
+
+    def get_user_name(self, obj):
+        if obj.user:
+            return f"{obj.user.first_name} {obj.user.last_name}".strip() or obj.user.email
+        return "Unknown"
+
+    def get_is_edited(self, obj):
+        if obj.updated_at and obj.created_at:
+            delta = (obj.updated_at - obj.created_at).total_seconds()
+            return delta > 1
+        return False
+
+    def get_replies(self, obj):
+        if obj.parent is None:
+            replies = obj.replies.all()
+            return TestCaseCommentSerializer(replies, many=True, context=self.context).data
+        return []
+
+    def get_likes_count(self, obj):
+        return obj.likes.count()
+
+    def get_user_has_liked(self, obj):
+        request = self.context.get('request')
+        if request and request.user and request.user.is_authenticated:
+            return obj.likes.filter(user=request.user).exists()
+        return False
+
+    def get_user_reaction(self, obj):
+        request = self.context.get('request')
+        if request and request.user and request.user.is_authenticated:
+            try:
+                for item in obj.reactions.all():
+                    if getattr(item, 'user_id', None) == request.user.id:
+                        return getattr(item, 'reaction', None) or None
+            except Exception:
+                pass
+            reaction = obj.reactions.filter(user=request.user).values_list('reaction', flat=True).first()
+            return reaction or None
+        return None
+
+    def get_reactions_summary(self, obj):
+        counts = {}
+        try:
+            for item in obj.reactions.all():
+                key = getattr(item, 'reaction', None)
+                if not key:
+                    continue
+                counts[key] = counts.get(key, 0) + 1
+        except Exception:
+            for key in obj.reactions.values_list('reaction', flat=True):
+                if not key:
+                    continue
+                counts[key] = counts.get(key, 0) + 1
+
+        return [
+            {"reaction": reaction, "count": count}
+            for reaction, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
+
+
 class ProjectSerializer(serializers.ModelSerializer):
     description = serializers.CharField(allow_blank=True, required=False)
     test_modules = TestModulesSerializer(many=True, read_only=True)
