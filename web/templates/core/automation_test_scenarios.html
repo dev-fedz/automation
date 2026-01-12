@@ -217,6 +217,14 @@
                             <span style="font-weight: 600;">COMMENTS</span>
                             <button type="button" class="btn-primary" data-action="toggle-view-scenario-add-comment">Add Comment</button>
                         </div>
+                        <input
+                            type="file"
+                            id="module-view-scenario-comment-attachments-input"
+                            name="scenario_comment_attachments"
+                            multiple
+                            hidden
+                            accept="image/*,video/*,.csv,.xls,.xlsx,.pdf,.doc,.docx"
+                        >
                         <div id="module-view-scenario-add-comment-form" class="automation-form" style="display:none; margin-bottom: 12px;">
                             <input type="hidden" id="module-view-scenario-comment-scenario-id" name="scenario">
                             <div class="form-row">

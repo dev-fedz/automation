@@ -1960,6 +1960,174 @@
             }
         };
 
+        // View Scenario: Attachments
+        const setViewScenarioAttachmentsVisible = (modalEl, visible) => {
+            try {
+                if (!modalEl) return;
+                const row = modalEl.querySelector('#module-view-scenario-attachments-row');
+                if (!row) return;
+                row.hidden = !visible;
+                try { row.style.display = visible ? 'flex' : 'none'; } catch (e) { /* ignore */ }
+            } catch (e) { /* ignore */ }
+        };
+
+        const renderViewScenarioAttachments = (modalEl, attachments) => {
+            if (!modalEl) return;
+            const container = modalEl.querySelector('#module-view-scenario-attachments');
+            if (!container) return;
+            const list = Array.isArray(attachments) ? attachments : [];
+
+            if (!list.length) {
+                container.innerHTML = '<div class="comment-empty">No attachments yet.</div>';
+                return;
+            }
+
+            const attachmentStorageTag = (att) => {
+                if (!att) return '';
+                const raw = (att.storage_backend || att.storage || '').toString().toLowerCase();
+                if (raw === 's3') return 'S3';
+                if (raw === 'local') return 'Local';
+                if (raw) return raw.toUpperCase();
+                return '';
+            };
+
+            const images = list.filter((a) => a && a.url && isImageAttachment(a));
+            const nonImages = list.filter((a) => a && a.url && !isImageAttachment(a));
+
+            const parts = [];
+            if (images.length) {
+                const tiles = images.map((att) => {
+                    const url = att && att.url ? String(att.url) : '';
+                    const name = att && att.original_name ? String(att.original_name) : 'Attachment';
+                    const storageTag = attachmentStorageTag(att);
+                    const title = storageTag ? `${name} (${storageTag})` : name;
+                    return `
+                        <a class="tc-attachment-tile" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="${escapeHtml(title)}">
+                            <img class="tc-attachment-thumb" src="${escapeHtml(url)}" alt="${escapeHtml(name)}" loading="lazy">
+                        </a>
+                    `;
+                }).join('');
+                parts.push(`<div class="tc-attachments-grid">${tiles}</div>`);
+            }
+
+            if (nonImages.length) {
+                const rest = nonImages.map((att) => {
+                    const url = att && att.url ? String(att.url) : '';
+                    const name = att && att.original_name ? String(att.original_name) : 'Attachment';
+                    const when = att && att.created_at ? formatDateTime(att.created_at) : '';
+                    const storageTag = attachmentStorageTag(att);
+
+                    if (url && isVideoAttachment(att)) {
+                        return `
+                            <div class="comment-item" style="margin-bottom: 12px;">
+                                <div class="comment-header">
+                                    <span class="comment-author">${escapeHtml(name)}${storageTag ? ` <span style=\"font-weight:700;\">(${escapeHtml(storageTag)})</span>` : ''}</span>
+                                    <span class="comment-date">${escapeHtml(when)}</span>
+                                </div>
+                                <div style="margin-top: 8px;">
+                                    <a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open in new tab</a>
+                                </div>
+                                <div style="margin-top: 10px;">
+                                    <video controls style="max-width: 100%;" src="${escapeHtml(url)}"></video>
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    const label = attachmentTypeLabel(att);
+                    return `
+                        <div class="comment-item" style="margin-bottom: 10px;">
+                            <div class="comment-header">
+                                <span class="comment-author">
+                                    <span style="display:inline-block; min-width: 52px; font-weight: 700;">${escapeHtml(label)}</span>
+                                    <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(name)}</a>
+                                    ${storageTag ? `<span style=\"margin-left: 8px; font-weight: 700;\">(${escapeHtml(storageTag)})</span>` : ''}
+                                </span>
+                                <span class="comment-date">${escapeHtml(when)}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                parts.push(rest);
+            }
+
+            container.innerHTML = parts.join('');
+        };
+
+        const loadTestScenarioAttachmentsForViewModal = async (scenarioId) => {
+            const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
+            if (!modal) return;
+            const row = modal.querySelector('#module-view-scenario-attachments-row');
+            const container = modal.querySelector('#module-view-scenario-attachments');
+            if (!row || !container) return;
+
+            if (!scenarioId) {
+                setViewScenarioAttachmentsVisible(modal, false);
+                return;
+            }
+
+            setViewScenarioAttachmentsVisible(modal, true);
+            container.innerHTML = '<div class="comment-empty">Loading attachments…</div>';
+
+            try {
+                const url = `/api/core/test-scenarios/${encodeURIComponent(String(scenarioId))}/attachments/`;
+                const resp = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                if (!resp.ok) {
+                    container.innerHTML = '<div class="comment-empty">Failed to load attachments.</div>';
+                    return;
+                }
+                const data = await resp.json();
+                renderViewScenarioAttachments(modal, data);
+            } catch (e) {
+                container.innerHTML = '<div class="comment-empty">Error loading attachments.</div>';
+            }
+        };
+
+        // expose so other bundles (e.g., data_management.js) can reuse it
+        try { window.loadTestScenarioAttachmentsForViewModal = loadTestScenarioAttachmentsForViewModal; } catch (e) { /* ignore */ }
+
+        const uploadTestScenarioAttachmentsForViewModal = async (scenarioId, fileList) => {
+            const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
+            if (!modal) return;
+            if (!scenarioId) {
+                setStatus('Invalid scenario.', 'error');
+                return;
+            }
+
+            const files = Array.from(fileList || []).filter(Boolean);
+            if (!files.length) return;
+
+            try {
+                const fd = new FormData();
+                files.forEach((f) => fd.append('files', f));
+                const url = `/api/core/test-scenarios/${encodeURIComponent(String(scenarioId))}/attachments/`;
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
+                    body: fd,
+                });
+                if (!resp.ok) {
+                    const errorData = await resp.json().catch(() => null);
+                    if (errorData) {
+                        setStatus(errorData.detail || (errorData.files || 'Failed to upload attachment.'), 'error');
+                    } else {
+                        const text = await resp.text().catch(() => '');
+                        const suffix = ` (HTTP ${resp.status})`;
+                        const preview = text ? String(text).replace(/\s+/g, ' ').slice(0, 160) : '';
+                        setStatus(preview ? `Upload failed${suffix}: ${preview}` : `Upload failed${suffix}.`, 'error');
+                    }
+                    return;
+                }
+                setStatus('Attachment uploaded successfully.', 'success');
+                const data = await resp.json().catch(() => null);
+                if (data) renderViewScenarioAttachments(modal, data);
+                else await loadTestScenarioAttachmentsForViewModal(scenarioId);
+            } catch (e) {
+                setStatus('Error uploading attachment.', 'error');
+            }
+        };
+
         // Normalize scenario shape returned by the API so client-side code can
         // reliably compare module and plan ids. Some API responses include
         // nested objects for `module` or `plan` which breaks equality checks.
@@ -4121,7 +4289,6 @@
                             <td>
                                 <div class="table-action-group">
                                     <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>
-                                    <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>
                                     <button type="button" class="action-button" data-action="comment-scenario" data-scenario-id="${scenario.id}">Comment</button>
                                     <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>
                                 </div>
@@ -4198,7 +4365,6 @@
                                                 <td>
                                                     <div class="table-action-group">
                                                         <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>
-                                                        <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>
                                                         <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>
                                                     </div>
                                                 </td>
@@ -4231,7 +4397,6 @@
                                             <td>
                                                 <div class="table-action-group">
                                                     <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>
-                                                    <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>
                                                     <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>
                                                 </div>
                                             </td>
@@ -5287,6 +5452,27 @@
             } catch (e) { /* ignore */ }
         });
 
+        // Upload attachments from the View Scenario modal
+        document.addEventListener('change', async (ev) => {
+            try {
+                const input = ev && ev.target ? ev.target : null;
+                if (!input || input.id !== 'module-view-scenario-attachments-input') return;
+                const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
+                if (!modal || modal.hidden) return;
+                if (!modal.contains(input)) return;
+                const scenarioId = (typeof state !== 'undefined' && state && state.moduleScenarioCurrentId) ? state.moduleScenarioCurrentId : null;
+                const fallbackId = modal.querySelector('#module-view-scenario-comment-scenario-id') ? modal.querySelector('#module-view-scenario-comment-scenario-id').value : null;
+                const sid = scenarioId || fallbackId;
+                if (!sid) {
+                    setStatus('Invalid scenario.', 'error');
+                    return;
+                }
+                const selectedFiles = Array.from(input.files || []).filter(Boolean);
+                try { input.value = ''; } catch (e) { /* ignore */ }
+                await uploadTestScenarioAttachmentsForViewModal(sid, selectedFiles);
+            } catch (e) { /* ignore */ }
+        });
+
         // Upload attachments for a specific comment (details modal)
         document.addEventListener('change', async (ev) => {
             try {
@@ -5364,6 +5550,22 @@
                     return;
                 }
                 const input = modal.querySelector('#module-view-case-attachments-input');
+                if (input) input.click();
+                return;
+            }
+
+            if (action === 'pick-view-scenario-attachments') {
+                ev.preventDefault();
+                const scenarioModal = document.querySelector('[data-role="module-add-scenario-modal"]');
+                if (!scenarioModal || scenarioModal.hidden) return;
+                const scenarioId = (typeof state !== 'undefined' && state && state.moduleScenarioCurrentId) ? state.moduleScenarioCurrentId : null;
+                const fallbackId = scenarioModal.querySelector('#module-view-scenario-comment-scenario-id') ? scenarioModal.querySelector('#module-view-scenario-comment-scenario-id').value : null;
+                const sid = scenarioId || fallbackId;
+                if (!sid) {
+                    setStatus('Invalid scenario.', 'error');
+                    return;
+                }
+                const input = scenarioModal.querySelector('#module-view-scenario-attachments-input');
                 if (input) input.click();
                 return;
             }

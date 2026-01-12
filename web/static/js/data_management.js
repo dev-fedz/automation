@@ -478,6 +478,8 @@
             }
         };
 
+        let activeViewScenarioAttachCommentId = null;
+
         const initialEnvironments = readScriptJson("automation-initial-environments") || [];
         const initialRisks = readScriptJson("automation-initial-risks") || [];
         const initialMitigations = readScriptJson("automation-initial-mitigation-plans") || [];
@@ -847,7 +849,6 @@
                                 <td class="scenario-actions">
                                     <div class="table-action-group">
                                         <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${s.id}">View</button>
-                                        <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${s.id}">Edit</button>
                                         <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${s.id}" data-variant="danger">Delete</button>
                                     </div>
                                 </td>
@@ -1749,6 +1750,44 @@
                     }
                 })();
 
+                const getAttachmentExt = (name) => {
+                    try {
+                        const n = String(name || '');
+                        const idx = n.lastIndexOf('.');
+                        if (idx === -1) return '';
+                        return n.slice(idx + 1).toLowerCase();
+                    } catch (e) { return ''; }
+                };
+
+                const isImageAttachment = (att) => {
+                    const ct = (att && att.content_type) ? String(att.content_type).toLowerCase() : '';
+                    if (ct.startsWith('image/')) return true;
+                    const ext = getAttachmentExt(att && att.original_name);
+                    return ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
+                };
+
+                const isVideoAttachment = (att) => {
+                    const ct = (att && att.content_type) ? String(att.content_type).toLowerCase() : '';
+                    if (ct.startsWith('video/')) return true;
+                    const ext = getAttachmentExt(att && att.original_name);
+                    return ['mp4', 'webm', 'mov'].includes(ext);
+                };
+
+                const attachmentTypeLabel = (att) => {
+                    const ext = getAttachmentExt(att && att.original_name);
+                    if (!ext) return 'FILE';
+                    return String(ext).toUpperCase();
+                };
+
+                const attachmentStorageTag = (att) => {
+                    if (!att) return '';
+                    const raw = (att.storage_backend || att.storage || '').toString().toLowerCase();
+                    if (raw === 's3') return 'S3';
+                    if (raw === 'local') return 'Local';
+                    if (raw) return raw.toUpperCase();
+                    return '';
+                };
+
                 const renderComment = (comment, isReply = false) => {
                     if (!comment) return '';
 
@@ -1761,6 +1800,11 @@
                         <button type="button" class="comment-action-btn" data-action="view-scenario-delete-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Delete">
                             <span>🗑️</span>
                         </button>` : '';
+
+                    const attachBtn = `
+                        <button type="button" class="comment-action-btn" data-action="view-scenario-attach-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Attach file">
+                            <span>📎</span>
+                        </button>`;
 
                     const isLiked = !!comment.user_has_liked;
                     const likesCount = typeof comment.likes_count === 'number' ? comment.likes_count : 0;
@@ -1782,6 +1826,68 @@
                     const rawCommentHtml = normalizeCommentHtmlForDisplay(comment.content || '');
                     const commentDisplayHtml = renderCommentPlainHtml(rawCommentHtml);
 
+                    const atts = Array.isArray(comment.attachments) ? comment.attachments : [];
+                    const images = atts.filter((a) => a && a.url && isImageAttachment(a));
+                    const videos = atts.filter((a) => a && a.url && isVideoAttachment(a));
+                    const docs = atts.filter((a) => {
+                        if (!a || !a.url) return false;
+                        return !(isImageAttachment(a) || isVideoAttachment(a));
+                    });
+
+                    const imagesHtml = images.length
+                        ? `<div class="tc-attachments-grid" style="margin-top: 10px;">${images.map((a) => {
+                            const url = String(a.url || '');
+                            const name = String(a.original_name || 'Attachment');
+                            const storageTag = attachmentStorageTag(a);
+                            const title = storageTag ? `${name} (${storageTag})` : name;
+                            return `
+                                <a class="tc-attachment-tile" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="${escapeHtml(title)}">
+                                    <img class="tc-attachment-thumb" src="${escapeHtml(url)}" alt="${escapeHtml(name)}" loading="lazy">
+                                </a>
+                            `;
+                        }).join('')}</div>`
+                        : '';
+
+                    const videosHtml = videos.length
+                        ? `<div style="margin-top: 10px;">${videos.map((a) => {
+                            const url = String(a.url || '');
+                            const name = String(a.original_name || 'Attachment');
+                            const storageTag = attachmentStorageTag(a);
+                            return `
+                                <div style="margin-bottom: 10px;">
+                                    <div style="margin-bottom: 6px;">
+                                        <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(name)}</a>
+                                        ${storageTag ? `<span style="margin-left: 8px; font-weight: 700;">(${escapeHtml(storageTag)})</span>` : ''}
+                                    </div>
+                                    <video controls style="max-width: 100%;" src="${escapeHtml(url)}"></video>
+                                </div>
+                            `;
+                        }).join('')}</div>`
+                        : '';
+
+                    const docsHtml = docs.length
+                        ? `<div style="margin-top: 10px;">${docs.map((a) => {
+                            const url = String(a.url || '');
+                            const name = String(a.original_name || 'Attachment');
+                            const label = attachmentTypeLabel(a);
+                            const storageTag = attachmentStorageTag(a);
+                            return `
+                                <div style="margin-bottom: 6px;">
+                                    <span style="display:inline-block; min-width: 52px; font-weight: 700;">${escapeHtml(label)}</span>
+                                    <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(name)}</a>
+                                    ${storageTag ? `<span style="margin-left: 8px; font-weight: 700;">(${escapeHtml(storageTag)})</span>` : ''}
+                                </div>
+                            `;
+                        }).join('')}</div>`
+                        : '';
+
+                    const attachmentsBlock = (atts.length)
+                        ? `
+                            <div class="automation-section-separator" aria-hidden="true" style="margin: 10px 0 8px;"></div>
+                            <div>${imagesHtml}${videosHtml}${docsHtml}</div>
+                        `
+                        : '';
+
                     return `
                         <div class="comment-item ${isReply ? 'comment-reply' : ''}" data-comment-id="${escapeHtml(comment.id || '')}" data-comment-user="${escapeHtml(comment.user || '')}">
                             <div class="comment-header">
@@ -1798,9 +1904,11 @@
                                 <button type="button" class="comment-action-btn" data-action="view-scenario-add-reaction-comment" data-comment-id="${escapeHtml(comment.id || '')}" data-user-reaction="${escapeHtml(userReaction)}" title="Add Reaction">
                                     <span data-role="reaction-display">${escapeHtml(reactionDisplayText)}</span>
                                 </button>
+                                ${attachBtn}
                                 ${editBtn}
                                 ${deleteBtn}
                             </div>
+                            ${attachmentsBlock}
                             ${repliesHtml}
                         </div>
                     `;
@@ -1930,6 +2038,7 @@
                 }
             } catch (e) { /* ignore */ }
 
+
             // Reset inline add-comment form (View Scenario only).
             try {
                 const addForm = modal.querySelector('#module-view-scenario-add-comment-form');
@@ -2016,6 +2125,7 @@
                     loadScenarioCommentsForViewModal(scenario.id);
                 }
             } catch (e) { /* ignore */ }
+
             // focus first input when not viewing
             if (!readOnly && titleInput) titleInput.focus();
         };
@@ -2121,6 +2231,9 @@
                     const addReactionBtn = ev && ev.target && ev.target.closest
                         ? ev.target.closest('[data-action="view-scenario-add-reaction-comment"]')
                         : null;
+                    const attachCommentBtn = ev && ev.target && ev.target.closest
+                        ? ev.target.closest('[data-action="view-scenario-attach-comment"]')
+                        : null;
                     const cancelInlineBtn = ev && ev.target && ev.target.closest
                         ? ev.target.closest('[data-action="cancel-view-scenario-inline-comment"]')
                         : null;
@@ -2129,7 +2242,7 @@
                         : null;
 
                     const handleCommentAction = async () => {
-                        const anyBtn = editCommentBtn || replyCommentBtn || deleteCommentBtn || thumbsUpBtn || addReactionBtn || cancelInlineBtn || submitInlineBtn;
+                        const anyBtn = editCommentBtn || replyCommentBtn || deleteCommentBtn || thumbsUpBtn || addReactionBtn || attachCommentBtn || cancelInlineBtn || submitInlineBtn;
                         if (!anyBtn) return false;
 
                         try {
@@ -2158,6 +2271,15 @@
                         }
 
                         const commentId = anyBtn && anyBtn.dataset ? anyBtn.dataset.commentId : null;
+
+                        if (attachCommentBtn && commentId) {
+                            activeViewScenarioAttachCommentId = String(commentId);
+                            const fileInput = modal.querySelector('#module-view-scenario-comment-attachments-input');
+                            if (fileInput && typeof fileInput.click === 'function') {
+                                try { fileInput.click(); } catch (e) { /* ignore */ }
+                            }
+                            return true;
+                        }
 
                         if (editCommentBtn && commentId) {
                             const commentItem = modal.querySelector(`.comment-item[data-comment-id="${cssEscape(commentId)}"]`);
@@ -2432,6 +2554,62 @@
                         })();
                     }
                 });
+
+                // Scenario comment attachments upload input
+                try {
+                    const fileInput = modal.querySelector('#module-view-scenario-comment-attachments-input');
+                    if (fileInput && !fileInput.dataset.viewScenarioAttachBound) {
+                        fileInput.dataset.viewScenarioAttachBound = '1';
+                        fileInput.addEventListener('change', async () => {
+                            const commentId = activeViewScenarioAttachCommentId;
+                            activeViewScenarioAttachCommentId = null;
+                            if (!commentId) {
+                                try { fileInput.value = ''; } catch (e) { /* ignore */ }
+                                return;
+                            }
+
+                            const selectedFiles = (() => {
+                                try { return Array.from(fileInput.files || []); } catch (e) { return []; }
+                            })();
+                            if (!selectedFiles.length) {
+                                try { fileInput.value = ''; } catch (e) { /* ignore */ }
+                                return;
+                            }
+
+                            const url = `/api/core/scenario-comments/${encodeURIComponent(String(commentId))}/attachments/`;
+                            const formData = new FormData();
+                            selectedFiles.forEach((f) => formData.append('files', f));
+
+                            try {
+                                fileInput.disabled = true;
+                                const resp = await fetch(url, {
+                                    method: 'POST',
+                                    credentials: 'same-origin',
+                                    headers: { 'X-CSRFToken': getCsrfToken() },
+                                    body: formData,
+                                });
+                                if (!resp.ok) {
+                                    let msg = 'Upload failed.';
+                                    try {
+                                        const data = await resp.json();
+                                        const messages = flattenMessages(data);
+                                        if (messages && messages.length) msg = messages.join(' ');
+                                    } catch (e) { /* ignore */ }
+                                    throw new Error(msg);
+                                }
+                                showToast('Attachment uploaded.', 'success');
+                                if (state.moduleScenarioCurrentId) {
+                                    await loadScenarioCommentsForViewModal(state.moduleScenarioCurrentId);
+                                }
+                            } catch (e) {
+                                showToast(e instanceof Error ? e.message : 'Failed to upload attachment.', 'error');
+                            } finally {
+                                try { fileInput.value = ''; } catch (e) { /* ignore */ }
+                                fileInput.disabled = false;
+                            }
+                        });
+                    }
+                } catch (e) { /* ignore */ }
             }
         } catch (e) { /* ignore */ }
 
@@ -2473,6 +2651,11 @@
             try {
                 const editorWrapper = modal.querySelector('#module-view-inline-comment-editor');
                 if (editorWrapper) editorWrapper.style.display = 'none';
+            } catch (e) { /* ignore */ }
+
+            try {
+                const input = modal.querySelector('#module-view-scenario-comment-attachments-input');
+                if (input) input.value = '';
             } catch (e) { /* ignore */ }
             const form = document.getElementById('module-add-scenario-form');
             if (form) form.reset();

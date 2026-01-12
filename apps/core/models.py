@@ -345,6 +345,42 @@ class TestScenario(TimeStampedModel):
         return self.title
 
 
+def testscenario_attachment_upload_path(instance: "TestScenarioAttachment", filename: str) -> str:
+    # Example: testscenarios/attachments/123/20260112T010203Z_myfile.pdf
+    from datetime import datetime
+
+    safe_name = (filename or "upload.bin").replace("/", "_").replace("\\", "_")
+    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    return f"testscenarios/attachments/{instance.scenario_id}/{ts}_{safe_name}"
+
+
+class TestScenarioAttachment(TimeStampedModel):
+    """File attachment linked to a TestScenario."""
+
+    scenario = models.ForeignKey(
+        TestScenario,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+    )
+    file = models.FileField(upload_to=testscenario_attachment_upload_path)
+    original_name = models.CharField(max_length=255, blank=True)
+    content_type = models.CharField(max_length=150, blank=True)
+    size = models.PositiveIntegerField(default=0)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="test_scenario_attachments",
+    )
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.original_name or (self.file.name if self.file else "Attachment")
+
+
 class ScenarioComment(TimeStampedModel):
     """Comments on test scenarios for collaboration and discussion."""
 
@@ -369,6 +405,42 @@ class ScenarioComment(TimeStampedModel):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Comment by {self.user} on {self.scenario}"
+
+
+def scenario_comment_attachment_upload_path(instance: "ScenarioCommentAttachment", filename: str) -> str:
+    # Example: testscenarios/comments/attachments/987/20260112T010203Z_myfile.pdf
+    from datetime import datetime
+
+    safe_name = (filename or "upload.bin").replace("/", "_").replace("\\", "_")
+    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    return f"testscenarios/comments/attachments/{instance.comment_id}/{ts}_{safe_name}"
+
+
+class ScenarioCommentAttachment(TimeStampedModel):
+    """File attachment linked to a ScenarioComment."""
+
+    comment = models.ForeignKey(
+        ScenarioComment,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+    )
+    file = models.FileField(upload_to=scenario_comment_attachment_upload_path)
+    original_name = models.CharField(max_length=255, blank=True)
+    content_type = models.CharField(max_length=150, blank=True)
+    size = models.PositiveIntegerField(default=0)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="scenario_comment_attachments",
+    )
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.original_name or (self.file.name if self.file else "Attachment")
 
 
 class CommentLike(TimeStampedModel):

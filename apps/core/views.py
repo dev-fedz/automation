@@ -428,6 +428,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
 class TestScenarioViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.TestScenarioSerializer
     permission_classes = [IsAuthenticated]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
 
     def get_queryset(self):
         queryset = selectors.test_scenario_list()
@@ -444,10 +445,92 @@ class TestScenarioViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(module_id=module)
         return queryset
 
+    def _is_allowed_scenario_attachment(self, filename: str | None, content_type: str | None) -> bool:
+        """Allow images, videos, and common document formats."""
+
+        import os
+
+        name = (filename or "").lower()
+        ext = ""
+        try:
+            _, ext = os.path.splitext(name)
+        except Exception:
+            ext = ""
+
+        allowed_ext = {
+            ".png", ".jpg", ".jpeg", ".gif", ".webp",
+            ".mp4", ".webm", ".mov",
+            ".csv",
+            ".xls", ".xlsx",
+            ".pdf",
+            ".doc", ".docx",
+        }
+        if ext in allowed_ext:
+            return True
+
+        ct = (content_type or "").lower()
+        if ct.startswith("image/") or ct.startswith("video/"):
+            return True
+
+        allowed_ct = {
+            "text/csv",
+            "application/csv",
+            "application/pdf",
+            "application/msword",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }
+        return ct in allowed_ct
+
+    @action(detail=True, methods=["get", "post"], url_path="attachments")
+    def attachments(self, request, pk=None):
+        scenario = self.get_object()
+
+        if request.method == "GET":
+            qs = models.TestScenarioAttachment.objects.filter(scenario=scenario).order_by("-created_at", "-id")
+            return Response(
+                serializers.TestScenarioAttachmentSerializer(qs, many=True, context={"request": request}).data
+            )
+
+        files = []
+        try:
+            if hasattr(request, "FILES"):
+                files = request.FILES.getlist("files") or request.FILES.getlist("file")
+        except Exception:
+            files = []
+
+        if not files:
+            raise ValidationError({"files": "No files uploaded."})
+
+        created: list[models.TestScenarioAttachment] = []
+        for f in files:
+            fname = getattr(f, "name", None) or "upload.bin"
+            ctype = getattr(f, "content_type", None) or "application/octet-stream"
+            if not self._is_allowed_scenario_attachment(fname, ctype):
+                raise ValidationError({"files": f"File type not allowed: {fname}"})
+
+            obj = models.TestScenarioAttachment(
+                scenario=scenario,
+                uploaded_by=request.user if getattr(request, "user", None) and request.user.is_authenticated else None,
+                original_name=fname,
+                content_type=ctype,
+                size=getattr(f, "size", 0) or 0,
+            )
+            obj.file.save(fname, f, save=True)
+            created.append(obj)
+
+        qs = models.TestScenarioAttachment.objects.filter(id__in=[o.id for o in created]).order_by("-created_at", "-id")
+        return Response(
+            serializers.TestScenarioAttachmentSerializer(qs, many=True, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
 
 class ScenarioCommentViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.ScenarioCommentSerializer
     permission_classes = [IsAuthenticated]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
 
     def get_queryset(self):
         queryset = models.ScenarioComment.objects.select_related("user", "scenario").prefetch_related(
@@ -455,6 +538,8 @@ class ScenarioCommentViewSet(viewsets.ModelViewSet):
             "likes",
             "reactions",
             "replies__reactions",
+            "attachments",
+            "replies__attachments",
         ).all()
         scenario_id = self.request.query_params.get("scenario")
         if scenario_id:
@@ -463,6 +548,87 @@ class ScenarioCommentViewSet(viewsets.ModelViewSet):
         if self.action == 'list':
             queryset = queryset.filter(parent__isnull=True)
         return queryset
+
+    def _is_allowed_scenario_comment_attachment(self, filename: str | None, content_type: str | None) -> bool:
+        """Allow images, videos, and common document formats."""
+
+        import os
+
+        name = (filename or "").lower()
+        ext = ""
+        try:
+            _, ext = os.path.splitext(name)
+        except Exception:
+            ext = ""
+
+        allowed_ext = {
+            ".png", ".jpg", ".jpeg", ".gif", ".webp",
+            ".mp4", ".webm", ".mov",
+            ".csv",
+            ".xls", ".xlsx",
+            ".pdf",
+            ".doc", ".docx",
+        }
+        if ext in allowed_ext:
+            return True
+
+        ct = (content_type or "").lower()
+        if ct.startswith("image/") or ct.startswith("video/"):
+            return True
+
+        allowed_ct = {
+            "text/csv",
+            "application/csv",
+            "application/pdf",
+            "application/msword",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }
+        return ct in allowed_ct
+
+    @action(detail=True, methods=["get", "post"], url_path="attachments")
+    def attachments(self, request, pk=None):
+        comment = self.get_object()
+
+        if request.method == "GET":
+            qs = models.ScenarioCommentAttachment.objects.filter(comment=comment).order_by("-created_at", "-id")
+            return Response(
+                serializers.ScenarioCommentAttachmentSerializer(qs, many=True, context={"request": request}).data
+            )
+
+        files = []
+        try:
+            if hasattr(request, "FILES"):
+                files = request.FILES.getlist("files") or request.FILES.getlist("file")
+        except Exception:
+            files = []
+
+        if not files:
+            raise ValidationError({"files": "No files uploaded."})
+
+        created: list[models.ScenarioCommentAttachment] = []
+        for f in files:
+            fname = getattr(f, "name", None) or "upload.bin"
+            ctype = getattr(f, "content_type", None) or "application/octet-stream"
+            if not self._is_allowed_scenario_comment_attachment(fname, ctype):
+                raise ValidationError({"files": f"File type not allowed: {fname}"})
+
+            obj = models.ScenarioCommentAttachment(
+                comment=comment,
+                uploaded_by=request.user if getattr(request, "user", None) and request.user.is_authenticated else None,
+                original_name=fname,
+                content_type=ctype,
+                size=getattr(f, "size", 0) or 0,
+            )
+            obj.file.save(fname, f, save=True)
+            created.append(obj)
+
+        qs = models.ScenarioCommentAttachment.objects.filter(id__in=[o.id for o in created]).order_by("-created_at", "-id")
+        return Response(
+            serializers.ScenarioCommentAttachmentSerializer(qs, many=True, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)

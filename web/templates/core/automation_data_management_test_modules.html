@@ -116,28 +116,19 @@
                         <button type="button" class="btn-secondary" data-action="cancel-view-scenario-edit">Cancel</button>
                     </div>
 
-                    <div class="form-row" id="module-view-case-attachments-row" hidden style="display: flex; flex-direction: column;">
-                        <div class="automation-section-separator" aria-hidden="true"></div>
-                        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px;">
-                            <span style="font-weight: 600;">ATTACHMENTS</span>
-                            <button type="button" class="btn-primary" data-action="pick-view-case-attachments">Add Attachment</button>
-                        </div>
-                        <input
-                            type="file"
-                            id="module-view-case-attachments-input"
-                            name="attachments"
-                            multiple
-                            hidden
-                            accept="image/*,video/*,.csv,.xls,.xlsx,.pdf,.doc,.docx"
-                        >
-                        <small class="form-hint" style="margin-bottom: 8px;">Supported: images, videos, CSV, Excel, PDF, Word.</small>
-                        <div id="module-view-case-attachments" style="flex: 0 0 auto;"></div>
-                    </div>
                     <div class="form-row" id="module-view-scenario-comments-row" hidden style="height: 1000px; display: flex; flex-direction: column;">
                         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px;">
                             <span style="font-weight: 600;">COMMENTS</span>
                             <button type="button" class="btn-primary" data-action="toggle-view-scenario-add-comment">Add Comment</button>
                         </div>
+                        <input
+                            type="file"
+                            id="module-view-scenario-comment-attachments-input"
+                            name="scenario_comment_attachments"
+                            multiple
+                            hidden
+                            accept="image/*,video/*,.csv,.xls,.xlsx,.pdf,.doc,.docx"
+                        >
                         <div id="module-view-scenario-add-comment-form" class="automation-form" style="display:none; margin-bottom: 12px;">
                             <input type="hidden" id="module-view-scenario-comment-scenario-id" name="scenario">
                             <div class="form-row">
