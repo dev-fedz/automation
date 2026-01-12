@@ -471,6 +471,43 @@ class TestCaseCommentReaction(TimeStampedModel):
         return f"{self.user} reacted to test case comment {self.comment.id}"
 
 
+def testcase_comment_attachment_upload_path(instance: "TestCaseCommentAttachment", filename: str) -> str:
+    # Keep uploads grouped by comment for easy browsing.
+    # Example: testcases/comments/attachments/987/20260112T010203Z_myfile.pdf
+    from datetime import datetime
+
+    safe_name = (filename or "upload.bin").replace("/", "_").replace("\\", "_")
+    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    return f"testcases/comments/attachments/{instance.comment_id}/{ts}_{safe_name}"
+
+
+class TestCaseCommentAttachment(TimeStampedModel):
+    """File attachment linked to a TestCaseComment."""
+
+    comment = models.ForeignKey(
+        TestCaseComment,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+    )
+    file = models.FileField(upload_to=testcase_comment_attachment_upload_path)
+    original_name = models.CharField(max_length=255, blank=True)
+    content_type = models.CharField(max_length=150, blank=True)
+    size = models.PositiveIntegerField(default=0)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="test_case_comment_attachments",
+    )
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.original_name or (self.file.name if self.file else "Attachment")
+
+
 class TestCase(TimeStampedModel):
     """Executable test case with dynamic variables for API validation."""
 
@@ -639,3 +676,40 @@ class TestCase(TimeStampedModel):
         else:
             self.requires_dependency = True
             self.dependency_response_key = str(self.dependency_response_key).strip()
+
+
+def testcase_attachment_upload_path(instance: "TestCaseAttachment", filename: str) -> str:
+    # Keep uploads grouped by testcase for easy browsing.
+    # Example: testcases/attachments/123/20260112T010203Z_myfile.pdf
+    from datetime import datetime
+
+    safe_name = (filename or "upload.bin").replace("/", "_").replace("\\", "_")
+    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    return f"testcases/attachments/{instance.test_case_id}/{ts}_{safe_name}"
+
+
+class TestCaseAttachment(TimeStampedModel):
+    """File attachment linked to a TestCase (images, videos, docs, etc.)."""
+
+    test_case = models.ForeignKey(
+        TestCase,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+    )
+    file = models.FileField(upload_to=testcase_attachment_upload_path)
+    original_name = models.CharField(max_length=255, blank=True)
+    content_type = models.CharField(max_length=150, blank=True)
+    size = models.PositiveIntegerField(default=0)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="test_case_attachments",
+    )
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.original_name or (self.file.name if self.file else "Attachment")

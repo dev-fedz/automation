@@ -561,6 +561,134 @@ class TestCaseSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
+class TestCaseAttachmentSerializer(serializers.ModelSerializer):
+    url = serializers.SerializerMethodField()
+    storage_backend = serializers.SerializerMethodField()
+    storage_bucket = serializers.SerializerMethodField()
+    storage_key = serializers.SerializerMethodField()
+    uploaded_by = serializers.StringRelatedField(read_only=True)
+
+    class Meta:
+        model = models.TestCaseAttachment
+        fields = [
+            "id",
+            "test_case",
+            "original_name",
+            "content_type",
+            "size",
+            "url",
+            "storage_backend",
+            "storage_bucket",
+            "storage_key",
+            "uploaded_by",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_url(self, obj):
+        try:
+            return obj.file.url if obj.file else None
+        except Exception:
+            return None
+
+    def get_storage_key(self, obj):
+        try:
+            return obj.file.name if obj.file else None
+        except Exception:
+            return None
+
+    def get_storage_bucket(self, obj):
+        try:
+            storage = obj.file.storage if obj.file else None
+            if storage is None:
+                return None
+            bucket_name = getattr(storage, "bucket_name", None)
+            if bucket_name:
+                return str(bucket_name)
+            return None
+        except Exception:
+            return None
+
+    def get_storage_backend(self, obj):
+        try:
+            storage = obj.file.storage if obj.file else None
+            if storage is None:
+                return None
+            module = (storage.__class__.__module__ or "").lower()
+            name = (storage.__class__.__name__ or "").lower()
+            if "s3" in module or "boto" in module or "s3" in name or getattr(storage, "bucket_name", None):
+                return "s3"
+            if "filesystemstorage" in name or "django.core.files.storage" in module:
+                return "local"
+            return "other"
+        except Exception:
+            return None
+
+
+class TestCaseCommentAttachmentSerializer(serializers.ModelSerializer):
+    url = serializers.SerializerMethodField()
+    storage_backend = serializers.SerializerMethodField()
+    storage_bucket = serializers.SerializerMethodField()
+    storage_key = serializers.SerializerMethodField()
+    uploaded_by = serializers.StringRelatedField(read_only=True)
+
+    class Meta:
+        model = models.TestCaseCommentAttachment
+        fields = [
+            "id",
+            "comment",
+            "original_name",
+            "content_type",
+            "size",
+            "url",
+            "storage_backend",
+            "storage_bucket",
+            "storage_key",
+            "uploaded_by",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_url(self, obj):
+        try:
+            return obj.file.url if obj.file else None
+        except Exception:
+            return None
+
+    def get_storage_key(self, obj):
+        try:
+            return obj.file.name if obj.file else None
+        except Exception:
+            return None
+
+    def get_storage_bucket(self, obj):
+        try:
+            storage = obj.file.storage if obj.file else None
+            if storage is None:
+                return None
+            bucket_name = getattr(storage, "bucket_name", None)
+            if bucket_name:
+                return str(bucket_name)
+            return None
+        except Exception:
+            return None
+
+    def get_storage_backend(self, obj):
+        try:
+            storage = obj.file.storage if obj.file else None
+            if storage is None:
+                return None
+            module = (storage.__class__.__module__ or "").lower()
+            name = (storage.__class__.__name__ or "").lower()
+            if "s3" in module or "boto" in module or "s3" in name or getattr(storage, "bucket_name", None):
+                return "s3"
+            if "filesystemstorage" in name or "django.core.files.storage" in module:
+                return "local"
+            return "other"
+        except Exception:
+            return None
+
+
 class TestScenarioSerializer(serializers.ModelSerializer):
     cases = TestCaseSerializer(many=True, read_only=True)
     is_automated = serializers.BooleanField(required=False, default=True)
@@ -710,6 +838,7 @@ class TestCaseCommentSerializer(serializers.ModelSerializer):
     user_has_liked = serializers.SerializerMethodField()
     user_reaction = serializers.SerializerMethodField()
     reactions_summary = serializers.SerializerMethodField()
+    attachments = TestCaseCommentAttachmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = models.TestCaseComment
@@ -721,6 +850,7 @@ class TestCaseCommentSerializer(serializers.ModelSerializer):
             "user_name",
             "content",
             "parent",
+            "attachments",
             "created_at",
             "updated_at",
             "is_edited",
@@ -733,6 +863,7 @@ class TestCaseCommentSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "user",
+            "attachments",
             "created_at",
             "updated_at",
             "likes_count",

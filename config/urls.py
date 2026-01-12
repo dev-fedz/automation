@@ -4,6 +4,7 @@ from django.contrib import admin
 from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
+from django.conf.urls.static import static
 from django.http import JsonResponse, HttpResponseNotFound, HttpResponseServerError
 from django.shortcuts import render, redirect
 from django.urls import include, path
@@ -105,3 +106,4 @@ def handler500(request):  # noqa: D401
 
 if settings.DEBUG:
 	urlpatterns += staticfiles_urlpatterns()
+	urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

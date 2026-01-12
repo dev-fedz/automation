@@ -1436,8 +1436,44 @@
     color: #b97c00;
 }
 
+.automation-section-separator {
+    border-top: 1px solid var(--automation-border);
+    margin: 10px 0 12px;
+}
+
 body.automation-modal-open {
     overflow: hidden;
+}
+
+/* Test Case Details: attachment thumbnails (4 columns) */
+.tc-attachments-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.tc-attachment-tile {
+    display: block;
+}
+
+.tc-attachment-thumb {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 180px;
+    object-fit: contain;
+}
+
+@media (max-width: 900px) {
+    .tc-attachments-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 520px) {
+    .tc-attachments-grid {
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+    }
 }
 
 /* Make the Test Case response modal wider: at least 75% of the viewport width,

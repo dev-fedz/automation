@@ -1252,12 +1252,15 @@
 
             // Comments should only appear in details view.
             try { setViewCaseCommentsVisible(modalEl, Boolean(isDetails)); } catch (e) { /* ignore */ }
+            // Attachments should only appear in details view.
+            try { setViewCaseAttachmentsVisible(modalEl, Boolean(isDetails)); } catch (e) { /* ignore */ }
         };
 
         // Test Case Details: Comments (mirrors View Scenario comments)
         let viewCaseCommentEditor = null;
         let viewCaseInlineCommentEditor = null;
         let activeViewCaseId = null;
+        let activeViewCaseAttachCommentId = null;
         let viewCaseCommentsCache = new Map();
         let viewCaseCommentEditorAttempts = 0;
         const MAX_VIEW_CASE_COMMENT_EDITOR_ATTEMPTS = 20;
@@ -1308,6 +1311,42 @@
                 if (!modalEl) return;
                 const row = modalEl.querySelector('#module-view-case-comments-row');
                 if (!row) return;
+
+                // Keep Attachments above Comments (details view layout).
+                try {
+                    const attachmentsRow = modalEl.querySelector('#module-view-case-attachments-row');
+                    if (attachmentsRow && row.parentNode && attachmentsRow.parentNode === row.parentNode) {
+                        if (attachmentsRow.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING) {
+                            // attachmentsRow is after comments row; move it above.
+                            row.parentNode.insertBefore(attachmentsRow, row);
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+
+                row.hidden = !visible;
+                try { row.style.display = visible ? 'flex' : 'none'; } catch (e) { /* ignore */ }
+            } catch (e) { /* ignore */ }
+        };
+
+        const setViewCaseAttachmentsVisible = (modalEl, visible) => {
+            try {
+                if (!modalEl) return;
+                const row = modalEl.querySelector('#module-view-case-attachments-row');
+                if (!row) return;
+
+                // Keep Attachments above Comments (details view layout).
+                try {
+                    const commentsRow = modalEl.querySelector('#module-view-case-comments-row');
+                    if (commentsRow && commentsRow.parentNode && row.parentNode === commentsRow.parentNode) {
+                        if (commentsRow.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING) {
+                            // commentsRow is after attachments row (already good)
+                        } else if (commentsRow.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_PRECEDING) {
+                            // attachmentsRow is after comments row; move it above.
+                            commentsRow.parentNode.insertBefore(row, commentsRow);
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+
                 row.hidden = !visible;
                 try { row.style.display = visible ? 'flex' : 'none'; } catch (e) { /* ignore */ }
             } catch (e) { /* ignore */ }
@@ -1569,6 +1608,9 @@
                     const deleteBtn = canEdit ? `
                         <button type="button" class="comment-action-btn" data-action="view-case-delete-comment" data-comment-id="${escapeHtml(String(comment.id || ''))}" title="Delete"><span>🗑️</span></button>` : '';
 
+                    const attachBtn = `
+                        <button type="button" class="comment-action-btn" data-action="view-case-attach-comment" data-comment-id="${escapeHtml(String(comment.id || ''))}" title="Attach file"><span>📎</span></button>`;
+
                     const isLiked = !!comment.user_has_liked;
                     const likesCount = typeof comment.likes_count === 'number' ? comment.likes_count : 0;
                     const thumbsUpIconStyle = isLiked ? '' : 'filter: grayscale(1); opacity: 0.45;';
@@ -1584,6 +1626,77 @@
 
                     const repliesHtml = (!isReply && comment.replies && comment.replies.length > 0)
                         ? `<div class="comment-replies">${comment.replies.map(reply => renderComment(reply, true)).join('')}</div>`
+                        : '';
+
+                    const atts = Array.isArray(comment.attachments) ? comment.attachments : [];
+
+                    const attachmentStorageTag = (att) => {
+                        if (!att) return '';
+                        const raw = (att.storage_backend || att.storage || '').toString().toLowerCase();
+                        if (raw === 's3') return 'S3';
+                        if (raw === 'local') return 'Local';
+                        if (raw) return raw.toUpperCase();
+                        return '';
+                    };
+                    const images = atts.filter((a) => a && a.url && isImageAttachment(a));
+                    const videos = atts.filter((a) => a && a.url && isVideoAttachment(a));
+                    const docs = atts.filter((a) => {
+                        if (!a || !a.url) return false;
+                        return !(isImageAttachment(a) || isVideoAttachment(a));
+                    });
+
+                    const imagesHtml = images.length
+                        ? `<div class="tc-attachments-grid" style="margin-top: 10px;">${images.map((a) => {
+                            const url = String(a.url || '');
+                            const name = String(a.original_name || 'Attachment');
+                            const storageTag = attachmentStorageTag(a);
+                            const title = storageTag ? `${name} (${storageTag})` : name;
+                            return `
+                                <a class="tc-attachment-tile" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="${escapeHtml(title)}">
+                                    <img class="tc-attachment-thumb" src="${escapeHtml(url)}" alt="${escapeHtml(name)}" loading="lazy">
+                                </a>
+                            `;
+                        }).join('')}</div>`
+                        : '';
+
+                    const videosHtml = videos.length
+                        ? `<div style="margin-top: 10px;">${videos.map((a) => {
+                            const url = String(a.url || '');
+                            const name = String(a.original_name || 'Attachment');
+                            const storageTag = attachmentStorageTag(a);
+                            return `
+                                <div style="margin-bottom: 10px;">
+                                    <div style="margin-bottom: 6px;">
+                                        <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(name)}</a>
+                                        ${storageTag ? `<span style="margin-left: 8px; font-weight: 700;">(${escapeHtml(storageTag)})</span>` : ''}
+                                    </div>
+                                    <video controls style="max-width: 100%;" src="${escapeHtml(url)}"></video>
+                                </div>
+                            `;
+                        }).join('')}</div>`
+                        : '';
+
+                    const docsHtml = docs.length
+                        ? `<div style="margin-top: 10px;">${docs.map((a) => {
+                            const url = String(a.url || '');
+                            const name = String(a.original_name || 'Attachment');
+                            const label = attachmentTypeLabel(a);
+                            const storageTag = attachmentStorageTag(a);
+                            return `
+                                <div style="margin-bottom: 6px;">
+                                    <span style="display:inline-block; min-width: 52px; font-weight: 700;">${escapeHtml(label)}</span>
+                                    <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(name)}</a>
+                                    ${storageTag ? `<span style="margin-left: 8px; font-weight: 700;">(${escapeHtml(storageTag)})</span>` : ''}
+                                </div>
+                            `;
+                        }).join('')}</div>`
+                        : '';
+
+                    const attachmentsBlock = (atts.length)
+                        ? `
+                            <div class="automation-section-separator" aria-hidden="true" style="margin: 10px 0 8px;"></div>
+                            <div>${imagesHtml}${videosHtml}${docsHtml}</div>
+                        `
                         : '';
 
                     return `
@@ -1602,9 +1715,11 @@
                                 <button type="button" class="comment-action-btn" data-action="view-case-add-reaction-comment" data-comment-id="${escapeHtml(String(comment.id || ''))}" data-user-reaction="${escapeHtml(String(userReaction))}" title="Add Reaction">
                                     <span data-role="reaction-display">${escapeHtml(reactionDisplayText)}</span>
                                 </button>
+                                ${attachBtn}
                                 ${editBtn}
                                 ${deleteBtn}
                             </div>
+                            ${attachmentsBlock}
                             ${repliesHtml}
                         </div>
                     `;
@@ -1617,6 +1732,231 @@
                 }
             } catch (e) {
                 container.innerHTML = '<div class="comment-empty">Error loading comments.</div>';
+            }
+        };
+
+        // Test Case Details: Attachments
+        const getAttachmentExt = (name) => {
+            try {
+                const n = String(name || '');
+                const idx = n.lastIndexOf('.');
+                if (idx === -1) return '';
+                return n.slice(idx + 1).toLowerCase();
+            } catch (e) { return ''; }
+        };
+
+        const isImageAttachment = (att) => {
+            const ct = (att && att.content_type) ? String(att.content_type).toLowerCase() : '';
+            if (ct.startsWith('image/')) return true;
+            const ext = getAttachmentExt(att && att.original_name);
+            return ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
+        };
+
+        const isVideoAttachment = (att) => {
+            const ct = (att && att.content_type) ? String(att.content_type).toLowerCase() : '';
+            if (ct.startsWith('video/')) return true;
+            const ext = getAttachmentExt(att && att.original_name);
+            return ['mp4', 'webm', 'mov'].includes(ext);
+        };
+
+        const attachmentTypeLabel = (att) => {
+            const ext = getAttachmentExt(att && att.original_name);
+            if (!ext) return 'FILE';
+            return String(ext).toUpperCase();
+        };
+
+        const renderViewCaseAttachments = (modalEl, attachments) => {
+            if (!modalEl) return;
+            const container = modalEl.querySelector('#module-view-case-attachments');
+            if (!container) return;
+
+            const list = Array.isArray(attachments) ? attachments : [];
+            if (!list.length) {
+                container.innerHTML = '<div class="comment-empty">No attachments yet.</div>';
+                return;
+            }
+
+            const images = list.filter((att) => {
+                const url = att && att.url ? String(att.url) : '';
+                return Boolean(url && isImageAttachment(att));
+            });
+
+            const nonImages = list.filter((att) => {
+                const url = att && att.url ? String(att.url) : '';
+                return !Boolean(url && isImageAttachment(att));
+            });
+
+            const parts = [];
+
+            if (images.length) {
+                const tiles = images.map((att) => {
+                    const url = att && att.url ? String(att.url) : '';
+                    const name = att && att.original_name ? String(att.original_name) : 'Attachment';
+                    return `
+                        <a class="tc-attachment-tile" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="${escapeHtml(name)}">
+                            <img class="tc-attachment-thumb" src="${escapeHtml(url)}" alt="${escapeHtml(name)}" loading="lazy">
+                        </a>
+                    `;
+                }).join('');
+
+                parts.push(`<div class="tc-attachments-grid">${tiles}</div>`);
+            }
+
+            if (nonImages.length) {
+                const rest = nonImages.map((att) => {
+                    const url = att && att.url ? String(att.url) : '';
+                    const name = att && att.original_name ? String(att.original_name) : 'Attachment';
+                    const when = att && att.created_at ? formatDateTime(att.created_at) : '';
+
+                    if (url && isVideoAttachment(att)) {
+                        return `
+                            <div class="comment-item" style="margin-bottom: 12px;">
+                                <div class="comment-header">
+                                    <span class="comment-author">${escapeHtml(name)}</span>
+                                    <span class="comment-date">${escapeHtml(when)}</span>
+                                </div>
+                                <div style="margin-top: 8px;">
+                                    <a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open in new tab</a>
+                                </div>
+                                <div style="margin-top: 10px;">
+                                    <video controls style="max-width: 100%;" src="${escapeHtml(url)}"></video>
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    const label = attachmentTypeLabel(att);
+                    return `
+                        <div class="comment-item" style="margin-bottom: 10px;">
+                            <div class="comment-header">
+                                <span class="comment-author">
+                                    <span style="display:inline-block; min-width: 52px; font-weight: 700;">${escapeHtml(label)}</span>
+                                    <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(name)}</a>
+                                </span>
+                                <span class="comment-date">${escapeHtml(when)}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                parts.push(rest);
+            }
+
+            container.innerHTML = parts.join('');
+        };
+
+        const loadTestCaseAttachmentsForViewModal = async (testCaseId) => {
+            const modal = document.querySelector('[data-role="module-add-case-modal"]');
+            if (!modal) return;
+            const row = modal.querySelector('#module-view-case-attachments-row');
+            const container = modal.querySelector('#module-view-case-attachments');
+            if (!row || !container) return;
+
+            if (!testCaseId) {
+                setViewCaseAttachmentsVisible(modal, false);
+                return;
+            }
+
+            setViewCaseAttachmentsVisible(modal, true);
+            container.innerHTML = '<div class="comment-empty">Loading attachments…</div>';
+
+            try {
+                const url = `/api/core/test-cases/${encodeURIComponent(String(testCaseId))}/attachments/`;
+                const resp = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                if (!resp.ok) {
+                    container.innerHTML = '<div class="comment-empty">Failed to load attachments.</div>';
+                    return;
+                }
+                const data = await resp.json();
+                renderViewCaseAttachments(modal, data);
+            } catch (e) {
+                container.innerHTML = '<div class="comment-empty">Error loading attachments.</div>';
+            }
+        };
+
+        const uploadTestCaseAttachmentsForViewModal = async (testCaseId, fileList) => {
+            const modal = document.querySelector('[data-role="module-add-case-modal"]');
+            if (!modal) return;
+            if (!testCaseId) {
+                setStatus('Invalid test case.', 'error');
+                return;
+            }
+
+            const files = Array.from(fileList || []).filter(Boolean);
+            if (!files.length) return;
+
+            try {
+                const fd = new FormData();
+                files.forEach((f) => fd.append('files', f));
+                const url = `/api/core/test-cases/${encodeURIComponent(String(testCaseId))}/attachments/`;
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
+                    body: fd,
+                });
+                if (!resp.ok) {
+                    const errorData = await resp.json().catch(() => null);
+                    if (errorData) {
+                        setStatus(errorData.detail || (errorData.files || 'Failed to upload attachment.'), 'error');
+                    } else {
+                        const text = await resp.text().catch(() => '');
+                        const suffix = text ? ` (HTTP ${resp.status})` : ` (HTTP ${resp.status})`;
+                        // Avoid dumping full HTML into the toast; keep it short.
+                        const preview = text ? String(text).replace(/\s+/g, ' ').slice(0, 160) : '';
+                        setStatus(preview ? `Upload failed${suffix}: ${preview}` : `Upload failed${suffix}.`, 'error');
+                    }
+                    return;
+                }
+                setStatus('Attachment uploaded successfully.', 'success');
+                const data = await resp.json().catch(() => null);
+                if (data) renderViewCaseAttachments(modal, data);
+                else await loadTestCaseAttachmentsForViewModal(testCaseId);
+            } catch (e) {
+                setStatus('Error uploading attachment.', 'error');
+            }
+        };
+
+        const uploadTestCaseCommentAttachmentsForViewModal = async (commentId, fileList) => {
+            const modal = document.querySelector('[data-role="module-add-case-modal"]');
+            if (!modal) return;
+            if (!commentId) {
+                setStatus('Invalid comment.', 'error');
+                return;
+            }
+
+            const files = Array.from(fileList || []).filter(Boolean);
+            if (!files.length) return;
+
+            try {
+                const fd = new FormData();
+                files.forEach((f) => fd.append('files', f));
+                const url = `/api/core/test-case-comments/${encodeURIComponent(String(commentId))}/attachments/`;
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
+                    body: fd,
+                });
+                if (!resp.ok) {
+                    const errorData = await resp.json().catch(() => null);
+                    if (errorData) {
+                        setStatus(errorData.detail || (errorData.files || 'Failed to upload attachment.'), 'error');
+                    } else {
+                        const text = await resp.text().catch(() => '');
+                        const suffix = ` (HTTP ${resp.status})`;
+                        const preview = text ? String(text).replace(/\s+/g, ' ').slice(0, 160) : '';
+                        setStatus(preview ? `Upload failed${suffix}: ${preview}` : `Upload failed${suffix}.`, 'error');
+                    }
+                    return;
+                }
+
+                setStatus('Attachment uploaded successfully.', 'success');
+                if (activeViewCaseId) {
+                    await loadTestCaseCommentsForViewModal(activeViewCaseId);
+                }
+            } catch (e) {
+                setStatus('Error uploading attachment.', 'error');
             }
         };
 
@@ -4823,6 +5163,9 @@
                                 setViewCaseCommentsVisible(caseModal, false);
                             }
                         } catch (e) { /* ignore */ }
+
+                        // Attachments are now handled per comment.
+                        try { setViewCaseAttachmentsVisible(caseModal, false); } catch (e) { /* ignore */ }
                         // For view mode: do not mount TinyMCE (match View Scenario description behaviour).
                         // For edit mode: mount TinyMCE editor.
                         try {
@@ -4893,6 +5236,7 @@
                 try { removeCaseDescriptionEditor(); } catch (e) { /* ignore */ }
                 try {
                     activeViewCaseId = null;
+                    activeViewCaseAttachCommentId = null;
                     viewCaseCommentsCache = new Map();
                     removeViewCaseCommentEditor();
                     removeViewCaseInlineCommentEditor();
@@ -4904,8 +5248,63 @@
                     const inlineEditor = modal ? modal.querySelector('#module-view-case-inline-comment-editor') : null;
                     if (inlineEditor) inlineEditor.style.display = 'none';
                 } catch (e) { /* ignore */ }
+
+                try {
+                    setViewCaseAttachmentsVisible(modal, false);
+                    const attList = modal ? modal.querySelector('#module-view-case-attachments') : null;
+                    if (attList) attList.innerHTML = '';
+                    const attInput = modal ? modal.querySelector('#module-view-case-attachments-input') : null;
+                    if (attInput) attInput.value = '';
+                } catch (e) { /* ignore */ }
+
+                try {
+                    const commentAttInput = modal ? modal.querySelector('#module-view-case-comment-attachments-input') : null;
+                    if (commentAttInput) commentAttInput.value = '';
+                } catch (e) { /* ignore */ }
                 try { if (modal) applyCaseModalLayout(modal, { isDetails: false }); } catch (e) { /* ignore */ }
                 try { if (modal) applyScenarioAutomationToCaseModal({ modalEl: modal, scenario: { is_automated: true }, isDetails: false }); } catch (e) { /* ignore */ }
+            } catch (e) { /* ignore */ }
+        });
+
+        // Upload attachments from the Test Case Details modal
+        document.addEventListener('change', async (ev) => {
+            try {
+                const input = ev && ev.target ? ev.target : null;
+                if (!input || input.id !== 'module-view-case-attachments-input') return;
+                const modal = document.querySelector('[data-role="module-add-case-modal"]');
+                if (!modal || modal.hidden) return;
+                if (!modal.contains(input)) return;
+                const caseId = activeViewCaseId || (modal.querySelector('#module-view-case-comment-case-id') ? modal.querySelector('#module-view-case-comment-case-id').value : null);
+                if (!caseId) {
+                    setStatus('Invalid test case.', 'error');
+                    return;
+                }
+                // Copy files before clearing input; clearing can empty FileList.
+                const selectedFiles = Array.from(input.files || []).filter(Boolean);
+                // reset the input immediately so selecting the same file again triggers change
+                try { input.value = ''; } catch (e) { /* ignore */ }
+                await uploadTestCaseAttachmentsForViewModal(caseId, selectedFiles);
+            } catch (e) { /* ignore */ }
+        });
+
+        // Upload attachments for a specific comment (details modal)
+        document.addEventListener('change', async (ev) => {
+            try {
+                const input = ev && ev.target ? ev.target : null;
+                if (!input || input.id !== 'module-view-case-comment-attachments-input') return;
+                const modal = document.querySelector('[data-role="module-add-case-modal"]');
+                if (!modal || modal.hidden) return;
+                if (!modal.contains(input)) return;
+
+                const commentId = activeViewCaseAttachCommentId;
+                if (!commentId) {
+                    setStatus('Select a comment first.', 'error');
+                    return;
+                }
+
+                const selectedFiles = Array.from(input.files || []).filter(Boolean);
+                try { input.value = ''; } catch (e) { /* ignore */ }
+                await uploadTestCaseCommentAttachmentsForViewModal(commentId, selectedFiles);
             } catch (e) { /* ignore */ }
         });
 
@@ -4956,6 +5355,30 @@
                     }
                 } catch (e) { /* ignore */ }
             };
+
+            if (action === 'pick-view-case-attachments') {
+                ev.preventDefault();
+                const caseId = activeViewCaseId || (modal.querySelector('#module-view-case-comment-case-id') ? modal.querySelector('#module-view-case-comment-case-id').value : null);
+                if (!caseId) {
+                    setStatus('Invalid test case.', 'error');
+                    return;
+                }
+                const input = modal.querySelector('#module-view-case-attachments-input');
+                if (input) input.click();
+                return;
+            }
+
+            if (action === 'view-case-attach-comment') {
+                ev.preventDefault();
+                if (!commentId) {
+                    setStatus('Invalid comment.', 'error');
+                    return;
+                }
+                activeViewCaseAttachCommentId = String(commentId);
+                const input = modal.querySelector('#module-view-case-comment-attachments-input');
+                if (input) input.click();
+                return;
+            }
 
             if (action === 'toggle-view-case-add-comment') {
                 ev.preventDefault();

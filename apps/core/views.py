@@ -32,6 +32,7 @@ from django.http import Http404
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
@@ -548,6 +549,7 @@ class ScenarioCommentViewSet(viewsets.ModelViewSet):
 class TestCaseCommentViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.TestCaseCommentSerializer
     permission_classes = [IsAuthenticated]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
 
     def get_queryset(self):
         queryset = models.TestCaseComment.objects.select_related("user", "test_case").prefetch_related(
@@ -555,6 +557,8 @@ class TestCaseCommentViewSet(viewsets.ModelViewSet):
             "likes",
             "reactions",
             "replies__reactions",
+            "attachments",
+            "replies__attachments",
         ).all()
         test_case_id = self.request.query_params.get("test_case")
         if test_case_id:
@@ -575,6 +579,87 @@ class TestCaseCommentViewSet(viewsets.ModelViewSet):
         if instance.user != self.request.user:
             raise ValidationError("You can only delete your own comments.")
         instance.delete()
+
+    def _is_allowed_comment_attachment(self, filename: str | None, content_type: str | None) -> bool:
+        """Allow images, videos, and common document formats."""
+
+        import os
+
+        name = (filename or "").lower()
+        ext = ""
+        try:
+            _, ext = os.path.splitext(name)
+        except Exception:
+            ext = ""
+
+        allowed_ext = {
+            ".png", ".jpg", ".jpeg", ".gif", ".webp",
+            ".mp4", ".webm", ".mov",
+            ".csv",
+            ".xls", ".xlsx",
+            ".pdf",
+            ".doc", ".docx",
+        }
+        if ext in allowed_ext:
+            return True
+
+        ct = (content_type or "").lower()
+        if ct.startswith("image/") or ct.startswith("video/"):
+            return True
+
+        allowed_ct = {
+            "text/csv",
+            "application/csv",
+            "application/pdf",
+            "application/msword",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }
+        return ct in allowed_ct
+
+    @action(detail=True, methods=["get", "post"], url_path="attachments")
+    def attachments(self, request, pk=None):
+        comment = self.get_object()
+
+        if request.method == "GET":
+            qs = models.TestCaseCommentAttachment.objects.filter(comment=comment).order_by("-created_at", "-id")
+            return Response(
+                serializers.TestCaseCommentAttachmentSerializer(qs, many=True, context={"request": request}).data
+            )
+
+        files = []
+        try:
+            if hasattr(request, "FILES"):
+                files = request.FILES.getlist("files") or request.FILES.getlist("file")
+        except Exception:
+            files = []
+
+        if not files:
+            raise ValidationError({"files": "No files uploaded."})
+
+        created: list[models.TestCaseCommentAttachment] = []
+        for f in files:
+            fname = getattr(f, "name", None) or "upload.bin"
+            ctype = getattr(f, "content_type", None) or "application/octet-stream"
+            if not self._is_allowed_comment_attachment(fname, ctype):
+                raise ValidationError({"files": f"File type not allowed: {fname}"})
+
+            obj = models.TestCaseCommentAttachment(
+                comment=comment,
+                uploaded_by=request.user if getattr(request, "user", None) and request.user.is_authenticated else None,
+                original_name=fname,
+                content_type=ctype,
+                size=getattr(f, "size", 0) or 0,
+            )
+            obj.file.save(fname, f, save=True)
+            created.append(obj)
+
+        qs = models.TestCaseCommentAttachment.objects.filter(id__in=[o.id for o in created]).order_by("-created_at", "-id")
+        return Response(
+            serializers.TestCaseCommentAttachmentSerializer(qs, many=True, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=['post'])
     def toggle_like(self, request, pk=None):
@@ -754,6 +839,88 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                 raise ValidationError({"scenario": "Scenario must be an integer."}) from exc
 
         return queryset
+
+    def _is_allowed_testcase_attachment(self, filename: str | None, content_type: str | None) -> bool:
+        """Allow images, videos, and common document formats."""
+
+        name = (filename or "").lower()
+        ext = ""
+        try:
+            _, ext = os.path.splitext(name)
+        except Exception:
+            ext = ""
+
+        allowed_ext = {
+            ".png", ".jpg", ".jpeg", ".gif", ".webp",
+            ".mp4", ".webm", ".mov",
+            ".csv",
+            ".xls", ".xlsx",
+            ".pdf",
+            ".doc", ".docx",
+        }
+        if ext in allowed_ext:
+            return True
+
+        ct = (content_type or "").lower()
+        if ct.startswith("image/") or ct.startswith("video/"):
+            return True
+
+        allowed_ct = {
+            "text/csv",
+            "application/csv",
+            "application/pdf",
+            "application/msword",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }
+        return ct in allowed_ct
+
+    @action(detail=True, methods=["get", "post"], url_path="attachments")
+    def attachments(self, request, pk=None):
+        test_case = self.get_object()
+
+        if request.method == "GET":
+            qs = models.TestCaseAttachment.objects.filter(test_case=test_case).order_by("-created_at", "-id")
+            return Response(serializers.TestCaseAttachmentSerializer(qs, many=True, context={"request": request}).data)
+
+        # POST: accept multipart file upload(s)
+        files = []
+        try:
+            if hasattr(request, "FILES"):
+                files = request.FILES.getlist("files") or request.FILES.getlist("file")
+        except Exception:
+            files = []
+
+        if not files:
+            raise ValidationError({"files": "No files uploaded."})
+
+        created: list[models.TestCaseAttachment] = []
+        for f in files:
+            try:
+                fname = getattr(f, "name", None) or "upload.bin"
+                ctype = getattr(f, "content_type", None) or "application/octet-stream"
+                if not self._is_allowed_testcase_attachment(fname, ctype):
+                    raise ValidationError({"files": f"Unsupported file type: {fname}"})
+
+                obj = models.TestCaseAttachment.objects.create(
+                    test_case=test_case,
+                    file=f,
+                    original_name=fname,
+                    content_type=ctype,
+                    size=int(getattr(f, "size", 0) or 0),
+                    uploaded_by=getattr(request, "user", None) if getattr(request, "user", None) and request.user.is_authenticated else None,
+                )
+                created.append(obj)
+            except ValidationError:
+                raise
+            except Exception as exc:
+                logger.exception("[core] failed to save testcase attachment: %s", exc)
+                raise ValidationError({"files": "Failed to upload attachment."})
+
+        # Return refreshed list so the UI can re-render.
+        qs = models.TestCaseAttachment.objects.filter(test_case=test_case).order_by("-created_at", "-id")
+        return Response(serializers.TestCaseAttachmentSerializer(qs, many=True, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
     def create(self, request, *args, **kwargs):
         # Defensive: some clients or parsers may omit the 'testcase_id' key
@@ -1095,6 +1262,7 @@ def automation_test_plans(request):
     return render(request, "core/automation_test_plans.html", context)
 
 
+@ensure_csrf_cookie
 @login_required
 def automation_test_scenarios(request):
     data = _prepare_automation_data()
@@ -1115,6 +1283,7 @@ def automation_test_scenarios(request):
     return render(request, "core/automation_test_scenarios.html", context)
 
 
+@ensure_csrf_cookie
 @login_required
 def automation_test_cases(request):
     data = _prepare_automation_data()
@@ -1183,6 +1352,7 @@ def automation_test_cases(request):
     return render(request, "core/automation_test_cases.html", context)
 
 
+@ensure_csrf_cookie
 @login_required
 def automation_test_plan_maintenance(request):
     data = _prepare_automation_data()
@@ -1196,6 +1366,7 @@ def automation_test_plan_maintenance(request):
     return render(request, "core/automation_test_plan_maintenance.html", context)
 
 
+@ensure_csrf_cookie
 @login_required
 def automation_data_management(request, section: str | None = None):
     data = _prepare_automation_data()
@@ -1211,6 +1382,7 @@ def automation_data_management(request, section: str | None = None):
     return render(request, "core/automation_data_management.html", context)
 
 
+@ensure_csrf_cookie
 @login_required
 def automation_data_management_api_environment(request, section: str | None = None):
     """Render API Environments focused data management page."""
@@ -1227,6 +1399,7 @@ def automation_data_management_api_environment(request, section: str | None = No
     return render(request, "core/automation_data_management_api_environment.html", context)
 
 
+@ensure_csrf_cookie
 @login_required
 def automation_data_management_mitigation_plan(request, section: str | None = None):
     """Render mitigation plan focused data management page."""
@@ -1243,6 +1416,7 @@ def automation_data_management_mitigation_plan(request, section: str | None = No
     return render(request, "core/automation_data_management_mitigation_plan.html", context)
 
 
+@ensure_csrf_cookie
 @login_required
 def automation_data_management_risk_registry(request, section: str | None = None):
     data = _prepare_automation_data()
@@ -1258,6 +1432,7 @@ def automation_data_management_risk_registry(request, section: str | None = None
     return render(request, "core/automation_data_management_risk_registry.html", context)
 
 
+@ensure_csrf_cookie
 @login_required
 def automation_data_management_test_tools(request, section: str | None = None):
     """Render Test Tools focused data management page."""
@@ -1274,6 +1449,7 @@ def automation_data_management_test_tools(request, section: str | None = None):
     return render(request, "core/automation_data_management_test_tools.html", context)
 
 
+@ensure_csrf_cookie
 @login_required
 def automation_data_management_test_modules(request, section: str | None = None):
     """Render Test Modules focused data management page."""
