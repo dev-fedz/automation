@@ -2034,6 +2034,11 @@
                 const container = modal.querySelector('#module-view-scenario-comments');
                 if (row && container) {
                     row.hidden = !readOnly;
+                    // Hard guarantee: when creating/editing a scenario, never show
+                    // the comments UI (even if inline styles exist on the element).
+                    try {
+                        row.style.display = readOnly ? 'flex' : 'none';
+                    } catch (e) { /* ignore */ }
                     if (!readOnly) container.innerHTML = '';
                 }
             } catch (e) { /* ignore */ }
