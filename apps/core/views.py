@@ -27,7 +27,7 @@ except ImportError:  # pragma: no cover - handled gracefully at runtime
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.db.models import Q, Count
+from django.db.models import Q, Count, Max
 from django.http import Http404
 from django.shortcuts import render
 from django.urls import reverse
@@ -1335,16 +1335,16 @@ def automation_reports(request):
                 if getattr(obj, 'started', None):
                     ser['started'] = obj.started.strftime('%Y-%m-%d %I:%M %p')
                 else:
-                    ser['started'] = ''
+                    ser['started'] = '—'
             except Exception:
-                ser['started'] = ser.get('started') or ''
+                ser['started'] = ser.get('started') or '—'
             try:
                 if getattr(obj, 'finished', None):
                     ser['finished'] = obj.finished.strftime('%Y-%m-%d %I:%M %p')
                 else:
-                    ser['finished'] = ''
+                    ser['finished'] = '—'
             except Exception:
-                ser['finished'] = ser.get('finished') or ''
+                ser['finished'] = ser.get('finished') or '—'
     except Exception:
         pass
     try:
@@ -1379,20 +1379,94 @@ def automation_reports(request):
                 if getattr(obj, 'created_at', None):
                     item['started'] = obj.created_at.strftime('%Y-%m-%d %I:%M %p')
                 else:
-                    item['started'] = ser.get('created_at') or ''
+                    item['started'] = ser.get('created_at') or '—'
             except Exception:
-                item['started'] = ser.get('created_at') or ''
+                item['started'] = ser.get('created_at') or '—'
             try:
                 if getattr(obj, 'updated_at', None):
                     item['finished'] = obj.updated_at.strftime('%Y-%m-%d %I:%M %p')
                 else:
-                    item['finished'] = ser.get('updated_at') or ''
+                    item['finished'] = ser.get('updated_at') or '—'
             except Exception:
-                item['finished'] = ser.get('updated_at') or ''
+                item['finished'] = ser.get('updated_at') or '—'
+
+            # Human-friendly outcome label for UI tables.
+            # The underlying result-report status is one of: passed|failed|error.
+            # Map error to Failed (UI expects Passed/Failed/Queued/Running).
+            try:
+                status_val = (getattr(obj, 'status', None) or item.get('status') or '')
+                status_norm = str(status_val).strip().lower()
+            except Exception:
+                status_norm = ''
+            outcome = ''
+            if status_norm == 'passed':
+                outcome = 'Passed'
+            elif status_norm in ('failed', 'error'):
+                outcome = 'Failed'
+            else:
+                # Fallback to run status when status is missing/unexpected.
+                try:
+                    run_status = str(getattr(getattr(obj, 'run', None), 'status', '') or '').lower()
+                except Exception:
+                    run_status = ''
+                if run_status == 'running':
+                    outcome = 'Running'
+                elif run_status in ('pending', 'queued'):
+                    outcome = 'Queued'
+                else:
+                    outcome = 'Queued'
+            item['outcome'] = outcome
+
+            # Back-compat keys for templates that reference created_at/finished_at.
+            item['created_label'] = item.get('started') or '—'
+            item['finished_at'] = item.get('finished') or '—'
 
             testcase_reports.append(item)
     except Exception:
         testcase_reports = []
+
+    # For the parent AutomationReport table, compute "Finished At" from the
+    # latest testcase run in that report (max ApiRunResultReport.updated_at).
+    # This better reflects real completion time across different trigger paths.
+    try:
+        report_ids = [r.get("id") for r in automation_reports if isinstance(r, dict) and r.get("id") is not None]
+        report_ids = [int(rid) for rid in report_ids if str(rid).isdigit()]
+        if report_ids:
+            last_finished_map = {}
+            try:
+                rows = (
+                    models.ApiRunResultReport.objects.filter(automation_report_id__in=report_ids)
+                    .values("automation_report_id")
+                    .annotate(last_finished=Max("updated_at"))
+                )
+                for row in rows:
+                    rid = row.get("automation_report_id")
+                    dt = row.get("last_finished")
+                    if rid is not None and dt is not None:
+                        last_finished_map[int(rid)] = dt
+            except Exception:
+                last_finished_map = {}
+
+            for r in automation_reports:
+                try:
+                    rid = r.get("id") if isinstance(r, dict) else None
+                    if rid is None:
+                        continue
+                    dt = last_finished_map.get(int(rid))
+                    if dt is not None:
+                        r["finished"] = dt.strftime('%Y-%m-%d %I:%M %p')
+                    else:
+                        # Keep existing formatted value, but ensure it's not blank.
+                        r["finished"] = r.get("finished") or '—'
+                except Exception:
+                    # Don't let formatting errors break the page.
+                    try:
+                        if isinstance(r, dict) and not r.get("finished"):
+                            r["finished"] = '—'
+                    except Exception:
+                        pass
+    except Exception:
+        pass
 
     # attach per-report testcase lists so template can render "No test cases" correctly
     try:

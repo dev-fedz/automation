@@ -63,8 +63,8 @@
                                             <td data-label="Passed">{{ r.total_passed }}</td>
                                             <td data-label="Failed">{{ r.total_failed }}</td>
                                             <td data-label="Blocked">{{ r.total_blocked }}</td>
-                                            <td data-label="Started At">{{ r.started }}</td>
-                                            <td data-label="Finished At">{{ r.finished }}</td>
+                                            <td data-label="Started At">{{ r.started|default:"—" }}</td>
+                                            <td data-label="Finished At">{{ r.finished|default:"—" }}</td>
                                         </tr>
                                         <tr class="report-details" id="report-details-{{ r.id }}" hidden>
                                             <td colspan="9">
@@ -89,9 +89,9 @@
                                                                         <td>{{ t.testcase_id }}</td>
                                                                         <td>{{ t.request_name }}</td>
                                                                         <td>{{ t.run_id }}</td>
-                                                                        <td>{{ t.outcome }}</td>
-                                                                        <td>{{ t.created_at }}</td>
-                                                                        <td>{{ t.finished_at }}</td>
+                                                                        <td>{{ t.outcome|default:"—" }}</td>
+                                                                        <td>{{ t.started|default:"—" }}</td>
+                                                                        <td>{{ t.finished|default:"—" }}</td>
                                                                         <td>
                                                                             <button class="btn btn-sm" data-action="view-testcase" data-testcase-id="{{ t.testcase_id }}">View</button>
                                                                         </td>
@@ -139,8 +139,8 @@
                                             </td>
                                             <td data-label="Request Name">{{ t.request_name }}</td>
                                             <td data-label="Triggered By">{{ t.triggered_by|default:'' }}</td>
-                                            <td data-label="Started At">{{ t.started }}</td>
-                                            <td data-label="Finished At">{{ t.finished }}</td>
+                                            <td data-label="Started At">{{ t.started|default:"—" }}</td>
+                                            <td data-label="Finished At">{{ t.finished|default:"—" }}</td>
                                             <td data-label="Action">
                                                 <div class="table-action-group">
                                                     <button class="btn btn-sm" data-action="view-testcase" data-testcase-id="{{ t.testcase_id }}" data-automation-report-id="{{ t.automation_report_id }}">View</button>
