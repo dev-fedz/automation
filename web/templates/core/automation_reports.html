@@ -123,6 +123,11 @@
                             <div class="table-round">
                                 <div class="panel-controls" style="margin:0.85rem 0 0.6rem 0;">
                                     <label class="inline-filter">Filter: <input type="text" id="testcase-report-filter" placeholder="Testcase id or request name" /></label>
+                                    <form class="inline-filter" method="get" action="{% url 'automation-testcase-reports-export' %}">
+                                        <label class="inline-filter">From: <input type="date" name="start" value="{{ request.GET.start }}" /></label>
+                                        <label class="inline-filter">To: <input type="date" name="end" value="{{ request.GET.end }}" /></label>
+                                        <button type="submit" class="btn btn-primary">Export</button>
+                                    </form>
                                 </div>
                                 <table class="table-modern automation-table" id="testcase-report-table" aria-label="Test case reports">
                                     <thead>

@@ -1801,6 +1801,212 @@ def automation_reports_export(request):
 
 
 @login_required
+def automation_testcase_reports_export(request):
+    """Export Test Case Reports to an Excel file.
+
+    Query params:
+      - start: YYYY-MM-DD (optional)
+      - end: YYYY-MM-DD (optional)
+
+    Summary groups counts by day based on finished timestamp (updated_at).
+    """
+
+    start_str = (request.GET.get("start") or "").strip()
+    end_str = (request.GET.get("end") or "").strip()
+    start_date = None
+    end_date = None
+    try:
+        if start_str:
+            start_date = timezone.datetime.fromisoformat(start_str).date()
+    except Exception:
+        start_date = None
+    try:
+        if end_str:
+            end_date = timezone.datetime.fromisoformat(end_str).date()
+    except Exception:
+        end_date = None
+
+    qs = models.ApiRunResultReport.objects.select_related(
+        "automation_report",
+        "run",
+        "request",
+        "testcase",
+        "automation_report__triggered_by",
+    ).order_by("-updated_at", "-id")
+
+    # Filter by finished date (updated_at) when provided
+    if start_date:
+        qs = qs.filter(updated_at__date__gte=start_date)
+    if end_date:
+        qs = qs.filter(updated_at__date__lte=end_date)
+
+    rows = list(qs)
+
+    # Summary buckets by day
+    summary_by_day: dict[str, dict[str, int]] = {}
+    for obj in rows:
+        try:
+            day_key = obj.updated_at.date().isoformat() if getattr(obj, "updated_at", None) else "Unfinished"
+        except Exception:
+            day_key = "Unfinished"
+
+        bucket = summary_by_day.setdefault(day_key, {"passed": 0, "failed": 0, "blocked": 0, "total": 0})
+        try:
+            status_norm = str(getattr(obj, "status", "") or "").strip().lower()
+        except Exception:
+            status_norm = ""
+
+        if status_norm == "passed":
+            bucket["passed"] += 1
+        elif status_norm == "failed":
+            bucket["failed"] += 1
+        elif status_norm == "error":
+            bucket["blocked"] += 1
+        else:
+            # Unexpected statuses count as blocked so totals still reconcile.
+            bucket["blocked"] += 1
+        bucket["total"] += 1
+
+    try:
+        from openpyxl import Workbook
+        from openpyxl.chart import LineChart, Reference
+        from openpyxl.styles import Alignment, Font
+    except Exception as exc:
+        return HttpResponse(f"Excel export dependency not available: {exc}", status=500)
+
+    wb = Workbook()
+    try:
+        wb.remove(wb.active)
+    except Exception:
+        pass
+
+    ws_summary = wb.create_sheet("Summary")
+    ws_details = wb.create_sheet("Testcases")
+
+    bold = Font(bold=True)
+
+    exported_at = timezone.now()
+    range_label = f"{start_str or '—'} to {end_str or '—'}"
+    ws_summary["A1"].value = "Test Case Report Export"
+    ws_summary["A1"].font = Font(bold=True, size=14)
+    ws_summary["A2"].value = "Date range"
+    ws_summary["A2"].font = bold
+    ws_summary["B2"].value = range_label
+    ws_summary["A3"].value = "Exported at"
+    ws_summary["A3"].font = bold
+    ws_summary["B3"].value = exported_at.strftime("%Y-%m-%d %H:%M")
+
+    header_row = 5
+    headers = ["Day", "Passed", "Failed", "Blocked", "Total"]
+    for col, h in enumerate(headers, start=1):
+        c = ws_summary.cell(row=header_row, column=col, value=h)
+        c.font = bold
+        c.alignment = Alignment(horizontal="center")
+
+    day_keys = sorted([k for k in summary_by_day.keys() if k != "Unfinished"])
+    if "Unfinished" in summary_by_day:
+        day_keys.append("Unfinished")
+
+    r0 = header_row + 1
+    for i, day in enumerate(day_keys):
+        b = summary_by_day[day]
+        ws_summary.cell(row=r0 + i, column=1, value=day)
+        ws_summary.cell(row=r0 + i, column=2, value=b["passed"])
+        ws_summary.cell(row=r0 + i, column=3, value=b["failed"])
+        ws_summary.cell(row=r0 + i, column=4, value=b["blocked"])
+        ws_summary.cell(row=r0 + i, column=5, value=b["total"])
+
+    ws_summary.freeze_panes = ws_summary["A6"]
+
+    if day_keys:
+        chart = LineChart()
+        chart.title = "Testcases by Day"
+        chart.y_axis.title = "Count"
+        chart.x_axis.title = "Day"
+        data = Reference(ws_summary, min_col=2, max_col=4, min_row=header_row, max_row=r0 + len(day_keys) - 1)
+        cats = Reference(ws_summary, min_col=1, min_row=r0, max_row=r0 + len(day_keys) - 1)
+        chart.add_data(data, titles_from_data=True)
+        chart.set_categories(cats)
+        for s in chart.series:
+            try:
+                s.marker.symbol = "circle"
+                s.marker.size = 7
+            except Exception:
+                pass
+            try:
+                s.graphicalProperties.line.width = 20000
+            except Exception:
+                pass
+        ws_summary.add_chart(chart, "G5")
+
+    ws_summary.column_dimensions["A"].width = 14
+    ws_summary.column_dimensions["B"].width = 10
+    ws_summary.column_dimensions["C"].width = 10
+    ws_summary.column_dimensions["D"].width = 10
+    ws_summary.column_dimensions["E"].width = 10
+    ws_summary.column_dimensions["G"].width = 18
+
+    # Details sheet
+    d_headers = [
+        "Automation Report ID",
+        "Report ID",
+        "Triggered In",
+        "Triggered By",
+        "Testcase ID",
+        "Request Name",
+        "Run ID",
+        "Status",
+        "Started At",
+        "Finished At",
+    ]
+    for col, h in enumerate(d_headers, start=1):
+        c = ws_details.cell(row=1, column=col, value=h)
+        c.font = bold
+        c.alignment = Alignment(horizontal="center")
+
+    for idx, obj in enumerate(rows, start=2):
+        ar = getattr(obj, "automation_report", None)
+        ws_details.cell(row=idx, column=1, value=getattr(obj, "automation_report_id", None))
+        ws_details.cell(row=idx, column=2, value=(getattr(ar, "report_id", "") if ar else ""))
+        ws_details.cell(row=idx, column=3, value=(getattr(ar, "triggered_in", "") if ar else ""))
+        ws_details.cell(row=idx, column=4, value=str(getattr(getattr(ar, "triggered_by", None), "username", "") or getattr(ar, "triggered_by", "") or "") if ar else "")
+        ws_details.cell(row=idx, column=5, value=(obj.testcase.testcase_id if getattr(obj, "testcase", None) else ""))
+        ws_details.cell(row=idx, column=6, value=(obj.request.name if getattr(obj, "request", None) else ""))
+        ws_details.cell(row=idx, column=7, value=(getattr(obj, "run_id", None) or ""))
+        ws_details.cell(row=idx, column=8, value=(getattr(obj, "status", "") or ""))
+        sa = getattr(obj, "created_at", None)
+        fa = getattr(obj, "updated_at", None)
+        ws_details.cell(row=idx, column=9, value=(sa.strftime("%Y-%m-%d %H:%M") if sa else "—"))
+        ws_details.cell(row=idx, column=10, value=(fa.strftime("%Y-%m-%d %H:%M") if fa else "—"))
+
+    ws_details.freeze_panes = ws_details["A2"]
+    ws_details.column_dimensions["A"].width = 20
+    ws_details.column_dimensions["B"].width = 12
+    ws_details.column_dimensions["C"].width = 40
+    ws_details.column_dimensions["D"].width = 22
+    ws_details.column_dimensions["E"].width = 14
+    ws_details.column_dimensions["F"].width = 30
+    ws_details.column_dimensions["G"].width = 10
+    ws_details.column_dimensions["H"].width = 10
+    ws_details.column_dimensions["I"].width = 18
+    ws_details.column_dimensions["J"].width = 18
+
+    from io import BytesIO
+
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+
+    filename = f"testcase_reports_{start_str or 'all'}_to_{end_str or 'all'}.xlsx".replace(":", "-")
+    resp = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return resp
+
+
+@login_required
 def automation_test_plans(request):
     data = _prepare_automation_data()
     context = {
