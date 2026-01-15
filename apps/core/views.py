@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover - handled gracefully at runtime
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import Q, Count, Max
+from django.http import HttpResponse
 from django.http import Http404
 from django.shortcuts import render
 from django.urls import reverse
@@ -1489,6 +1490,314 @@ def automation_reports(request):
         "testcase_reports_serialized": testcase_reports,
     }
     return render(request, "core/automation_reports.html", context)
+
+
+@login_required
+def automation_reports_export(request):
+    """Export Automated Reports to an Excel file.
+
+    Query params:
+      - start: YYYY-MM-DD (optional)
+      - end: YYYY-MM-DD (optional)
+
+    Exports 3 sheets:
+      - Summary: per-day totals and chart
+      - Reports: parent AutomationReport rows
+      - Testcases: child ApiRunResultReport rows
+    """
+
+    # Parse date range (inclusive)
+    start_str = (request.GET.get("start") or request.GET.get("from") or "").strip()
+    end_str = (request.GET.get("end") or request.GET.get("to") or "").strip()
+    start_date = None
+    end_date = None
+    try:
+        if start_str:
+            start_date = timezone.datetime.fromisoformat(start_str).date()
+    except Exception:
+        start_date = None
+    try:
+        if end_str:
+            end_date = timezone.datetime.fromisoformat(end_str).date()
+    except Exception:
+        end_date = None
+
+    qs = models.AutomationReport.objects.select_related("triggered_by").order_by("-created_at")
+    # Filter by report.started when present, else by created_at
+    if start_date:
+        qs = qs.filter(Q(started__date__gte=start_date) | Q(started__isnull=True, created_at__date__gte=start_date))
+    if end_date:
+        qs = qs.filter(Q(started__date__lte=end_date) | Q(started__isnull=True, created_at__date__lte=end_date))
+
+    reports = list(qs)
+    report_ids = [r.id for r in reports]
+
+    # Compute "finished at" per report from latest testcase run (max updated_at)
+    last_finished_map: dict[int, timezone.datetime] = {}
+    if report_ids:
+        try:
+            rows = (
+                models.ApiRunResultReport.objects.filter(automation_report_id__in=report_ids)
+                .values("automation_report_id")
+                .annotate(last_finished=Max("updated_at"))
+            )
+            for row in rows:
+                rid = row.get("automation_report_id")
+                dt = row.get("last_finished")
+                if rid is not None and dt is not None:
+                    last_finished_map[int(rid)] = dt
+        except Exception:
+            last_finished_map = {}
+
+    # Load testcase reports
+    testcase_rows = []
+    if report_ids:
+        try:
+            testcase_qs = (
+                models.ApiRunResultReport.objects.select_related("run", "request", "testcase")
+                .filter(automation_report_id__in=report_ids)
+                .order_by("automation_report_id", "order", "id")
+            )
+            for obj in testcase_qs:
+                try:
+                    status_norm = str(getattr(obj, "status", "") or "").strip().lower()
+                except Exception:
+                    status_norm = ""
+                if status_norm == "passed":
+                    outcome = "Passed"
+                elif status_norm in ("failed", "error"):
+                    outcome = "Failed"
+                else:
+                    # Fallback: if run is still in progress, show Running; otherwise Queued.
+                    try:
+                        run_status = str(getattr(getattr(obj, "run", None), "status", "") or "").lower()
+                    except Exception:
+                        run_status = ""
+                    outcome = "Running" if run_status == "running" else "Queued"
+
+                testcase_rows.append(
+                    {
+                        "automation_report_id": obj.automation_report_id,
+                        "testcase_id": (obj.testcase.testcase_id if obj.testcase else None),
+                        "request_name": (obj.request.name if obj.request else None),
+                        "run_id": (obj.run_id or None),
+                        "outcome": outcome,
+                        "status": getattr(obj, "status", None),
+                        "started_at": getattr(obj, "created_at", None),
+                        "finished_at": getattr(obj, "updated_at", None),
+                    }
+                )
+        except Exception:
+            testcase_rows = []
+
+    # Build summary by date (report-level), using report finished date derived from testcase rows.
+    summary_by_day: dict[str, dict[str, int]] = {}
+    for r in reports:
+        dt = last_finished_map.get(r.id) or getattr(r, "finished", None) or getattr(r, "updated_at", None)
+        day_key = None
+        try:
+            if dt:
+                day_key = dt.date().isoformat()
+        except Exception:
+            day_key = None
+        if not day_key:
+            # Put unfinished reports into a synthetic bucket so user can still see them.
+            day_key = "Unfinished"
+
+        bucket = summary_by_day.setdefault(
+            day_key,
+            {"reports": 0, "passed": 0, "failed": 0, "blocked": 0, "total": 0},
+        )
+        bucket["reports"] += 1
+        bucket["passed"] += int(getattr(r, "total_passed", 0) or 0)
+        bucket["failed"] += int(getattr(r, "total_failed", 0) or 0)
+        bucket["blocked"] += int(getattr(r, "total_blocked", 0) or 0)
+        bucket["total"] += (
+            int(getattr(r, "total_passed", 0) or 0)
+            + int(getattr(r, "total_failed", 0) or 0)
+            + int(getattr(r, "total_blocked", 0) or 0)
+        )
+
+    # Create workbook
+    try:
+        from openpyxl import Workbook
+        from openpyxl.chart import LineChart, Reference
+        from openpyxl.styles import Alignment, Font
+    except Exception as exc:
+        return HttpResponse(f"Excel export dependency not available: {exc}", status=500)
+
+    wb = Workbook()
+    # Remove default sheet
+    try:
+        wb.remove(wb.active)
+    except Exception:
+        pass
+
+    ws_summary = wb.create_sheet("Summary")
+    ws_reports = wb.create_sheet("Reports")
+    ws_testcases = wb.create_sheet("Testcases")
+
+    bold = Font(bold=True)
+
+    # --- Summary sheet ---
+    exported_at = timezone.now()
+    range_label = f"{start_str or '—'} to {end_str or '—'}"
+    ws_summary["A1"].value = "Automated Report Export"
+    ws_summary["A1"].font = Font(bold=True, size=14)
+    ws_summary["A2"].value = "Date range"
+    ws_summary["A2"].font = bold
+    ws_summary["B2"].value = range_label
+    ws_summary["A3"].value = "Exported at"
+    ws_summary["A3"].font = bold
+    ws_summary["B3"].value = exported_at.strftime("%Y-%m-%d %H:%M")
+
+    header_row = 5
+    summary_headers = ["Day", "Reports", "Passed", "Failed", "Blocked", "Total"]
+    for col, h in enumerate(summary_headers, start=1):
+        cell = ws_summary.cell(row=header_row, column=col, value=h)
+        cell.font = bold
+        cell.alignment = Alignment(horizontal="center")
+
+    # Sorted days (dates first), then Unfinished
+    day_keys = sorted([k for k in summary_by_day.keys() if k != "Unfinished"])
+    if "Unfinished" in summary_by_day:
+        day_keys.append("Unfinished")
+
+    r0 = header_row + 1
+    for i, day in enumerate(day_keys):
+        b = summary_by_day[day]
+        ws_summary.cell(row=r0 + i, column=1, value=day)
+        ws_summary.cell(row=r0 + i, column=2, value=b["reports"])
+        ws_summary.cell(row=r0 + i, column=3, value=b["passed"])
+        ws_summary.cell(row=r0 + i, column=4, value=b["failed"])
+        ws_summary.cell(row=r0 + i, column=5, value=b["blocked"])
+        ws_summary.cell(row=r0 + i, column=6, value=b["total"])
+
+    ws_summary.freeze_panes = ws_summary["A6"]
+
+    # Add chart (skip if no data rows)
+    if day_keys:
+        chart = LineChart()
+        chart.title = "Totals by Day"
+        chart.y_axis.title = "Count"
+        chart.x_axis.title = "Day"
+        data = Reference(ws_summary, min_col=3, max_col=5, min_row=header_row, max_row=r0 + len(day_keys) - 1)
+        cats = Reference(ws_summary, min_col=1, min_row=r0, max_row=r0 + len(day_keys) - 1)
+        chart.add_data(data, titles_from_data=True)
+        chart.set_categories(cats)
+
+        # Ensure something is visible even for a single-day range.
+        # With one category Excel has no line segment; markers make the point visible.
+        for s in chart.series:
+            try:
+                s.marker.symbol = "circle"
+                s.marker.size = 7
+            except Exception:
+                pass
+            try:
+                s.graphicalProperties.line.width = 20000
+            except Exception:
+                pass
+
+        ws_summary.add_chart(chart, "H5")
+
+    ws_summary.column_dimensions["A"].width = 14
+    ws_summary.column_dimensions["B"].width = 10
+    ws_summary.column_dimensions["C"].width = 10
+    ws_summary.column_dimensions["D"].width = 10
+    ws_summary.column_dimensions["E"].width = 10
+    ws_summary.column_dimensions["F"].width = 10
+    ws_summary.column_dimensions["H"].width = 18
+
+    # --- Reports sheet ---
+    report_headers = [
+        "Report ID",
+        "Triggered In",
+        "Triggered By",
+        "Passed",
+        "Failed",
+        "Blocked",
+        "Started At",
+        "Finished At (last testcase)",
+    ]
+    for col, h in enumerate(report_headers, start=1):
+        c = ws_reports.cell(row=1, column=col, value=h)
+        c.font = bold
+        c.alignment = Alignment(horizontal="center")
+
+    for idx, r in enumerate(reports, start=2):
+        finished_dt = last_finished_map.get(r.id) or getattr(r, "finished", None)
+        ws_reports.cell(row=idx, column=1, value=getattr(r, "report_id", None) or f"R{r.id}")
+        ws_reports.cell(row=idx, column=2, value=getattr(r, "triggered_in", "") or "")
+        ws_reports.cell(row=idx, column=3, value=str(getattr(r, "triggered_by", "") or "") or "")
+        ws_reports.cell(row=idx, column=4, value=int(getattr(r, "total_passed", 0) or 0))
+        ws_reports.cell(row=idx, column=5, value=int(getattr(r, "total_failed", 0) or 0))
+        ws_reports.cell(row=idx, column=6, value=int(getattr(r, "total_blocked", 0) or 0))
+        ws_reports.cell(row=idx, column=7, value=(getattr(r, "started", None).strftime("%Y-%m-%d %H:%M") if getattr(r, "started", None) else "—"))
+        ws_reports.cell(row=idx, column=8, value=(finished_dt.strftime("%Y-%m-%d %H:%M") if finished_dt else "—"))
+
+    ws_reports.freeze_panes = ws_reports["A2"]
+    ws_reports.column_dimensions["A"].width = 12
+    ws_reports.column_dimensions["B"].width = 40
+    ws_reports.column_dimensions["C"].width = 22
+    ws_reports.column_dimensions["D"].width = 8
+    ws_reports.column_dimensions["E"].width = 8
+    ws_reports.column_dimensions["F"].width = 8
+    ws_reports.column_dimensions["G"].width = 18
+    ws_reports.column_dimensions["H"].width = 22
+
+    # --- Testcases sheet ---
+    tc_headers = [
+        "Automation Report ID",
+        "Testcase ID",
+        "Request Name",
+        "Run ID",
+        "Outcome",
+        "Status",
+        "Started At",
+        "Finished At",
+    ]
+    for col, h in enumerate(tc_headers, start=1):
+        c = ws_testcases.cell(row=1, column=col, value=h)
+        c.font = bold
+        c.alignment = Alignment(horizontal="center")
+
+    for idx, t in enumerate(testcase_rows, start=2):
+        ws_testcases.cell(row=idx, column=1, value=t.get("automation_report_id"))
+        ws_testcases.cell(row=idx, column=2, value=t.get("testcase_id") or "")
+        ws_testcases.cell(row=idx, column=3, value=t.get("request_name") or "")
+        ws_testcases.cell(row=idx, column=4, value=t.get("run_id") or "")
+        ws_testcases.cell(row=idx, column=5, value=t.get("outcome") or "")
+        ws_testcases.cell(row=idx, column=6, value=t.get("status") or "")
+        sa = t.get("started_at")
+        fa = t.get("finished_at")
+        ws_testcases.cell(row=idx, column=7, value=(sa.strftime("%Y-%m-%d %H:%M") if sa else "—"))
+        ws_testcases.cell(row=idx, column=8, value=(fa.strftime("%Y-%m-%d %H:%M") if fa else "—"))
+
+    ws_testcases.freeze_panes = ws_testcases["A2"]
+    ws_testcases.column_dimensions["A"].width = 20
+    ws_testcases.column_dimensions["B"].width = 14
+    ws_testcases.column_dimensions["C"].width = 30
+    ws_testcases.column_dimensions["D"].width = 10
+    ws_testcases.column_dimensions["E"].width = 12
+    ws_testcases.column_dimensions["F"].width = 10
+    ws_testcases.column_dimensions["G"].width = 18
+    ws_testcases.column_dimensions["H"].width = 18
+
+    # Serialize workbook to response
+    from io import BytesIO
+
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+
+    filename = f"automated_reports_{start_str or 'all'}_to_{end_str or 'all'}.xlsx".replace(":", "-")
+    resp = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return resp
 
 
 @login_required
