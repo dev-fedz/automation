@@ -32,13 +32,23 @@
                         <div id="panel-automated" role="tabpanel" aria-labelledby="tab-automated" class="report-panel" data-active="true">
                             <div class="card table-card automation-table-card">
                                 <div class="panel-controls">
-                                    <label class="inline-filter">Filter: <input type="text" id="automation-report-filter" placeholder="Report id or triggered in" /></label>
-                                    <form class="inline-filter" method="get" action="{% url 'automation-reports-export' %}">
-                                        <label class="inline-filter">From: <input type="date" name="start" value="{{ request.GET.start }}" /></label>
-                                        <label class="inline-filter">To: <input type="date" name="end" value="{{ request.GET.end }}" /></label>
+                                    <label class="inline-filter">
+                                        <input type="text" id="automation-report-filter" placeholder="Report id or triggered in" />
+                                    </label>
+
+                                    <form class="inline-filter" method="get" action="{% url 'automation-reports-export' %}" data-role="export-date-range">
+                                        <label class="inline-filter">
+                                            From
+                                            <input type="date" name="start" value="{{ request.GET.start }}" />
+                                        </label>
+                                        <label class="inline-filter">
+                                            To
+                                            <input type="date" name="end" value="{{ request.GET.end }}" />
+                                        </label>
                                         <button type="submit" class="btn btn-primary">Export</button>
                                     </form>
                                 </div>
+
                                 <table class="table-modern automation-table" id="automation-report-table" aria-label="Automation reports">
                                     <thead>
                                         <tr>
@@ -121,11 +131,12 @@
 
                         <div id="panel-testcase" role="tabpanel" aria-labelledby="tab-testcase" class="report-panel" data-active="false" hidden>
                             <div class="table-round">
-                                <div class="panel-controls" style="margin:0.85rem 0 0.6rem 0;">
-                                    <label class="inline-filter">Filter: <input type="text" id="testcase-report-filter" placeholder="Testcase id or request name" /></label>
-                                    <form class="inline-filter" method="get" action="{% url 'automation-testcase-reports-export' %}">
-                                        <label class="inline-filter">From: <input type="date" name="start" value="{{ request.GET.start }}" /></label>
-                                        <label class="inline-filter">To: <input type="date" name="end" value="{{ request.GET.end }}" /></label>
+                                <div class="panel-controls">
+                                        <label class="inline-filter"> <input type="text" id="testcase-report-filter" placeholder="Testcase id or request name" /></label>
+                                    
+                                    <form class="inline-filter" method="get" action="{% url 'automation-testcase-reports-export' %}" data-role="export-date-range">
+                                        <label class="inline-filter">From <input type="date" name="start" value="{{ request.GET.start }}" /></label>
+                                        <label class="inline-filter">To <input type="date" name="end" value="{{ request.GET.end }}" /></label>
                                         <button type="submit" class="btn btn-primary">Export</button>
                                     </form>
                                 </div>
@@ -308,6 +319,76 @@
             wireFilter('automation-report-filter','automation-report-table',[1,2]);
             // testcase reports: check testcase id and request name (first two columns)
             wireFilter('testcase-report-filter','testcase-report-table',[0,1]);
+
+            // Export date range validation (both tabs)
+            function wireExportDateRange(form) {
+                if (!form) return;
+                var from = form.querySelector('input[name="start"]');
+                var to = form.querySelector('input[name="end"]');
+                if (!from || !to) return;
+
+                function todayISO() {
+                    try {
+                        var d = new Date();
+                        // local date yyyy-mm-dd
+                        var yyyy = String(d.getFullYear());
+                        var mm = String(d.getMonth() + 1).padStart(2, '0');
+                        var dd = String(d.getDate()).padStart(2, '0');
+                        return yyyy + '-' + mm + '-' + dd;
+                    } catch (e) {
+                        return '';
+                    }
+                }
+
+                function sync() {
+                    var fromVal = (from.value || '').trim();
+                    var hasFrom = !!fromVal;
+                    var maxVal = todayISO();
+
+                    // Always clamp max to "today" (latest date)
+                    if (maxVal) {
+                        to.max = maxVal;
+                    }
+
+                    if (!hasFrom) {
+                        // If From is cleared, clear To and disable it.
+                        to.min = '';
+                        if (to.value) to.value = '';
+                        to.disabled = true;
+                        return;
+                    }
+
+                    // Enable To and enforce min/max.
+                    to.disabled = false;
+                    to.min = fromVal;
+
+                    // If From is after today, there is no valid To.
+                    if (maxVal && fromVal > maxVal) {
+                        if (to.value) to.value = '';
+                        to.disabled = true;
+                        return;
+                    }
+
+                    // If To is set but now invalid (<min or >max), clear it.
+                    var toVal = (to.value || '').trim();
+                    if (toVal) {
+                        if (toVal < fromVal) {
+                            to.value = '';
+                        } else if (maxVal && toVal > maxVal) {
+                            to.value = '';
+                        }
+                    }
+                }
+
+                from.addEventListener('change', sync);
+                from.addEventListener('input', sync);
+                to.addEventListener('change', sync);
+                // If user clears To manually it's fine; we still enforce disabling when From is empty.
+                sync();
+            }
+            try {
+                document.querySelectorAll('form[data-role="export-date-range"]').forEach(wireExportDateRange);
+            } catch (e) { /* ignore */ }
 
             // --- Pagination ---
             function createPaginationControls(paginationId, onPrev, onNext, defaultPageSize) {
@@ -537,7 +618,11 @@
                 // Helper to fetch testcase detail from the server (fallback to embedded JSON if available)
                 function fetchTestcaseDetail(reportId, testcaseId) {
                     var url = '/api/core/automation-report/' + encodeURIComponent(reportId) + '/testcase/' + encodeURIComponent(testcaseId) + '/';
-                    return fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+                    var fetcher = (typeof apiFetch === 'function') ? apiFetch : fetch;
+                    var options = { headers: { 'Accept': 'application/json' } };
+                    // apiFetch supports options; plain fetch also supports options.
+                    // Don't force credentials here; token auth will handle API access.
+                    return fetcher(url, options)
                         .then(function (resp) {
                             if (!resp.ok) throw resp;
                             return resp.json();

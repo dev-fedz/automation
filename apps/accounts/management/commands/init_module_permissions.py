@@ -25,6 +25,45 @@ class Command(BaseCommand):
 				('Read (View)', 'can_view_user'),
 				('Update (Edit)', 'can_change_user'),
 				('Delete (Archive)', 'can_delete_user'),
+			],
+			'projects_project': [
+				('Create', 'can_create_project'),
+				('Read (View)', 'can_view_project'),
+				('Update (Edit)', 'can_change_project'),
+				('Delete (Archive)', 'can_delete_project'),
+			],
+			'projects_module': [
+				('Create', 'can_create_project_module'),
+				('Read (View)', 'can_view_project_module'),
+				('Update (Edit)', 'can_change_project_module'),
+				('Delete (Archive)', 'can_delete_project_module'),
+			],
+			'projects_scenario': [
+				('Create', 'can_create_project_scenario'),
+				('Read (View)', 'can_view_project_scenario'),
+				('Update (Edit)', 'can_change_project_scenario'),
+				('Delete (Archive)', 'can_delete_project_scenario'),
+			],
+			'projects_testcase': [
+				('Create', 'can_create_project_testcase'),
+				('Read (View)', 'can_view_project_testcase'),
+				('Update (Edit)', 'can_change_project_testcase'),
+				('Delete (Archive)', 'can_delete_project_testcase'),
+			],
+			'api_tester': [
+				('Read (View)', 'can_view_user'),
+			],
+			'automation': [
+				('Read (Overview)', 'can_view_automation'),
+				('Run (Trigger)', 'can_run_automation'),
+				('Report (View)', 'can_view_automation_reports'),
+				('Report (Export)', 'can_export_automation_reports'),
+			],
+			'api_environment': [
+				('Create', 'can_create_api_environment'),
+				('Read (View)', 'can_view_api_environment'),
+				('Update (Edit)', 'can_change_api_environment'),
+				('Delete (Archive)', 'can_delete_api_environment'),
 			]
 		}
 

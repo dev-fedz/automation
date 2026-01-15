@@ -11,6 +11,13 @@ class Command(BaseCommand):
 			('dashboard', ' Dashboard', Module.Categories.DASHBOARD),
 			('user_roles', 'User Roles', Module.Categories.USERMANAGEMENT),
 			('user_accounts', 'User Accounts', Module.Categories.USERMANAGEMENT),
+			('projects_project', 'Projects', Module.Categories.CORE),
+			('projects_module', 'Modules', Module.Categories.CORE),
+			('projects_scenario', 'Scenarios', Module.Categories.CORE),
+			('projects_testcase', 'Test Cases', Module.Categories.CORE),
+			('api_tester', 'API Tester', Module.Categories.APITESTER),
+			('automation', 'Automation', Module.Categories.AUTOMATION),
+			('api_environment', 'API Environment', Module.Categories.CMS),
 		]
 
 		wanted_codes = [c for c, *_ in base_modules]

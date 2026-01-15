@@ -14,7 +14,15 @@
     <aside class="dash-sidebar" id="sidebar" aria-label="Primary sidebar navigation">
             <div class="sidebar-profile">
                 <div class="avatar"></div>
-                <div class="profile-name">{{ request.user.first_name|default:'User' }} {{ request.user.last_name }}</div>
+                <div class="sidebar-user-menu" data-role="sidebar-user-menu">
+                    <button type="button" class="sidebar-user-menu__button" aria-haspopup="menu" aria-expanded="false" data-action="toggle-sidebar-user-menu">
+                        <span class="profile-name">{{ request.user.first_name|default:'User' }} {{ request.user.last_name }}</span>
+                        <span class="sidebar-user-menu__caret" aria-hidden="true">▾</span>
+                    </button>
+                    <div class="sidebar-user-menu__dropdown" role="menu" hidden>
+                        <a href="{% url 'logout' %}?force=1" data-logout role="menuitem">Logout</a>
+                    </div>
+                </div>
             </div>
             {% include 'components/sidebar.html' %}
         </aside>
@@ -52,10 +60,16 @@
                         <button class="range">7 Days</button>
                         <button class="range">30 Days</button>
                     </div>
-                    <div class="user-box mini">
-                        <div class="user-meta">
-                            <div class="user-name">{{ request.user.first_name }} {{ request.user.last_name }}</div>
-                            <div class="user-email">{{ request.user.email }}</div>
+                    <div class="user-menu" data-role="user-menu">
+                        <button type="button" class="user-menu__button" aria-haspopup="menu" aria-expanded="false" data-action="toggle-user-menu">
+                            <div class="user-meta">
+                                <div class="user-name">{{ request.user.first_name }} {{ request.user.last_name }}</div>
+                                <div class="user-email">{{ request.user.email }}</div>
+                            </div>
+                            <span class="user-menu__caret" aria-hidden="true">▾</span>
+                        </button>
+                        <div class="user-menu__dropdown" role="menu" hidden>
+                            <a href="{% url 'logout' %}?force=1" data-logout role="menuitem">Logout</a>
                         </div>
                     </div>
                 </div>

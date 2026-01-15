@@ -91,7 +91,9 @@ class Module(models.Model):
         BASE = 'B', 'Base'
         DASHBOARD = 'DB', 'Dashboard'
         USERMANAGEMENT = 'UM', 'User Management'
+        APITESTER = 'API', 'API Tester'
         CORE = 'CORE', 'Core'
+        AUTOMATION = 'AUTO', 'Automation'
         CMS = 'CMS', 'CMS'
         REPORTS = 'R', 'Reports'
 

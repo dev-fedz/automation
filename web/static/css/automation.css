@@ -530,32 +530,69 @@
     border: none;
 }
 .reports-tabs-panels { padding: 0; }
-.report-panel { padding: 0.75rem 0.5rem 1rem; }
-.report-panel .panel-controls { padding: 0.6rem 0; margin-top: 2rem; }
+ .report-panel { padding: 0.75rem 0.5rem 1rem; }
+ .report-panel .panel-controls { padding: 0.6rem 0; margin-top: 2rem; }
+
+/* Reports (Automation > Reports): simple one-row controls */
+.reports-tabs-wrapper .report-panel .panel-controls,
+.reports-tabs-wrapper .table-round > .panel-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.reports-tabs-wrapper .panel-controls .inline-filter {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
 
 /* Ensure inline filter inputs align with the rounded table width.
    If the control sits inside `.table-round`, make the input fill that width
    but remain constrained and centered so it doesn't overflow the table area. */
+/* Match the existing input look, but don't force full-width. */
 .reports-tabs-wrapper .table-round > .panel-controls .inline-filter input,
 .reports-tabs-wrapper .report-panel .panel-controls .inline-filter input {
-    display: block;
-    width: calc(100% - 1.6rem);
-    max-width: 100%;
     box-sizing: border-box;
-    margin: 0.15rem auto 0;
-    padding: 0.75rem 0.95rem;
+    padding: 0.55rem 0.75rem;
     border-radius: 8px;
     border: 1px solid rgba(0,0,0,0.06);
     background: #fff;
     font-size: 0.95rem;
 }
 
+/* Prevent full-width textbox */
+.reports-tabs-wrapper #automation-report-filter {
+    width: 300px;
+    min-width: 220px;
+    max-width: 100%;
+}
+
+/* Test Case Report tab filter width (the panels are siblings of .reports-tabs-wrapper) */
+#panel-testcase #testcase-report-filter {
+    width: 220px;
+    min-width: 220px;
+    max-width: 100%;
+}
+
+/* Test Case Report tab: give controls a little left breathing room */
+#panel-testcase .panel-controls {
+    padding-left: 10px;
+}
+
+/* Optional: make date inputs compact */
+.reports-tabs-wrapper .panel-controls input[type="date"] {
+    width: 150px;
+    max-width: 150px;
+}
+
 /* Small screens: ensure input still fits comfortably */
 @media (max-width: 720px) {
-    .reports-tabs-wrapper .table-round > .panel-controls .inline-filter input,
-    .reports-tabs-wrapper .report-panel .panel-controls .inline-filter input {
+    #automation-report-filter,
+    #testcase-report-filter {
         width: 100%;
-        padding: 0.6rem 0.8rem;
+        min-width: 220px;
     }
 }
 .reports-tabs-wrapper .table-modern thead {
@@ -1933,3 +1970,28 @@ body.automation-modal-open {
     line-height: 1.4;
 }
 
+.panel-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px; /* space between items */
+    flex-wrap: wrap; /* optional: prevents overflow on small screens */
+}
+
+.inline-filter {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: 10px;
+}
+
+/* Prevent full-width textbox */
+#automation-report-filter {
+    width: 220px;      /* adjust as needed */
+    max-width: 100%;
+}
+
+
+/* Optional: make date inputs compact */
+.panel-controls input[type="date"] {
+    width: 150px;
+}
