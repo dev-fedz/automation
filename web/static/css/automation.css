@@ -534,15 +534,15 @@
  .report-panel .panel-controls { padding: 0.6rem 0; margin-top: 2rem; }
 
 /* Reports (Automation > Reports): simple one-row controls */
-.reports-tabs-wrapper .report-panel .panel-controls,
-.reports-tabs-wrapper .table-round > .panel-controls {
+.automation-reports .report-panel .panel-controls,
+.automation-reports .table-round > .panel-controls {
     display: flex;
     align-items: center;
     gap: 12px;
     flex-wrap: wrap;
 }
 
-.reports-tabs-wrapper .panel-controls .inline-filter {
+.automation-reports .panel-controls .inline-filter {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -552,18 +552,19 @@
    If the control sits inside `.table-round`, make the input fill that width
    but remain constrained and centered so it doesn't overflow the table area. */
 /* Match the existing input look, but don't force full-width. */
-.reports-tabs-wrapper .table-round > .panel-controls .inline-filter input,
-.reports-tabs-wrapper .report-panel .panel-controls .inline-filter input {
+.automation-reports .panel-controls .inline-filter input {
     box-sizing: border-box;
     padding: 0.55rem 0.75rem;
     border-radius: 8px;
     border: 1px solid rgba(0,0,0,0.06);
     background: #fff;
     font-size: 0.95rem;
+    height: 40px;
+    line-height: 1.2;
 }
 
 /* Prevent full-width textbox */
-.reports-tabs-wrapper #automation-report-filter {
+.automation-reports #automation-report-filter {
     width: 300px;
     min-width: 220px;
     max-width: 100%;
@@ -582,7 +583,7 @@
 }
 
 /* Optional: make date inputs compact */
-.reports-tabs-wrapper .panel-controls input[type="date"] {
+.automation-reports .panel-controls input[type="date"] {
     width: 150px;
     max-width: 150px;
 }
