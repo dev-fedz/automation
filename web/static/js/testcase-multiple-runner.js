@@ -2130,6 +2130,11 @@
                 statusEl.textContent = failedCount ? 'Failed' : 'Passed';
             }
             container.dataset.status = failedCount ? 'failed' : 'passed';
+            // Ensure scenario/module/project aggregates reflect this completed case.
+            try {
+                const parent = container.closest && container.closest('.multi-scenario');
+                if (parent) updateScenarioStatus(parent);
+            } catch (_e) { /* ignore */ }
             try { const modal = container && container.closest ? container.closest('.modal') || document.getElementById('testcase-multi-response-modal') : document.getElementById('testcase-multi-response-modal'); updateModalTotals(modal); } catch (_e) { }
         } else {
             if (statusEl) {
@@ -2140,6 +2145,11 @@
                 summaryEl.textContent = baseSummary ? `${baseSummary} · Completed.` : 'Completed.';
             }
             container.dataset.status = 'passed';
+            // Ensure scenario/module/project aggregates reflect this completed case.
+            try {
+                const parent = container.closest && container.closest('.multi-scenario');
+                if (parent) updateScenarioStatus(parent);
+            } catch (_e) { /* ignore */ }
             try { const modal = container && container.closest ? container.closest('.modal') || document.getElementById('testcase-multi-response-modal') : document.getElementById('testcase-multi-response-modal'); updateModalTotals(modal); } catch (_e) { }
         }
     }
@@ -2198,16 +2208,17 @@
             const anyPassed = statuses.some(s => s === 'passed');
 
             let text = '';
-            if (anyRunning) text = 'Running…';
-            else if (anyQueued && !anyPassed && !anyFailed && !anyBlocked && anyQueued) text = 'Queued';
-            else if (anyFailed) text = 'Failed';
-            else if (anyBlocked) text = 'Blocked';
-            else if (anySkipped && !anyPassed) text = 'Skipped';
-            else if (anyPassed) text = 'Passed';
-            else text = '';
+            let statusKey = '';
+            if (anyRunning) { text = 'Running…'; statusKey = 'running'; }
+            else if (anyQueued && !anyPassed && !anyFailed && !anyBlocked && anyQueued) { text = 'Queued'; statusKey = 'queued'; }
+            else if (anyFailed) { text = 'Failed'; statusKey = 'failed'; }
+            else if (anyBlocked) { text = 'Blocked'; statusKey = 'blocked'; }
+            else if (anySkipped && !anyPassed) { text = 'Skipped'; statusKey = 'skipped'; }
+            else if (anyPassed) { text = 'Passed'; statusKey = 'passed'; }
+            else { text = ''; statusKey = ''; }
 
             if (statusEl) statusEl.textContent = text;
-            try { parent.dataset.status = (text || '').toLowerCase(); } catch (_e) { }
+            try { parent.dataset.status = statusKey; } catch (_e) { }
 
             // compute counts per state and render a compact counts label
             try {
