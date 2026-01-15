@@ -158,7 +158,9 @@ def role_update(*, role: Group, data: dict):
     for field, value in data.items():
         setattr(role, field, value)
     role.save()
-    if role_modules:
+    # IMPORTANT: an empty list means "clear all modules/permissions".
+    # Only skip role-module updates when the client did not send role_modules at all.
+    if role_modules is not None:
         # Clear existing permission relations and role-module associations before re-adding
         role.permissions.clear()
         role.rolemodule_set.all().delete()
