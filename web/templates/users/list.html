@@ -16,7 +16,9 @@
         <p class="panel-subtitle">Manage platform access, roles, and account status.</p>
       </div>
       <div class="panel-actions">
+        {% if perms.accounts.can_add_user %}
         <a class="btn-primary" href="/users/create/" data-testid="user-create-link">Create User</a>
+        {% endif %}
       </div>
     </div>
 
@@ -54,8 +56,16 @@
             <td data-label="Status">{{ u.get_status_display }}</td>
             <td data-label="Actions">
               <div class="table-action-group">
+                {% if perms.accounts.can_change_user %}
                 <a class="action-button" href="/users/{{ u.id }}/edit/" data-testid="user-edit-{{ u.id }}">Edit</a>
+                {% endif %}
+                {% if perms.accounts.can_delete_user %}
                 <a class="action-button" data-variant="danger" href="/users/{{ u.id }}/delete/" data-testid="user-delete-{{ u.id }}">Delete</a>
+                {% endif %}
+
+                {% if not perms.accounts.can_delete_user and not perms.accounts.can_change_user %}
+                <label for="">no action available</label>
+                {% endif %}
               </div>
             </td>
           </tr>

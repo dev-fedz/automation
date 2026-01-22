@@ -8,10 +8,35 @@ from knox.views import LoginView as KnoxLoginView, LogoutView as KnoxLogoutView
 from rest_framework import exceptions, status
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.generics import ListAPIView
+from rest_framework.permissions import BasePermission
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.serializers import Serializer as EmptySerializer
 from rest_framework.views import APIView
+
+from django.http import HttpResponseForbidden
+
+
+class HasAccountsPermission(BasePermission):
+    """Permission checks based on our custom 'accounts.can_*' permissions.
+
+    We avoid IsAdminUser (is_staff) so non-superusers can access screens
+    when their role grants the appropriate permissions.
+    """
+
+    def has_permission(self, request, view):
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_superuser:
+            return True
+
+        required_perm = getattr(view, 'required_permission', None)
+        if callable(required_perm):
+            required_perm = required_perm(request)
+        if not required_perm:
+            return True
+        return user.has_perm(required_perm)
 
 from . import models, selectors, serializers, services
 
@@ -113,7 +138,8 @@ class OtpAPI(APIView):
 
 class UserListAPI(ListAPIView):
     serializer_class = serializers.UserListSerializer
-    permission_classes = (IsAuthenticated, IsAdminUser)
+    permission_classes = (IsAuthenticated, HasAccountsPermission)
+    required_permission = 'accounts.can_view_user'
     filter_backends = [SearchFilter, OrderingFilter, DjangoFilterBackend]
     filterset_fields = {'groups__id': ['exact']}
     search_fields = ['username', 'email', 'first_name', 'last_name']
@@ -124,7 +150,8 @@ class UserListAPI(ListAPIView):
 
 class UserDetailAPI(APIView):
     serializer_class = serializers.UserRetrieveSerializer
-    permission_classes = (IsAuthenticated, IsAdminUser)
+    permission_classes = (IsAuthenticated, HasAccountsPermission)
+    required_permission = 'accounts.can_view_user'
 
     def get(self, request, pk):
         obj = selectors.active_staff_get().filter(pk=pk).first()
@@ -135,7 +162,8 @@ class UserDetailAPI(APIView):
 
 class UserCreateAPI(APIView):
     serializer_class = serializers.UserCreateSerializer
-    permission_classes = (IsAuthenticated, IsAdminUser)
+    permission_classes = (IsAuthenticated, HasAccountsPermission)
+    required_permission = 'accounts.can_add_user'
 
     def post(self, request):
         s = self.serializer_class(data=request.data)
@@ -146,7 +174,8 @@ class UserCreateAPI(APIView):
 
 class UserUpdateApi(APIView):
     serializer_class = serializers.UserUpdateSerializer
-    permission_classes = (IsAuthenticated, IsAdminUser)
+    permission_classes = (IsAuthenticated, HasAccountsPermission)
+    required_permission = 'accounts.can_change_user'
 
     def get_obj(self, pk):
         obj = selectors.active_staff_get().filter(pk=pk).first()
@@ -170,7 +199,8 @@ class UserUpdateApi(APIView):
 
 class UserDeleteApi(APIView):
     serializer_class = EmptySerializer
-    permission_classes = (IsAuthenticated, IsAdminUser)
+    permission_classes = (IsAuthenticated, HasAccountsPermission)
+    required_permission = 'accounts.can_delete_user'
 
     def delete(self, request, pk):
         obj = selectors.active_staff_get().filter(pk=pk).first()
@@ -182,7 +212,8 @@ class UserDeleteApi(APIView):
 
 class RoleListAPI(ListAPIView):
     serializer_class = serializers.RoleListSerializer
-    permission_classes = (IsAuthenticated, IsAdminUser)
+    permission_classes = (IsAuthenticated, HasAccountsPermission)
+    required_permission = 'accounts.can_view_group'
     filter_backends = [SearchFilter, OrderingFilter]
     search_fields = ['name']
     ordering_fields = ['name']
@@ -193,7 +224,8 @@ class RoleListAPI(ListAPIView):
 class RoleDetailAPI(APIView):
     # Use detailed serializer including role_modules with permissions
     serializer_class = serializers.RoleDetailSerializer
-    permission_classes = (IsAuthenticated, IsAdminUser)
+    permission_classes = (IsAuthenticated, HasAccountsPermission)
+    required_permission = 'accounts.can_view_group'
     queryset = Group.objects.all()
 
     def get(self, request, pk):
@@ -205,7 +237,8 @@ class RoleDetailAPI(APIView):
 
 class RoleCreateAPI(APIView):
     serializer_class = serializers.RoleCreateSerializer
-    permission_classes = (IsAuthenticated, IsAdminUser)
+    permission_classes = (IsAuthenticated, HasAccountsPermission)
+    required_permission = 'accounts.can_add_group'
 
     def post(self, request):
         s = self.serializer_class(data=request.data)
@@ -216,7 +249,8 @@ class RoleCreateAPI(APIView):
 
 class RoleUpdateApi(APIView):
     serializer_class = serializers.RoleUpdateSerializer
-    permission_classes = (IsAuthenticated, IsAdminUser)
+    permission_classes = (IsAuthenticated, HasAccountsPermission)
+    required_permission = 'accounts.can_change_group'
     queryset = Group.objects.all()
 
     def put(self, request, pk):
@@ -237,7 +271,8 @@ class RoleUpdateApi(APIView):
 
 class RoleDeleteApi(APIView):
     serializer_class = EmptySerializer
-    permission_classes = (IsAuthenticated, IsAdminUser)
+    permission_classes = (IsAuthenticated, HasAccountsPermission)
+    required_permission = 'accounts.can_delete_group'
     queryset = Group.objects.all()
 
     def delete(self, request, pk):
@@ -254,25 +289,33 @@ class RoleDeleteApi(APIView):
 
 class ModuleListAPIView(ListAPIView):
     serializer_class = serializers.ModuleListSerializer
-    permission_classes = (IsAuthenticated, IsAdminUser)
+    permission_classes = (IsAuthenticated, HasAccountsPermission)
+    # Modules are used to configure roles; treat as role-view permission.
+    required_permission = 'accounts.can_view_group'
 
     def get_queryset(self):
         return selectors.module_list()
 
 # ---------------- Web (HTML) Role CRUD ---------------- #
 
-def _require_admin(user):
-    return user.is_authenticated and user.is_staff
+def _forbidden_or_login(request):
+    if not request.user.is_authenticated:
+        return redirect('login')
+    return HttpResponseForbidden('Forbidden')
+
+
+def _require_perm(user, perm_codename: str) -> bool:
+    return user.is_authenticated and (user.is_superuser or user.has_perm(perm_codename))
 
 def role_list_page(request):
-    if not _require_admin(request.user):
-        return redirect('login')
+    # if not _require_perm(request.user, 'accounts.can_view_group'):
+    #     return _forbidden_or_login(request)
     roles = Group.objects.all().prefetch_related('modules')
     return render(request, 'roles/list.html', {'roles': roles})
 
 def role_detail_page(request, pk):
-    if not _require_admin(request.user):
-        return redirect('login')
+    # if not _require_perm(request.user, 'accounts.can_view_group'):
+    #     return _forbidden_or_login(request)
     role = get_object_or_404(Group, pk=pk)
     # reuse API serializer for modules/permissions structure
     ser = serializers.RoleListSerializer(role)
@@ -289,8 +332,8 @@ def _modules_permissions_context():
     return modules
 
 def role_create_page(request):
-    if not _require_admin(request.user):
-        return redirect('login')
+    if not _require_perm(request.user, 'accounts.can_add_group'):
+        return _forbidden_or_login(request)
     if request.method == 'POST':
         name = request.POST.get('name','').strip()
         module_ids = request.POST.getlist('modules')
@@ -317,8 +360,8 @@ def role_create_page(request):
         'selected_module_ids': [], 'selected_permission_ids': []})
 
 def role_edit_page(request, pk):
-    if not _require_admin(request.user):
-        return redirect('login')
+    if not _require_perm(request.user, 'accounts.can_change_group'):
+        return _forbidden_or_login(request)
     role = get_object_or_404(Group, pk=pk)
     if request.method == 'POST':
         name = request.POST.get('name','').strip()
@@ -346,8 +389,8 @@ def role_edit_page(request, pk):
         'selected_module_ids': selected_module_ids, 'selected_permission_ids': selected_permission_ids})
 
 def role_delete_page(request, pk):
-    if not _require_admin(request.user):
-        return redirect('login')
+    if not _require_perm(request.user, 'accounts.can_delete_group'):
+        return _forbidden_or_login(request)
     role = get_object_or_404(Group, pk=pk)
     if request.method == 'POST':
         user_count = models.User.objects.filter(groups=role).count()
@@ -362,15 +405,15 @@ def role_delete_page(request, pk):
 # ---------------- Web (HTML) User CRUD ---------------- #
 
 def user_list_page(request):
-    if not _require_admin(request.user):
-        return redirect('login')
+    if not _require_perm(request.user, 'accounts.can_view_user'):
+        return _forbidden_or_login(request)
     users = models.User.active_objects.select_related().prefetch_related('groups')
     return render(request, 'users/list.html', {'users': users})
 
 
 def user_create_page(request):
-    if not _require_admin(request.user):
-        return redirect('login')
+    if not _require_perm(request.user, 'accounts.can_add_user'):
+        return _forbidden_or_login(request)
     roles = Group.objects.all().order_by('name')
     if request.method == 'POST':
         data = {
@@ -398,8 +441,8 @@ def user_create_page(request):
 
 
 def user_edit_page(request, pk):
-    if not _require_admin(request.user):
-        return redirect('login')
+    if not _require_perm(request.user, 'accounts.can_change_user'):
+        return _forbidden_or_login(request)
     user = get_object_or_404(models.User, pk=pk)
     roles = Group.objects.all().order_by('name')
     if request.method == 'POST':
@@ -430,8 +473,8 @@ def user_edit_page(request, pk):
 
 
 def user_delete_page(request, pk):
-    if not _require_admin(request.user):
-        return redirect('login')
+    if not _require_perm(request.user, 'accounts.can_delete_user'):
+        return _forbidden_or_login(request)
     user = get_object_or_404(models.User, pk=pk)
     if request.method == 'POST':
         user.soft_delete()
@@ -441,8 +484,8 @@ def user_delete_page(request, pk):
 
 
 def user_detail_page(request, pk):
-    if not _require_admin(request.user):
-        return redirect('login')
+    if not _require_perm(request.user, 'accounts.can_view_user'):
+        return _forbidden_or_login(request)
     user = get_object_or_404(models.User, pk=pk)
     role = user.groups.first()
     return render(request, 'users/detail.html', {'user_obj': user, 'role_obj': role})

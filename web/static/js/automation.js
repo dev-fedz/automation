@@ -76,136 +76,6 @@
         return (temp.textContent || temp.innerText || '').trim();
     };
 
-    const htmlToFormattedText = (value) => {
-        if (!value) {
-            return '';
-        }
-        if (typeof document === 'undefined' || !document.createElement) {
-            return String(value);
-        }
-
-        const container = document.createElement('div');
-        container.innerHTML = String(value);
-
-        const out = [];
-        const listStack = [];
-
-        const pushText = (text, { preserveWhitespace } = {}) => {
-            if (!text) return;
-            if (preserveWhitespace) {
-                out.push(text);
-                return;
-            }
-            // Collapse runs of whitespace but keep newlines managed by block tags.
-            out.push(String(text).replace(/[\t\f\v ]+/g, ' '));
-        };
-
-        const ensureNewline = (count = 1) => {
-            const joined = out.join('');
-            let existing = 0;
-            for (let i = joined.length - 1; i >= 0; i -= 1) {
-                if (joined[i] === '\n') existing += 1;
-                else if (joined[i] === ' ') continue;
-                else break;
-            }
-            const needed = Math.max(0, count - existing);
-            if (needed) out.push('\n'.repeat(needed));
-        };
-
-        const renderNode = (node, opts = {}) => {
-            if (!node) return;
-            const preserveWhitespace = !!opts.preserveWhitespace;
-            if (node.nodeType === Node.TEXT_NODE) {
-                pushText(node.nodeValue || '', { preserveWhitespace });
-                return;
-            }
-            if (node.nodeType !== Node.ELEMENT_NODE) {
-                return;
-            }
-
-            const tag = (node.tagName || '').toUpperCase();
-            if (tag === 'BR') {
-                out.push('\n');
-                return;
-            }
-
-            if (tag === 'PRE') {
-                ensureNewline(1);
-                pushText(node.textContent || '', { preserveWhitespace: true });
-                ensureNewline(1);
-                return;
-            }
-
-            if (tag === 'CODE') {
-                pushText(node.textContent || '', { preserveWhitespace });
-                return;
-            }
-
-            if (tag === 'UL' || tag === 'OL') {
-                ensureNewline(1);
-                listStack.push({ type: tag, counter: 0 });
-                const items = Array.from(node.children || []).filter((c) => (c.tagName || '').toUpperCase() === 'LI');
-                items.forEach((li) => {
-                    const top = listStack[listStack.length - 1];
-                    if (top.type === 'OL') {
-                        top.counter += 1;
-                    }
-                    const depth = Math.max(0, listStack.length - 1);
-                    const indent = '  '.repeat(depth);
-                    const marker = top.type === 'OL' ? `${top.counter}. ` : '• ';
-                    ensureNewline(1);
-                    out.push(indent + marker);
-                    // Render LI contents. TinyMCE often wraps list items in <p>,
-                    // so suppress leading block newlines for the first child.
-                    let listMarkerPending = true;
-                    Array.from(li.childNodes || []).forEach((child) => {
-                        // Ignore whitespace-only text nodes so they don't break marker formatting.
-                        if (child && child.nodeType === Node.TEXT_NODE) {
-                            const raw = child.nodeValue || '';
-                            if (!raw.trim()) {
-                                return;
-                            }
-                        }
-                        renderNode(child, { preserveWhitespace, listMarkerStart: listMarkerPending });
-                        listMarkerPending = false;
-                    });
-                    ensureNewline(1);
-                });
-                listStack.pop();
-                ensureNewline(1);
-                return;
-            }
-
-            // Treat common block containers as paragraph breaks.
-            const isBlock = ['P', 'DIV', 'SECTION', 'ARTICLE', 'HEADER', 'FOOTER', 'BLOCKQUOTE'].includes(tag);
-            if (isBlock) {
-                if (!opts.listMarkerStart) {
-                    ensureNewline(1);
-                }
-                Array.from(node.childNodes || []).forEach((child) => {
-                    renderNode(child, { preserveWhitespace });
-                });
-                ensureNewline(opts.listMarkerStart ? 1 : 2);
-                return;
-            }
-
-            // Default: recurse into children.
-            Array.from(node.childNodes || []).forEach((child) => {
-                renderNode(child, { preserveWhitespace });
-            });
-        };
-
-        Array.from(container.childNodes || []).forEach((child) => renderNode(child));
-
-        let text = out.join('');
-        // Normalize whitespace around newlines.
-        text = text
-            .replace(/[ \t]+\n/g, '\n')
-            .replace(/\n{3,}/g, '\n\n')
-            .trim();
-        return text;
-    };
-
     const getCsrfToken = () => {
         const name = "csrftoken=";
         const cookies = document.cookie ? document.cookie.split(";") : [];
@@ -783,6 +653,9 @@
             scenario: {
                 title: document.getElementById('scenario-title'),
                 description: document.getElementById('scenario-description'),
+                preconditions: document.getElementById('scenario-preconditions'),
+                postconditions: document.getElementById('scenario-postconditions'),
+                tags: document.getElementById('scenario-tags'),
             },
             case: {
                 title: document.getElementById('case-title'),
@@ -1092,1040 +965,6 @@
                 return { html: '', plain: '' };
             }
             return { html: sanitized, plain };
-        };
-
-        // TinyMCE for Test Case Description (module-add-case-modal)
-        let caseDescriptionEditor = null;
-
-        const getCaseDescriptionEditor = () => {
-            try {
-                if (typeof window !== 'undefined' && window.tinymce && typeof window.tinymce.get === 'function') {
-                    const byId = window.tinymce.get('module-add-case-description');
-                    if (byId) return byId;
-                }
-            } catch (_e) {
-                /* ignore */
-            }
-            return caseDescriptionEditor;
-        };
-
-        const setTinyMceReadOnly = (editor, readOnly) => {
-            if (!editor) return;
-            try {
-                if (typeof editor.setMode === 'function') {
-                    editor.setMode(readOnly ? 'readonly' : 'design');
-                    return;
-                }
-            } catch (_e) {
-                /* ignore */
-            }
-            try {
-                if (editor.mode && typeof editor.mode.set === 'function') {
-                    editor.mode.set(readOnly ? 'readonly' : 'design');
-                }
-            } catch (_e) {
-                /* ignore */
-            }
-        };
-
-        const removeCaseDescriptionEditor = () => {
-            try {
-                if (typeof tinymce !== 'undefined') {
-                    try {
-                        const byId = tinymce.get && tinymce.get('module-add-case-description');
-                        if (byId) tinymce.remove(byId);
-                    } catch (_e) {
-                        /* ignore */
-                    }
-                    try {
-                        tinymce.remove('#module-add-case-description');
-                    } catch (_e) {
-                        /* ignore */
-                    }
-                }
-            } catch (_e) {
-                /* ignore */
-            }
-            caseDescriptionEditor = null;
-            try {
-                const el = document.getElementById('module-add-case-description');
-                if (el) {
-                    el.style.display = '';
-                    el.removeAttribute('aria-hidden');
-                }
-            } catch (_e) {
-                /* ignore */
-            }
-        };
-
-        const initCaseDescriptionEditor = ({ readOnly } = {}) => {
-            const textarea = document.getElementById('module-add-case-description');
-            if (!textarea) return;
-
-            // Avoid duplicate editors when reopening modals.
-            removeCaseDescriptionEditor();
-
-            if (typeof window.tinymce === 'undefined') {
-                return;
-            }
-
-            const initialValue = sanitizeRichText(textarea.value || '');
-
-            window.tinymce.init({
-                target: textarea,
-                height: 200,
-                menubar: false,
-                branding: false,
-                plugins: [
-                    'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
-                    'searchreplace', 'visualblocks', 'code', 'fullscreen',
-                    'insertdatetime', 'table', 'help', 'wordcount'
-                ],
-                toolbar:
-                    'undo redo | formatselect | bold italic underline strikethrough | ' +
-                    'alignleft aligncenter alignright alignjustify | ' +
-                    'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
-                content_style:
-                    'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }',
-                setup(editor) {
-                    caseDescriptionEditor = editor;
-                    editor.on('init', () => {
-                        try {
-                            editor.setContent(initialValue || '');
-                            textarea.value = initialValue || '';
-                        } catch (_e) {
-                            /* ignore */
-                        }
-                        setTinyMceReadOnly(editor, Boolean(readOnly));
-                    });
-                    const sync = () => {
-                        try {
-                            const html = sanitizeRichText(editor.getContent({ format: 'html' }) || '');
-                            textarea.value = html;
-                        } catch (_e) {
-                            /* ignore */
-                        }
-                    };
-                    editor.on('change keyup paste blur setcontent', sync);
-                    editor.on('remove', () => {
-                        if (caseDescriptionEditor === editor) {
-                            caseDescriptionEditor = null;
-                        }
-                    });
-                },
-            });
-        };
-
-        const syncCaseDescriptionFromEditor = () => {
-            const textarea = document.getElementById('module-add-case-description');
-            if (!textarea) return '';
-            const editor = getCaseDescriptionEditor();
-            if (editor && typeof editor.getContent === 'function') {
-                try {
-                    const html = sanitizeRichText(editor.getContent({ format: 'html' }) || '');
-                    textarea.value = html;
-                    return html;
-                } catch (_e) {
-                    /* ignore */
-                }
-            }
-            textarea.value = sanitizeRichText(textarea.value || '');
-            return textarea.value;
-        };
-
-        const applyCaseModalLayout = (modalEl, { isDetails } = {}) => {
-            if (!modalEl) return;
-            try {
-                const dialog = modalEl.querySelector('.automation-modal__dialog');
-                if (dialog) {
-                    dialog.style.width = isDetails ? '80%' : '';
-                    dialog.style.maxWidth = isDetails ? '80%' : '';
-                }
-            } catch (e) { /* ignore */ }
-
-            try {
-                const descEl = document.getElementById('module-add-case-description');
-                if (descEl) {
-                    descEl.rows = isDetails ? 12 : 3;
-                }
-            } catch (e) { /* ignore */ }
-
-            // Comments should only appear in details view.
-            try { setViewCaseCommentsVisible(modalEl, Boolean(isDetails)); } catch (e) { /* ignore */ }
-            // Attachments should only appear in details view.
-            try { setViewCaseAttachmentsVisible(modalEl, Boolean(isDetails)); } catch (e) { /* ignore */ }
-        };
-
-        // Test Case Details: Comments (mirrors View Scenario comments)
-        let viewCaseCommentEditor = null;
-        let viewCaseInlineCommentEditor = null;
-        let activeViewCaseId = null;
-        let activeViewCaseAttachCommentId = null;
-        let viewCaseCommentsCache = new Map();
-        let viewCaseCommentEditorAttempts = 0;
-        const MAX_VIEW_CASE_COMMENT_EDITOR_ATTEMPTS = 20;
-
-        const ensureTinyMceLoaded = (onReady) => {
-            try {
-                if (typeof window.tinymce !== 'undefined') {
-                    if (typeof onReady === 'function') onReady();
-                    return;
-                }
-            } catch (e) { /* ignore */ }
-
-            // TinyMCE should normally be loaded via a script tag in the template,
-            // but in case it isn't (or didn't load), inject it and retry.
-            try {
-                const existing = document.querySelector('script[data-role="tinymce-loader"]');
-                if (existing) {
-                    existing.addEventListener('load', () => { try { if (typeof onReady === 'function') onReady(); } catch (e) { /* ignore */ } }, { once: true });
-                    return;
-                }
-
-                const anyTinyScript = document.querySelector('script[src*="tinymce" i]');
-                const src = anyTinyScript && anyTinyScript.getAttribute ? anyTinyScript.getAttribute('src') : null;
-                const scriptSrc = src || '/static/tinymce/tinymce.min.js';
-
-                const s = document.createElement('script');
-                s.src = scriptSrc;
-                s.async = true;
-                s.dataset.role = 'tinymce-loader';
-                s.onload = () => { try { if (typeof onReady === 'function') onReady(); } catch (e) { /* ignore */ } };
-                document.head.appendChild(s);
-            } catch (e) {
-                // If injection fails, just give up quietly.
-            }
-        };
-
-        const renderCommentPlainHtml = (rawHtml) => {
-            try {
-                const plain = htmlToFormattedText(rawHtml || '');
-                return escapeHtml(plain).replace(/\n/g, '<br>');
-            } catch (e) {
-                try { return escapeHtml(String(rawHtml || '')).replace(/\n/g, '<br>'); } catch (_e) { return ''; }
-            }
-        };
-
-        const setViewCaseCommentsVisible = (modalEl, visible) => {
-            try {
-                if (!modalEl) return;
-                const row = modalEl.querySelector('#module-view-case-comments-row');
-                if (!row) return;
-
-                // Keep Attachments above Comments (details view layout).
-                try {
-                    const attachmentsRow = modalEl.querySelector('#module-view-case-attachments-row');
-                    if (attachmentsRow && row.parentNode && attachmentsRow.parentNode === row.parentNode) {
-                        if (attachmentsRow.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING) {
-                            // attachmentsRow is after comments row; move it above.
-                            row.parentNode.insertBefore(attachmentsRow, row);
-                        }
-                    }
-                } catch (e) { /* ignore */ }
-
-                row.hidden = !visible;
-                try { row.style.display = visible ? 'flex' : 'none'; } catch (e) { /* ignore */ }
-            } catch (e) { /* ignore */ }
-        };
-
-        const setViewCaseAttachmentsVisible = (modalEl, visible) => {
-            try {
-                if (!modalEl) return;
-                const row = modalEl.querySelector('#module-view-case-attachments-row');
-                if (!row) return;
-
-                // Keep Attachments above Comments (details view layout).
-                try {
-                    const commentsRow = modalEl.querySelector('#module-view-case-comments-row');
-                    if (commentsRow && commentsRow.parentNode && row.parentNode === commentsRow.parentNode) {
-                        if (commentsRow.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING) {
-                            // commentsRow is after attachments row (already good)
-                        } else if (commentsRow.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_PRECEDING) {
-                            // attachmentsRow is after comments row; move it above.
-                            commentsRow.parentNode.insertBefore(row, commentsRow);
-                        }
-                    }
-                } catch (e) { /* ignore */ }
-
-                row.hidden = !visible;
-                try { row.style.display = visible ? 'flex' : 'none'; } catch (e) { /* ignore */ }
-            } catch (e) { /* ignore */ }
-        };
-
-        const removeViewCaseCommentEditor = () => {
-            try {
-                if (typeof tinymce !== 'undefined') {
-                    try {
-                        const byId = tinymce.get && tinymce.get('module-view-case-comment-content');
-                        if (byId) tinymce.remove(byId);
-                    } catch (e) { /* ignore */ }
-                    try { tinymce.remove('#module-view-case-comment-content'); } catch (e) { /* ignore */ }
-                }
-            } catch (e) { /* ignore */ }
-            viewCaseCommentEditor = null;
-            try {
-                const el = document.getElementById('module-view-case-comment-content');
-                if (el) {
-                    el.style.display = '';
-                    el.removeAttribute('aria-hidden');
-                }
-            } catch (e) { /* ignore */ }
-        };
-
-        const initViewCaseCommentEditor = () => {
-            const el = document.getElementById('module-view-case-comment-content');
-            if (!el) return;
-
-            ensureTinyMceLoaded(() => {
-                // If TinyMCE isn't loaded yet, retry a few times.
-                if (typeof window.tinymce === 'undefined') {
-                    if (viewCaseCommentEditorAttempts < MAX_VIEW_CASE_COMMENT_EDITOR_ATTEMPTS) {
-                        viewCaseCommentEditorAttempts += 1;
-                        window.setTimeout(initViewCaseCommentEditor, 150 * viewCaseCommentEditorAttempts);
-                    }
-                    return;
-                }
-
-                // If an editor is already attached, reuse it.
-                try {
-                    if (window.tinymce && typeof window.tinymce.get === 'function') {
-                        const existing = window.tinymce.get(el.id);
-                        if (existing) {
-                            viewCaseCommentEditor = existing;
-                            return;
-                        }
-                    }
-                } catch (e) { /* ignore */ }
-
-                // If the textarea is still hidden, defer until it's visible.
-                try {
-                    const cs = window.getComputedStyle ? window.getComputedStyle(el) : null;
-                    const hidden = !el.isConnected || (cs && (cs.display === 'none' || cs.visibility === 'hidden'));
-                    if (hidden) {
-                        if (viewCaseCommentEditorAttempts < MAX_VIEW_CASE_COMMENT_EDITOR_ATTEMPTS) {
-                            viewCaseCommentEditorAttempts += 1;
-                            window.setTimeout(initViewCaseCommentEditor, 100 * viewCaseCommentEditorAttempts);
-                        }
-                        return;
-                    }
-                } catch (e) { /* ignore */ }
-
-                viewCaseCommentEditorAttempts = 0;
-                removeViewCaseCommentEditor();
-
-                try {
-                    window.tinymce.init({
-                        target: el,
-                        height: 200,
-                        menubar: false,
-                        branding: false,
-                        plugins: [
-                            'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
-                            'searchreplace', 'visualblocks', 'code', 'fullscreen',
-                            'insertdatetime', 'table', 'help', 'wordcount'
-                        ],
-                        toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
-                            'alignleft aligncenter alignright alignjustify | ' +
-                            'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
-                        content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }',
-                        setup(editor) {
-                            viewCaseCommentEditor = editor;
-                            const sync = () => {
-                                try { el.value = editor.getContent({ format: 'html' }) || ''; } catch (e) { /* ignore */ }
-                            };
-                            editor.on('change keyup paste blur setcontent', sync);
-                            editor.on('remove', () => {
-                                if (viewCaseCommentEditor === editor) {
-                                    viewCaseCommentEditor = null;
-                                }
-                            });
-                        },
-                    });
-
-                    // If init was called but editor didn't attach, retry.
-                    window.setTimeout(() => {
-                        try {
-                            const created = window.tinymce && typeof window.tinymce.get === 'function' ? window.tinymce.get(el.id) : null;
-                            if (!created && viewCaseCommentEditorAttempts < MAX_VIEW_CASE_COMMENT_EDITOR_ATTEMPTS) {
-                                viewCaseCommentEditorAttempts += 1;
-                                initViewCaseCommentEditor();
-                            }
-                        } catch (e) { /* ignore */ }
-                    }, 50);
-                } catch (e) {
-                    if (viewCaseCommentEditorAttempts < MAX_VIEW_CASE_COMMENT_EDITOR_ATTEMPTS) {
-                        viewCaseCommentEditorAttempts += 1;
-                        window.setTimeout(initViewCaseCommentEditor, 150 * viewCaseCommentEditorAttempts);
-                    }
-                }
-            });
-        };
-
-        const removeViewCaseInlineCommentEditor = () => {
-            try {
-                if (typeof tinymce !== 'undefined') {
-                    try {
-                        const byId = tinymce.get && tinymce.get('module-view-case-inline-comment-content');
-                        if (byId) tinymce.remove(byId);
-                    } catch (e) { /* ignore */ }
-                    try { tinymce.remove('#module-view-case-inline-comment-content'); } catch (e) { /* ignore */ }
-                }
-            } catch (e) { /* ignore */ }
-            viewCaseInlineCommentEditor = null;
-        };
-
-        const ensureViewCaseInlineEditor = (modalEl) => {
-            if (!modalEl) return null;
-            let editor = modalEl.querySelector('#module-view-case-inline-comment-editor');
-            if (editor) return editor;
-
-            editor = document.createElement('div');
-            editor.id = 'module-view-case-inline-comment-editor';
-            editor.className = 'automation-form';
-            editor.style.display = 'none';
-            editor.style.marginTop = '10px';
-            editor.innerHTML = `
-                <form id="module-view-case-inline-comment-form" data-mode="" data-comment-id="" data-parent-id="">
-                    <div class="form-row">
-                        <label id="module-view-case-inline-editor-label" for="module-view-case-inline-comment-content">Edit Comment</label>
-                        <textarea id="module-view-case-inline-comment-content" name="content" rows="6" class="tinymce-editor"></textarea>
-                    </div>
-                    <div class="form-actions">
-                        <button type="button" class="btn-primary" data-action="submit-view-case-inline-comment" id="module-view-case-inline-submit-btn">Save</button>
-                        <button type="button" class="btn-secondary" data-action="cancel-view-case-inline-comment" id="module-view-case-inline-cancel-btn">Cancel</button>
-                    </div>
-                </form>
-            `;
-
-            const commentsContainer = modalEl.querySelector('#module-view-case-comments');
-            if (commentsContainer && commentsContainer.parentNode) {
-                commentsContainer.parentNode.insertBefore(editor, commentsContainer.nextSibling);
-            } else {
-                modalEl.appendChild(editor);
-            }
-
-            return editor;
-        };
-
-        const initViewCaseInlineCommentEditor = ({ modalEl, contentHtml }) => {
-            const editorWrapper = ensureViewCaseInlineEditor(modalEl);
-            if (!editorWrapper) return;
-            const textarea = editorWrapper.querySelector('#module-view-case-inline-comment-content');
-            if (!textarea) return;
-
-            removeViewCaseInlineCommentEditor();
-            editorWrapper.style.display = 'block';
-
-            if (typeof tinymce === 'undefined') {
-                textarea.value = contentHtml || '';
-                return;
-            }
-
-            tinymce.init({
-                target: textarea,
-                height: 200,
-                menubar: false,
-                branding: false,
-                plugins: [
-                    'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
-                    'searchreplace', 'visualblocks', 'code', 'fullscreen',
-                    'insertdatetime', 'table', 'help', 'wordcount'
-                ],
-                toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
-                    'alignleft aligncenter alignright alignjustify | ' +
-                    'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
-                content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }',
-                setup(editor) {
-                    viewCaseInlineCommentEditor = editor;
-                    editor.on('init', () => {
-                        try { editor.setContent(contentHtml || ''); } catch (e) { /* ignore */ }
-                        try { editor.focus(); } catch (e) { /* ignore */ }
-                    });
-                    editor.on('remove', () => {
-                        if (viewCaseInlineCommentEditor === editor) {
-                            viewCaseInlineCommentEditor = null;
-                        }
-                    });
-                },
-            });
-        };
-
-        const loadTestCaseCommentsForViewModal = async (testCaseId) => {
-            const modal = document.querySelector('[data-role="module-add-case-modal"]');
-            if (!modal) return;
-            const row = modal.querySelector('#module-view-case-comments-row');
-            const container = modal.querySelector('#module-view-case-comments');
-            const hiddenId = modal.querySelector('#module-view-case-comment-case-id');
-            if (!row || !container) return;
-
-            try {
-                const addForm = modal.querySelector('#module-view-case-add-comment-form');
-                if (addForm) addForm.style.display = 'none';
-                const inlineEditor = modal.querySelector('#module-view-case-inline-comment-editor');
-                if (inlineEditor) inlineEditor.style.display = 'none';
-                removeViewCaseCommentEditor();
-                removeViewCaseInlineCommentEditor();
-            } catch (e) { /* ignore */ }
-
-            if (!testCaseId) {
-                setViewCaseCommentsVisible(modal, false);
-                return;
-            }
-
-            activeViewCaseId = String(testCaseId);
-            if (hiddenId) hiddenId.value = String(testCaseId);
-
-            setViewCaseCommentsVisible(modal, true);
-            container.innerHTML = '<div class="comment-empty">Loading comments…</div>';
-
-            try {
-                const url = `/api/core/test-case-comments/?test_case=${encodeURIComponent(String(testCaseId))}`;
-                const resp = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
-                if (!resp.ok) {
-                    container.innerHTML = '<div class="comment-empty">Failed to load comments.</div>';
-                    return;
-                }
-                const comments = await resp.json();
-                const appElement = document.getElementById('automation-app');
-                const currentUserId = appElement && appElement.dataset.currentUserId !== 'null'
-                    ? parseInt(appElement.dataset.currentUserId, 10)
-                    : null;
-
-                viewCaseCommentsCache = new Map();
-                const stash = (c) => {
-                    if (!c || !c.id) return;
-                    viewCaseCommentsCache.set(String(c.id), c);
-                    if (Array.isArray(c.replies)) {
-                        c.replies.forEach(stash);
-                    }
-                };
-                (Array.isArray(comments) ? comments : []).forEach(stash);
-
-                const renderComment = (comment, isReply = false) => {
-                    const canEdit = currentUserId && comment.user === currentUserId;
-                    const editBtn = canEdit ? `
-                        <button type="button" class="comment-action-btn" data-action="view-case-edit-comment" data-comment-id="${escapeHtml(String(comment.id || ''))}" title="Edit"><span>✏️</span></button>` : '';
-                    const deleteBtn = canEdit ? `
-                        <button type="button" class="comment-action-btn" data-action="view-case-delete-comment" data-comment-id="${escapeHtml(String(comment.id || ''))}" title="Delete"><span>🗑️</span></button>` : '';
-
-                    const attachBtn = `
-                        <button type="button" class="comment-action-btn" data-action="view-case-attach-comment" data-comment-id="${escapeHtml(String(comment.id || ''))}" title="Attach file"><span>📎</span></button>`;
-
-                    const isLiked = !!comment.user_has_liked;
-                    const likesCount = typeof comment.likes_count === 'number' ? comment.likes_count : 0;
-                    const thumbsUpIconStyle = isLiked ? '' : 'filter: grayscale(1); opacity: 0.45;';
-                    const thumbsUpCountStyle = (isLiked && likesCount > 0) ? 'margin-left: 4px; font-weight: 600;' : 'display: none;';
-
-                    const userReaction = comment.user_reaction || '';
-                    const reactionsSummary = Array.isArray(comment.reactions_summary) ? comment.reactions_summary : [];
-                    const reactionsSummaryText = reactionsSummary
-                        .filter((x) => x && x.reaction && typeof x.count === 'number' && x.count > 0)
-                        .map((x) => `${x.reaction} ${x.count}`)
-                        .join(' ');
-                    const reactionDisplayText = reactionsSummaryText || '😊';
-
-                    const repliesHtml = (!isReply && comment.replies && comment.replies.length > 0)
-                        ? `<div class="comment-replies">${comment.replies.map(reply => renderComment(reply, true)).join('')}</div>`
-                        : '';
-
-                    const atts = Array.isArray(comment.attachments) ? comment.attachments : [];
-
-                    const attachmentStorageTag = (att) => {
-                        if (!att) return '';
-                        const raw = (att.storage_backend || att.storage || '').toString().toLowerCase();
-                        if (raw === 's3') return 'S3';
-                        if (raw === 'local') return 'Local';
-                        if (raw) return raw.toUpperCase();
-                        return '';
-                    };
-                    const images = atts.filter((a) => a && a.url && isImageAttachment(a));
-                    const videos = atts.filter((a) => a && a.url && isVideoAttachment(a));
-                    const docs = atts.filter((a) => {
-                        if (!a || !a.url) return false;
-                        return !(isImageAttachment(a) || isVideoAttachment(a));
-                    });
-
-                    const imagesHtml = images.length
-                        ? `<div class="tc-attachments-grid" style="margin-top: 10px;">${images.map((a) => {
-                            const url = String(a.url || '');
-                            const name = String(a.original_name || 'Attachment');
-                            const storageTag = attachmentStorageTag(a);
-                            const title = storageTag ? `${name} (${storageTag})` : name;
-                            return `
-                                <a class="tc-attachment-tile" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="${escapeHtml(title)}">
-                                    <img class="tc-attachment-thumb" src="${escapeHtml(url)}" alt="${escapeHtml(name)}" loading="lazy">
-                                </a>
-                            `;
-                        }).join('')}</div>`
-                        : '';
-
-                    const videosHtml = videos.length
-                        ? `<div style="margin-top: 10px;">${videos.map((a) => {
-                            const url = String(a.url || '');
-                            const name = String(a.original_name || 'Attachment');
-                            const storageTag = attachmentStorageTag(a);
-                            return `
-                                <div style="margin-bottom: 10px;">
-                                    <div style="margin-bottom: 6px;">
-                                        <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(name)}</a>
-                                        ${storageTag ? `<span style="margin-left: 8px; font-weight: 700;">(${escapeHtml(storageTag)})</span>` : ''}
-                                    </div>
-                                    <video controls style="max-width: 100%;" src="${escapeHtml(url)}"></video>
-                                </div>
-                            `;
-                        }).join('')}</div>`
-                        : '';
-
-                    const docsHtml = docs.length
-                        ? `<div style="margin-top: 10px;">${docs.map((a) => {
-                            const url = String(a.url || '');
-                            const name = String(a.original_name || 'Attachment');
-                            const label = attachmentTypeLabel(a);
-                            const storageTag = attachmentStorageTag(a);
-                            return `
-                                <div style="margin-bottom: 6px;">
-                                    <span style="display:inline-block; min-width: 52px; font-weight: 700;">${escapeHtml(label)}</span>
-                                    <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(name)}</a>
-                                    ${storageTag ? `<span style="margin-left: 8px; font-weight: 700;">(${escapeHtml(storageTag)})</span>` : ''}
-                                </div>
-                            `;
-                        }).join('')}</div>`
-                        : '';
-
-                    const attachmentsBlock = (atts.length)
-                        ? `
-                            <div class="automation-section-separator" aria-hidden="true" style="margin: 10px 0 8px;"></div>
-                            <div>${imagesHtml}${videosHtml}${docsHtml}</div>
-                        `
-                        : '';
-
-                    return `
-                        <div class="comment-item ${isReply ? 'comment-reply' : ''}" data-comment-id="${escapeHtml(String(comment.id || ''))}" data-comment-user="${escapeHtml(String(comment.user || ''))}">
-                            <div class="comment-header">
-                                <span class="comment-author">${escapeHtml(comment.user_name || 'Unknown')}${comment.is_edited ? ' (edited)' : ''}</span>
-                                <span class="comment-date">${escapeHtml(formatDateTime(comment.created_at))}</span>
-                            </div>
-                            <div class="comment-content" data-comment-content>${renderCommentPlainHtml(comment.content || '')}</div>
-                            <div class="comment-actions">
-                                ${!isReply ? `<button type="button" class="comment-action-btn" data-action="view-case-reply-comment" data-comment-id="${escapeHtml(String(comment.id || ''))}" title="Reply"><span>↩️</span></button>` : ''}
-                                <button type="button" class="comment-action-btn" data-action="view-case-thumbs-up-comment" data-comment-id="${escapeHtml(String(comment.id || ''))}" data-liked="${isLiked ? 'true' : 'false'}" data-likes-count="${escapeHtml(String(likesCount))}" aria-pressed="${isLiked ? 'true' : 'false'}" title="Thumbs Up">
-                                    <span data-role="thumbs-up-icon" style="${thumbsUpIconStyle}">👍</span>
-                                    <span data-role="thumbs-up-count" style="${thumbsUpCountStyle}">${escapeHtml(String(likesCount))}</span>
-                                </button>
-                                <button type="button" class="comment-action-btn" data-action="view-case-add-reaction-comment" data-comment-id="${escapeHtml(String(comment.id || ''))}" data-user-reaction="${escapeHtml(String(userReaction))}" title="Add Reaction">
-                                    <span data-role="reaction-display">${escapeHtml(reactionDisplayText)}</span>
-                                </button>
-                                ${attachBtn}
-                                ${editBtn}
-                                ${deleteBtn}
-                            </div>
-                            ${attachmentsBlock}
-                            ${repliesHtml}
-                        </div>
-                    `;
-                };
-
-                if (!Array.isArray(comments) || comments.length === 0) {
-                    container.innerHTML = '<div class="comment-empty">No comments yet. Be the first to comment!</div>';
-                } else {
-                    container.innerHTML = comments.map((c) => renderComment(c, false)).join('');
-                }
-            } catch (e) {
-                container.innerHTML = '<div class="comment-empty">Error loading comments.</div>';
-            }
-        };
-
-        // Test Case Details: Attachments
-        const getAttachmentExt = (name) => {
-            try {
-                const n = String(name || '');
-                const idx = n.lastIndexOf('.');
-                if (idx === -1) return '';
-                return n.slice(idx + 1).toLowerCase();
-            } catch (e) { return ''; }
-        };
-
-        const isImageAttachment = (att) => {
-            const ct = (att && att.content_type) ? String(att.content_type).toLowerCase() : '';
-            if (ct.startsWith('image/')) return true;
-            const ext = getAttachmentExt(att && att.original_name);
-            return ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
-        };
-
-        const isVideoAttachment = (att) => {
-            const ct = (att && att.content_type) ? String(att.content_type).toLowerCase() : '';
-            if (ct.startsWith('video/')) return true;
-            const ext = getAttachmentExt(att && att.original_name);
-            return ['mp4', 'webm', 'mov'].includes(ext);
-        };
-
-        const attachmentTypeLabel = (att) => {
-            const ext = getAttachmentExt(att && att.original_name);
-            if (!ext) return 'FILE';
-            return String(ext).toUpperCase();
-        };
-
-        const renderViewCaseAttachments = (modalEl, attachments) => {
-            if (!modalEl) return;
-            const container = modalEl.querySelector('#module-view-case-attachments');
-            if (!container) return;
-
-            const list = Array.isArray(attachments) ? attachments : [];
-            if (!list.length) {
-                container.innerHTML = '<div class="comment-empty">No attachments yet.</div>';
-                return;
-            }
-
-            const images = list.filter((att) => {
-                const url = att && att.url ? String(att.url) : '';
-                return Boolean(url && isImageAttachment(att));
-            });
-
-            const nonImages = list.filter((att) => {
-                const url = att && att.url ? String(att.url) : '';
-                return !Boolean(url && isImageAttachment(att));
-            });
-
-            const parts = [];
-
-            if (images.length) {
-                const tiles = images.map((att) => {
-                    const url = att && att.url ? String(att.url) : '';
-                    const name = att && att.original_name ? String(att.original_name) : 'Attachment';
-                    return `
-                        <a class="tc-attachment-tile" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="${escapeHtml(name)}">
-                            <img class="tc-attachment-thumb" src="${escapeHtml(url)}" alt="${escapeHtml(name)}" loading="lazy">
-                        </a>
-                    `;
-                }).join('');
-
-                parts.push(`<div class="tc-attachments-grid">${tiles}</div>`);
-            }
-
-            if (nonImages.length) {
-                const rest = nonImages.map((att) => {
-                    const url = att && att.url ? String(att.url) : '';
-                    const name = att && att.original_name ? String(att.original_name) : 'Attachment';
-                    const when = att && att.created_at ? formatDateTime(att.created_at) : '';
-
-                    if (url && isVideoAttachment(att)) {
-                        return `
-                            <div class="comment-item" style="margin-bottom: 12px;">
-                                <div class="comment-header">
-                                    <span class="comment-author">${escapeHtml(name)}</span>
-                                    <span class="comment-date">${escapeHtml(when)}</span>
-                                </div>
-                                <div style="margin-top: 8px;">
-                                    <a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open in new tab</a>
-                                </div>
-                                <div style="margin-top: 10px;">
-                                    <video controls style="max-width: 100%;" src="${escapeHtml(url)}"></video>
-                                </div>
-                            </div>
-                        `;
-                    }
-
-                    const label = attachmentTypeLabel(att);
-                    return `
-                        <div class="comment-item" style="margin-bottom: 10px;">
-                            <div class="comment-header">
-                                <span class="comment-author">
-                                    <span style="display:inline-block; min-width: 52px; font-weight: 700;">${escapeHtml(label)}</span>
-                                    <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(name)}</a>
-                                </span>
-                                <span class="comment-date">${escapeHtml(when)}</span>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-
-                parts.push(rest);
-            }
-
-            container.innerHTML = parts.join('');
-        };
-
-        const loadTestCaseAttachmentsForViewModal = async (testCaseId) => {
-            const modal = document.querySelector('[data-role="module-add-case-modal"]');
-            if (!modal) return;
-            const row = modal.querySelector('#module-view-case-attachments-row');
-            const container = modal.querySelector('#module-view-case-attachments');
-            if (!row || !container) return;
-
-            if (!testCaseId) {
-                setViewCaseAttachmentsVisible(modal, false);
-                return;
-            }
-
-            setViewCaseAttachmentsVisible(modal, true);
-            container.innerHTML = '<div class="comment-empty">Loading attachments…</div>';
-
-            try {
-                const url = `/api/core/test-cases/${encodeURIComponent(String(testCaseId))}/attachments/`;
-                const resp = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
-                if (!resp.ok) {
-                    container.innerHTML = '<div class="comment-empty">Failed to load attachments.</div>';
-                    return;
-                }
-                const data = await resp.json();
-                renderViewCaseAttachments(modal, data);
-            } catch (e) {
-                container.innerHTML = '<div class="comment-empty">Error loading attachments.</div>';
-            }
-        };
-
-        const uploadTestCaseAttachmentsForViewModal = async (testCaseId, fileList) => {
-            const modal = document.querySelector('[data-role="module-add-case-modal"]');
-            if (!modal) return;
-            if (!testCaseId) {
-                setStatus('Invalid test case.', 'error');
-                return;
-            }
-
-            const files = Array.from(fileList || []).filter(Boolean);
-            if (!files.length) return;
-
-            try {
-                const fd = new FormData();
-                files.forEach((f) => fd.append('files', f));
-                const url = `/api/core/test-cases/${encodeURIComponent(String(testCaseId))}/attachments/`;
-                const resp = await fetch(url, {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: { 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
-                    body: fd,
-                });
-                if (!resp.ok) {
-                    const errorData = await resp.json().catch(() => null);
-                    if (errorData) {
-                        setStatus(errorData.detail || (errorData.files || 'Failed to upload attachment.'), 'error');
-                    } else {
-                        const text = await resp.text().catch(() => '');
-                        const suffix = text ? ` (HTTP ${resp.status})` : ` (HTTP ${resp.status})`;
-                        // Avoid dumping full HTML into the toast; keep it short.
-                        const preview = text ? String(text).replace(/\s+/g, ' ').slice(0, 160) : '';
-                        setStatus(preview ? `Upload failed${suffix}: ${preview}` : `Upload failed${suffix}.`, 'error');
-                    }
-                    return;
-                }
-                setStatus('Attachment uploaded successfully.', 'success');
-                const data = await resp.json().catch(() => null);
-                if (data) renderViewCaseAttachments(modal, data);
-                else await loadTestCaseAttachmentsForViewModal(testCaseId);
-            } catch (e) {
-                setStatus('Error uploading attachment.', 'error');
-            }
-        };
-
-        const uploadTestCaseCommentAttachmentsForViewModal = async (commentId, fileList) => {
-            const modal = document.querySelector('[data-role="module-add-case-modal"]');
-            if (!modal) return;
-            if (!commentId) {
-                setStatus('Invalid comment.', 'error');
-                return;
-            }
-
-            const files = Array.from(fileList || []).filter(Boolean);
-            if (!files.length) return;
-
-            try {
-                const fd = new FormData();
-                files.forEach((f) => fd.append('files', f));
-                const url = `/api/core/test-case-comments/${encodeURIComponent(String(commentId))}/attachments/`;
-                const resp = await fetch(url, {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: { 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
-                    body: fd,
-                });
-                if (!resp.ok) {
-                    const errorData = await resp.json().catch(() => null);
-                    if (errorData) {
-                        setStatus(errorData.detail || (errorData.files || 'Failed to upload attachment.'), 'error');
-                    } else {
-                        const text = await resp.text().catch(() => '');
-                        const suffix = ` (HTTP ${resp.status})`;
-                        const preview = text ? String(text).replace(/\s+/g, ' ').slice(0, 160) : '';
-                        setStatus(preview ? `Upload failed${suffix}: ${preview}` : `Upload failed${suffix}.`, 'error');
-                    }
-                    return;
-                }
-
-                setStatus('Attachment uploaded successfully.', 'success');
-                if (activeViewCaseId) {
-                    await loadTestCaseCommentsForViewModal(activeViewCaseId);
-                }
-            } catch (e) {
-                setStatus('Error uploading attachment.', 'error');
-            }
-        };
-
-        // View Scenario: Attachments
-        const setViewScenarioAttachmentsVisible = (modalEl, visible) => {
-            try {
-                if (!modalEl) return;
-                const row = modalEl.querySelector('#module-view-scenario-attachments-row');
-                if (!row) return;
-                row.hidden = !visible;
-                try { row.style.display = visible ? 'flex' : 'none'; } catch (e) { /* ignore */ }
-            } catch (e) { /* ignore */ }
-        };
-
-        const renderViewScenarioAttachments = (modalEl, attachments) => {
-            if (!modalEl) return;
-            const container = modalEl.querySelector('#module-view-scenario-attachments');
-            if (!container) return;
-            const list = Array.isArray(attachments) ? attachments : [];
-
-            if (!list.length) {
-                container.innerHTML = '<div class="comment-empty">No attachments yet.</div>';
-                return;
-            }
-
-            const attachmentStorageTag = (att) => {
-                if (!att) return '';
-                const raw = (att.storage_backend || att.storage || '').toString().toLowerCase();
-                if (raw === 's3') return 'S3';
-                if (raw === 'local') return 'Local';
-                if (raw) return raw.toUpperCase();
-                return '';
-            };
-
-            const images = list.filter((a) => a && a.url && isImageAttachment(a));
-            const nonImages = list.filter((a) => a && a.url && !isImageAttachment(a));
-
-            const parts = [];
-            if (images.length) {
-                const tiles = images.map((att) => {
-                    const url = att && att.url ? String(att.url) : '';
-                    const name = att && att.original_name ? String(att.original_name) : 'Attachment';
-                    const storageTag = attachmentStorageTag(att);
-                    const title = storageTag ? `${name} (${storageTag})` : name;
-                    return `
-                        <a class="tc-attachment-tile" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="${escapeHtml(title)}">
-                            <img class="tc-attachment-thumb" src="${escapeHtml(url)}" alt="${escapeHtml(name)}" loading="lazy">
-                        </a>
-                    `;
-                }).join('');
-                parts.push(`<div class="tc-attachments-grid">${tiles}</div>`);
-            }
-
-            if (nonImages.length) {
-                const rest = nonImages.map((att) => {
-                    const url = att && att.url ? String(att.url) : '';
-                    const name = att && att.original_name ? String(att.original_name) : 'Attachment';
-                    const when = att && att.created_at ? formatDateTime(att.created_at) : '';
-                    const storageTag = attachmentStorageTag(att);
-
-                    if (url && isVideoAttachment(att)) {
-                        return `
-                            <div class="comment-item" style="margin-bottom: 12px;">
-                                <div class="comment-header">
-                                    <span class="comment-author">${escapeHtml(name)}${storageTag ? ` <span style=\"font-weight:700;\">(${escapeHtml(storageTag)})</span>` : ''}</span>
-                                    <span class="comment-date">${escapeHtml(when)}</span>
-                                </div>
-                                <div style="margin-top: 8px;">
-                                    <a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open in new tab</a>
-                                </div>
-                                <div style="margin-top: 10px;">
-                                    <video controls style="max-width: 100%;" src="${escapeHtml(url)}"></video>
-                                </div>
-                            </div>
-                        `;
-                    }
-
-                    const label = attachmentTypeLabel(att);
-                    return `
-                        <div class="comment-item" style="margin-bottom: 10px;">
-                            <div class="comment-header">
-                                <span class="comment-author">
-                                    <span style="display:inline-block; min-width: 52px; font-weight: 700;">${escapeHtml(label)}</span>
-                                    <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(name)}</a>
-                                    ${storageTag ? `<span style=\"margin-left: 8px; font-weight: 700;\">(${escapeHtml(storageTag)})</span>` : ''}
-                                </span>
-                                <span class="comment-date">${escapeHtml(when)}</span>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-                parts.push(rest);
-            }
-
-            container.innerHTML = parts.join('');
-        };
-
-        const loadTestScenarioAttachmentsForViewModal = async (scenarioId) => {
-            const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
-            if (!modal) return;
-            const row = modal.querySelector('#module-view-scenario-attachments-row');
-            const container = modal.querySelector('#module-view-scenario-attachments');
-            if (!row || !container) return;
-
-            if (!scenarioId) {
-                setViewScenarioAttachmentsVisible(modal, false);
-                return;
-            }
-
-            setViewScenarioAttachmentsVisible(modal, true);
-            container.innerHTML = '<div class="comment-empty">Loading attachments…</div>';
-
-            try {
-                const url = `/api/core/test-scenarios/${encodeURIComponent(String(scenarioId))}/attachments/`;
-                const resp = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
-                if (!resp.ok) {
-                    container.innerHTML = '<div class="comment-empty">Failed to load attachments.</div>';
-                    return;
-                }
-                const data = await resp.json();
-                renderViewScenarioAttachments(modal, data);
-            } catch (e) {
-                container.innerHTML = '<div class="comment-empty">Error loading attachments.</div>';
-            }
-        };
-
-        // expose so other bundles (e.g., data_management.js) can reuse it
-        try { window.loadTestScenarioAttachmentsForViewModal = loadTestScenarioAttachmentsForViewModal; } catch (e) { /* ignore */ }
-
-        const uploadTestScenarioAttachmentsForViewModal = async (scenarioId, fileList) => {
-            const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
-            if (!modal) return;
-            if (!scenarioId) {
-                setStatus('Invalid scenario.', 'error');
-                return;
-            }
-
-            const files = Array.from(fileList || []).filter(Boolean);
-            if (!files.length) return;
-
-            try {
-                const fd = new FormData();
-                files.forEach((f) => fd.append('files', f));
-                const url = `/api/core/test-scenarios/${encodeURIComponent(String(scenarioId))}/attachments/`;
-                const resp = await fetch(url, {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: { 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
-                    body: fd,
-                });
-                if (!resp.ok) {
-                    const errorData = await resp.json().catch(() => null);
-                    if (errorData) {
-                        setStatus(errorData.detail || (errorData.files || 'Failed to upload attachment.'), 'error');
-                    } else {
-                        const text = await resp.text().catch(() => '');
-                        const suffix = ` (HTTP ${resp.status})`;
-                        const preview = text ? String(text).replace(/\s+/g, ' ').slice(0, 160) : '';
-                        setStatus(preview ? `Upload failed${suffix}: ${preview}` : `Upload failed${suffix}.`, 'error');
-                    }
-                    return;
-                }
-                setStatus('Attachment uploaded successfully.', 'success');
-                const data = await resp.json().catch(() => null);
-                if (data) renderViewScenarioAttachments(modal, data);
-                else await loadTestScenarioAttachmentsForViewModal(scenarioId);
-            } catch (e) {
-                setStatus('Error uploading attachment.', 'error');
-            }
         };
 
         // Normalize scenario shape returned by the API so client-side code can
@@ -2635,85 +1474,12 @@
 
         const getSelectedPlan = () => state.plans.find((plan) => Number(plan.id) === Number(state.selectedPlanId)) || null;
 
-        const findScenarioById = (scenarioId) => {
-            if (!scenarioId && scenarioId !== 0) return null;
-            const sid = toNumericId(scenarioId);
-            if (sid === null || sid === undefined) return null;
-            for (const plan of (state.plans || [])) {
-                if (!plan || !Array.isArray(plan.scenarios)) continue;
-                const found = plan.scenarios.find((s) => Number(s.id) === Number(sid));
-                if (found) return found;
-            }
-            return null;
-        };
-
         const getSelectedScenario = () => {
             const plan = getSelectedPlan();
             if (!plan || !Array.isArray(plan.scenarios)) {
                 return null;
             }
             return plan.scenarios.find((scenario) => Number(scenario.id) === Number(state.selectedScenarioId)) || null;
-        };
-
-        const applyScenarioAutomationToCaseModal = ({ modalEl, scenario, scenarioId, isDetails = false } = {}) => {
-            try {
-                if (!modalEl) return;
-                const resolvedScenario = scenario || findScenarioById(scenarioId);
-                const isAutomated = !(resolvedScenario && Object.prototype.hasOwnProperty.call(resolvedScenario, 'is_automated') && resolvedScenario.is_automated === false);
-
-                const titleInput = document.getElementById('module-add-case-title');
-                const descInput = document.getElementById('module-add-case-description');
-                const titleRow = titleInput && titleInput.closest ? titleInput.closest('.form-row') : null;
-                const descRow = descInput && descInput.closest ? descInput.closest('.form-row') : null;
-                const commentsRow = modalEl.querySelector('#module-view-case-comments-row');
-                const fieldset = modalEl.querySelector('form#module-add-case-form fieldset') || modalEl.querySelector('fieldset');
-                if (fieldset) {
-                    const rows = Array.from(fieldset.querySelectorAll('.form-row'));
-                    rows.forEach((row) => {
-                        if (!row) return;
-                        // Comments are a details-view feature; never show them in Add/Update.
-                        if (commentsRow && (row === commentsRow || commentsRow.contains(row))) {
-                            const hideComments = !isDetails;
-                            row.hidden = hideComments;
-                            try { row.style.display = hideComments ? 'none' : 'flex'; } catch (e) { /* ignore */ }
-                            return;
-                        }
-                        const keep = (titleRow && row === titleRow) || (descRow && row === descRow);
-                        const hide = !isAutomated && !keep;
-                        row.hidden = hide;
-                        try { row.style.display = hide ? 'none' : ''; } catch (e) { /* ignore */ }
-                    });
-                }
-
-                // Disable API request selection when scenario is not automated.
-                try {
-                    const apiBtn = document.getElementById('module-open-api-explorer');
-                    if (apiBtn) {
-                        apiBtn.disabled = !isAutomated;
-                        apiBtn.setAttribute('aria-disabled', (!isAutomated).toString());
-                        apiBtn.title = !isAutomated
-                            ? 'Disabled: this scenario is not for automation.'
-                            : 'Choose related API request';
-                    }
-                } catch (e) { /* ignore */ }
-
-                // Position the comments row based on scenario automation status:
-                // - automated: directly below "Selected API Request" row
-                // - not automated: directly below Description
-                try {
-                    if (commentsRow && isDetails) {
-                        const apiLabel = (modalEl.querySelector('#module-related-api-request-label') || document.getElementById('module-related-api-request-label'));
-                        const apiRow = apiLabel && apiLabel.closest ? apiLabel.closest('.form-row') : null;
-                        const anchorRow = isAutomated ? apiRow : descRow;
-                        if (anchorRow && anchorRow.insertAdjacentElement) {
-                            // Avoid re-inserting if it's already in the right place.
-                            if (anchorRow.nextElementSibling !== commentsRow) {
-                                anchorRow.insertAdjacentElement('afterend', commentsRow);
-                            }
-                        }
-                    }
-                } catch (e) { /* ignore */ }
-            } catch (e) { /* ignore */ }
         };
 
         const getScenarioModuleId = (scenario) => {
@@ -3126,16 +1892,6 @@
                             if (sid && typeof loadDependencyOptions === 'function') {
                                 loadDependencyOptions(sid);
                             }
-                            try {
-                                const testcaseId = document.getElementById('module-add-case-testcase-id');
-                                if (testcaseId) testcaseId.value = '';
-                            } catch (_e) { /* ignore */ }
-                            try {
-                                const descEl = document.getElementById('module-add-case-description');
-                                if (descEl) descEl.value = '';
-                            } catch (_e) { /* ignore */ }
-                            try { applyCaseModalLayout(caseModal, { isDetails: false }); } catch (_e) { /* ignore */ }
-                            try { initCaseDescriptionEditor({ readOnly: false }); } catch (_e) { /* ignore */ }
                             caseModal.hidden = false;
                             body.classList.add('automation-modal-open');
                             const titleInput = document.getElementById('module-add-case-title');
@@ -4248,8 +3004,7 @@
             const filtered = scenarios.filter((s) => {
                 if (q) {
                     const lower = q;
-                    const formattedDescription = htmlToFormattedText(s.description || '');
-                    const match = (s.title || '').toLowerCase().includes(lower) || formattedDescription.toLowerCase().includes(lower);
+                    const match = (s.title || '').toLowerCase().includes(lower) || (s.description || '').toLowerCase().includes(lower) || (Array.isArray(s.tags) ? s.tags.join(' ').toLowerCase().includes(lower) : false);
                     if (!match) return false;
                 }
                 if (moduleFilterVal) {
@@ -4281,7 +3036,7 @@
                     return `
                         <tr data-scenario-id="${scenario.id}">
                             <td>${escapeHtml(scenario.title || '')}</td>
-                            <td style="white-space: pre-wrap;">${escapeHtml(htmlToFormattedText(scenario.description || ''))}</td>
+                            <td>${escapeHtml(scenario.description || '')}</td>
                             <td>${escapeHtml(moduleLabel)}</td>
                             <td>${escapeHtml(formatDateTime(scenario.created_at || null))}</td>
                             <td>${escapeHtml(formatDateTime(scenario.updated_at || null))}</td>
@@ -4289,6 +3044,8 @@
                             <td>
                                 <div class="table-action-group">
                                     <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>
+                                    <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>
+                                    <button type="button" class="action-button" data-action="comment-scenario" data-scenario-id="${scenario.id}">Comment</button>
                                     <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>
                                 </div>
                             </td>
@@ -4364,6 +3121,7 @@
                                                 <td>
                                                     <div class="table-action-group">
                                                         <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>
+                                                        <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>
                                                         <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>
                                                     </div>
                                                 </td>
@@ -4396,6 +3154,7 @@
                                             <td>
                                                 <div class="table-action-group">
                                                     <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>
+                                                    <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>
                                                     <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>
                                                 </div>
                                             </td>
@@ -4469,8 +3228,12 @@
                     els.caseSummary.innerHTML = '<p class="empty">Loading test cases…</p>';
                 } else {
                     const caseCount = scenario.cases.length;
+                    const pre = scenario.preconditions ? escapeHtml(scenario.preconditions) : '—';
+                    const post = scenario.postconditions ? escapeHtml(scenario.postconditions) : '—';
                     els.caseSummary.innerHTML = `
                         <strong>${caseCount} test case${caseCount === 1 ? '' : 's'} in scope.</strong>
+                        <div>Preconditions: ${pre}</div>
+                        <div>Postconditions: ${post}</div>
                     `;
                 }
             }
@@ -4546,7 +3309,7 @@
                             cases = cases.filter((c) => {
                                 const idLabel = (c.testcase_id || String(c.id || '')).toLowerCase();
                                 const title = (c.title || '').toLowerCase();
-                                const desc = htmlToFormattedText(c.description || '').toLowerCase();
+                                const desc = (c.description || '').toLowerCase();
                                 return idLabel.includes(lower) || title.includes(lower) || desc.includes(lower);
                             });
                         }
@@ -4559,7 +3322,7 @@
                 const rows = cases.map((testCase) => {
                     const idLabel = escapeHtml(testCase.testcase_id || testCase.id || '');
                     const title = escapeHtml(testCase.title || 'Untitled case');
-                    const desc = escapeHtml(htmlToFormattedText(testCase.description || ''));
+                    const desc = escapeHtml(testCase.description || '');
                     const created = escapeHtml(formatDateTime(testCase.created_at || null));
                     const updated = escapeHtml(formatDateTime(testCase.updated_at || null));
                     const requiresDependency = Boolean(testCase.requires_dependency);
@@ -4568,13 +3331,7 @@
                     const dependencyKeyAttr = escapeHtml(testCase.dependency_response_key || '');
                     const expectedAttr = escapeHtml(JSON.stringify(testCase.expected_results || []));
                     const responseEncryptedAttr = testCase.is_response_encrypted ? 'true' : 'false';
-                    const scenarioIdForCase = (testCase.scenario || testCase.scenario_id || (scenario && scenario.id) || null);
-                    const scenarioForCase = findScenarioById(scenarioIdForCase);
-                    const scenarioIsAutomated = !(scenarioForCase && Object.prototype.hasOwnProperty.call(scenarioForCase, 'is_automated') && scenarioForCase.is_automated === false);
                     const runBlockedTitle = 'Run disabled: this test case requires a dependency to execute individually.';
-                    const runNotAutomatedTitle = requiresDependency
-                        ? 'Run disabled: this scenario is not for automation, and this test case requires a dependency.'
-                        : 'Run disabled: this scenario is not for automation.';
                     const runAllowedTitle = 'Run related API request';
                     return `
                         <tr data-case-id="${testCase.id || ''}" data-scenario-id="${testCase.scenario || testCase.scenario_id || ''}" data-requires-dependency="${requiresDependencyAttr}" data-dependency-id="${dependencyIdAttr}" data-dependency-key="${dependencyKeyAttr}" data-expected-results="${expectedAttr}" data-response-encrypted="${responseEncryptedAttr}">
@@ -4586,18 +3343,14 @@
                             </td>
                             <td>${idLabel}</td>
                             <td>${title}</td>
-                            <td style="white-space: pre-wrap;">${desc}</td>
+                            <td>${desc}</td>
                             <td>${created}</td>
                             <td>${updated}</td>
                             <td>
                                 <div class="table-action-group">
                                     <button type="button" class="action-button" data-action="view-case" data-case-id="${testCase.id || ''}" data-related-api-request-name="${escapeHtml(testCase.related_api_request_name || '')}">View</button>
                                     <button type="button" class="action-button" data-action="edit-case" data-case-id="${testCase.id || ''}" data-related-api-request-name="${escapeHtml(testCase.related_api_request_name || '')}">Edit</button>
-                                    ${testCase.related_api_request ? `<button type="button" class="action-button" data-action="run-case" data-case-id="${testCase.id || ''}" data-request-id="${testCase.related_api_request || ''}" data-expected-results="${expectedAttr}" data-response-encrypted="${responseEncryptedAttr}" data-requires-dependency="${requiresDependencyAttr}" data-dependency-id="${dependencyIdAttr}" data-dependency-key="${dependencyKeyAttr}" ${(!scenarioIsAutomated)
-                            ? 'disabled aria-disabled="true" title="' + escapeHtml(runNotAutomatedTitle) + '"'
-                            : (requiresDependency
-                                ? 'disabled aria-disabled="true" data-dependency-tooltip="Requires dependency" title="' + escapeHtml(runBlockedTitle) + '"'
-                                : 'title="' + escapeHtml(runAllowedTitle) + '" onclick="if (window.__automationTestcaseControls) { window.__automationTestcaseControls.runCaseFromElement(this); }"')}>Run</button>` : ''}
+                                    ${testCase.related_api_request ? `<button type="button" class="action-button" data-action="run-case" data-case-id="${testCase.id || ''}" data-request-id="${testCase.related_api_request || ''}" data-expected-results="${expectedAttr}" data-response-encrypted="${responseEncryptedAttr}" data-requires-dependency="${requiresDependencyAttr}" data-dependency-id="${dependencyIdAttr}" data-dependency-key="${dependencyKeyAttr}" ${requiresDependency ? 'disabled aria-disabled="true" data-dependency-tooltip="Requires dependency" title="' + escapeHtml(runBlockedTitle) + '"' : 'title="' + escapeHtml(runAllowedTitle) + '" onclick="if (window.__automationTestcaseControls) { window.__automationTestcaseControls.runCaseFromElement(this); }"'}>Run</button>` : ''}
                                     <button type="button" class="action-button" data-action="delete-case" data-case-id="${testCase.id || ''}" data-variant="danger">Delete</button>
                                 </div>
                             </td>
@@ -4803,11 +3556,14 @@
                 if (!tableEl || !tableEl.contains(trigger)) return; // ignore clicks outside our table
                 const action = trigger.dataset && trigger.dataset.action ? trigger.dataset.action : null;
                 if (!action) return;
-                if (!['view-scenario', 'edit-scenario', 'add-case', 'delete-scenario'].includes(action)) return;
+                if (!['view-scenario', 'edit-scenario', 'add-case', 'delete-scenario', 'comment-scenario'].includes(action)) return;
                 const sid = trigger.dataset && trigger.dataset.scenarioId ? trigger.dataset.scenarioId : null;
                 if (!sid) return;
                 ev.preventDefault();
-                if (action === 'view-scenario' || action === 'edit-scenario') {
+                if (action === 'comment-scenario') {
+                    // Open comments modal
+                    openScenarioCommentsModal(sid);
+                } else if (action === 'view-scenario' || action === 'edit-scenario') {
                     // reuse existing openPlanModal / view handlers - for simplicity
                     // fetch scenario detail and open a simple modal via existing plan modal if present
                     try {
@@ -4828,87 +3584,19 @@
                                 } else {
                                     const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
                                     if (modal) {
-                                        const automatedRow = modal.querySelector('.form-row.dependency-toggle') || modal.querySelector('.dependency-toggle');
-                                        const dialog = modal.querySelector('.automation-modal__dialog');
                                         // populate fields as a graceful fallback
-                                        const moduleInput = modal.querySelector('#module-add-scenario-module-id') || document.getElementById('module-add-scenario-module-id'); if (moduleInput) moduleInput.value = normalizedScenario.module || '';
-                                        const titleInput = modal.querySelector('#module-add-scenario-title') || document.getElementById('module-add-scenario-title'); if (titleInput) titleInput.value = normalizedScenario.title || '';
-                                        const descInput = modal.querySelector('#module-add-scenario-description') || document.getElementById('module-add-scenario-description');
-                                        if (descInput) {
-                                            const isViewMode = mode === 'view';
-
-                                            // Hard guarantee: View mode must never show/attach TinyMCE.
-                                            if (isViewMode && typeof tinymce !== 'undefined') {
-                                                try { tinymce.remove('#module-add-scenario-description'); } catch (e) { /* ignore */ }
-                                            }
-                                            if (isViewMode) {
-                                                try { descInput.classList.remove('tinymce-editor'); } catch (e) { /* ignore */ }
-                                            }
-
-                                            const rows = 12;
-                                            descInput.rows = rows;
-                                            descInput.setAttribute('rows', String(rows));
-                                            descInput.value = isViewMode ? htmlToFormattedText(normalizedScenario.description || '') : (normalizedScenario.description || '');
-                                            if (isViewMode) {
-                                                try {
-                                                    descInput.style.height = 'auto';
-                                                    descInput.style.overflowY = 'hidden';
-                                                    let minHeightPx = 0;
-                                                    try {
-                                                        const cs = window.getComputedStyle ? window.getComputedStyle(descInput) : null;
-                                                        if (cs) {
-                                                            let lineHeight = Number.parseFloat(cs.lineHeight);
-                                                            if (!Number.isFinite(lineHeight) || lineHeight <= 0) {
-                                                                const fontSize = Number.parseFloat(cs.fontSize) || 0;
-                                                                if (fontSize > 0) {
-                                                                    lineHeight = fontSize * 1.2;
-                                                                }
-                                                            }
-                                                            lineHeight = Number.isFinite(lineHeight) ? lineHeight : 0;
-                                                            const paddingTop = Number.parseFloat(cs.paddingTop) || 0;
-                                                            const paddingBottom = Number.parseFloat(cs.paddingBottom) || 0;
-                                                            if (lineHeight > 0) {
-                                                                minHeightPx = (lineHeight * 12) + paddingTop + paddingBottom;
-                                                            }
-                                                        }
-                                                    } catch (e) { /* ignore */ }
-                                                    const targetHeight = Math.max((descInput.scrollHeight + 2), minHeightPx);
-                                                    descInput.style.height = `${targetHeight}px`;
-                                                } catch (e) { /* ignore */ }
-                                            } else {
-                                                try {
-                                                    descInput.style.height = '';
-                                                    descInput.style.overflowY = '';
-                                                } catch (e) { /* ignore */ }
-                                            }
-                                        }
-                                        const isAutomated = modal.querySelector('#module-add-scenario-is-automated') || document.getElementById('module-add-scenario-is-automated'); if (isAutomated) isAutomated.checked = (typeof normalizedScenario.is_automated !== 'undefined') ? Boolean(normalizedScenario.is_automated) : true;
+                                        const moduleInput = document.getElementById('module-add-scenario-module-id'); if (moduleInput) moduleInput.value = normalizedScenario.module || '';
+                                        const titleInput = document.getElementById('module-add-scenario-title'); if (titleInput) titleInput.value = normalizedScenario.title || '';
+                                        const descInput = document.getElementById('module-add-scenario-description'); if (descInput) descInput.value = normalizedScenario.description || '';
+                                        const pre = document.getElementById('module-add-scenario-precondition'); if (pre) pre.value = normalizedScenario.preconditions || '';
+                                        const post = document.getElementById('module-add-scenario-postconditions'); if (post) post.value = normalizedScenario.postconditions || '';
+                                        const tags = document.getElementById('module-add-scenario-tags'); if (tags) tags.value = Array.isArray(normalizedScenario.tags) ? normalizedScenario.tags.join(',') : (normalizedScenario.tags || '');
+                                        const isAutomated = document.getElementById('module-add-scenario-is-automated'); if (isAutomated) isAutomated.checked = (typeof normalizedScenario.is_automated !== 'undefined') ? Boolean(normalizedScenario.is_automated) : true;
                                         // set readonly for view
                                         const readOnly = mode === 'view';
-
-                                        // View Scenario should be wider for readability.
-                                        if (dialog) {
-                                            try {
-                                                dialog.style.width = readOnly ? '80vw' : '';
-                                                dialog.style.maxWidth = readOnly ? '80vw' : '';
-                                            } catch (e) { /* ignore */ }
-                                        }
-                                        [titleInput, descInput].forEach((n) => { if (n) { n.readOnly = readOnly; n.disabled = false; } });
-                                        if (isAutomated) {
-                                            isAutomated.disabled = readOnly;
-                                            const row = (isAutomated.closest && (isAutomated.closest('.form-row') || isAutomated.closest('.dependency-toggle'))) || null;
-                                            if (row) {
-                                                row.hidden = readOnly;
-                                                try { row.style.display = readOnly ? 'none' : ''; } catch (e) { /* ignore */ }
-                                            }
-                                        }
-                                        if (automatedRow) {
-                                            automatedRow.hidden = readOnly;
-                                            try { automatedRow.style.display = readOnly ? 'none' : ''; } catch (e) { /* ignore */ }
-                                        }
+                                        [titleInput, descInput, pre, post, tags].forEach((n) => { if (n) { n.readOnly = readOnly; n.disabled = readOnly; } });
+                                        if (isAutomated) isAutomated.disabled = readOnly;
                                         const submit = modal.querySelector('button[type="submit"]'); if (submit) submit.hidden = readOnly;
-                                        const cancelBtn = modal.querySelector('form#module-add-scenario-form [data-action="close-module-add-scenario-modal"]');
-                                        if (cancelBtn) cancelBtn.hidden = readOnly;
                                         modal.hidden = false; body.classList.add('automation-modal-open');
                                     }
                                 }
@@ -4924,31 +3612,7 @@
                     // open add case modal and prefill scenario id
                     const caseModal = document.querySelector('[data-role="module-add-case-modal"]');
                     if (caseModal) {
-                        try {
-                            activeViewCaseId = null;
-                            viewCaseCommentsCache = new Map();
-                            removeViewCaseCommentEditor();
-                            removeViewCaseInlineCommentEditor();
-                            setViewCaseCommentsVisible(caseModal, false);
-                            const addForm = caseModal.querySelector('#module-view-case-add-comment-form');
-                            if (addForm) addForm.style.display = 'none';
-                            const comments = caseModal.querySelector('#module-view-case-comments');
-                            if (comments) comments.innerHTML = '';
-                            const inlineEditor = caseModal.querySelector('#module-view-case-inline-comment-editor');
-                            if (inlineEditor) inlineEditor.style.display = 'none';
-                        } catch (e) { /* ignore */ }
                         const hid = document.getElementById('module-add-case-scenario-id'); if (hid) hid.value = sid;
-                        try { applyScenarioAutomationToCaseModal({ modalEl: caseModal, scenarioId: sid, isDetails: false }); } catch (e) { /* ignore */ }
-                        try {
-                            const testcaseId = document.getElementById('module-add-case-testcase-id');
-                            if (testcaseId) testcaseId.value = '';
-                        } catch (e) { /* ignore */ }
-                        try {
-                            const descEl = document.getElementById('module-add-case-description');
-                            if (descEl) descEl.value = '';
-                        } catch (e) { /* ignore */ }
-                        try { initCaseDescriptionEditor({ readOnly: false }); } catch (e) { /* ignore */ }
-                        try { applyCaseModalLayout(caseModal, { isDetails: false }); } catch (e) { /* ignore */ }
                         // If the trigger included a related API request name, show it
                         try {
                             const name = trigger && trigger.dataset && trigger.dataset.relatedApiRequestName ? trigger.dataset.relatedApiRequestName : null;
@@ -5032,16 +3696,6 @@
                 const caseModal = document.querySelector('[data-role="module-add-case-modal"]');
                 if (caseModal) {
                     const hid = document.getElementById('module-add-case-scenario-id'); if (hid) hid.value = sid || '';
-                    try { applyScenarioAutomationToCaseModal({ modalEl: caseModal, scenarioId: sid, isDetails: false }); } catch (e) { /* ignore */ }
-                    try {
-                        const testcaseId = document.getElementById('module-add-case-testcase-id');
-                        if (testcaseId) testcaseId.value = '';
-                    } catch (e) { /* ignore */ }
-                    try {
-                        const descEl = document.getElementById('module-add-case-description');
-                        if (descEl) descEl.value = '';
-                    } catch (e) { /* ignore */ }
-                    try { initCaseDescriptionEditor({ readOnly: false }); } catch (e) { /* ignore */ }
                     caseModal.hidden = false; body.classList.add('automation-modal-open');
                     const titleInput = document.getElementById('module-add-case-title'); if (titleInput) titleInput.focus();
                     setStatus('', 'info');
@@ -5086,7 +3740,7 @@
                         const payload = {
                             scenario: sid,
                             title: (titleInput && titleInput.value || '').trim(),
-                            description: syncCaseDescriptionFromEditor(),
+                            description: descInput && descInput.value || '',
                             steps: stepsInput && stepsInput.value ? stepsInput.value.split(/\n/).map((s) => s.trim()).filter(Boolean) : [],
                             expected_results: expectedEntries,
                             priority: priorityInput && priorityInput.value ? priorityInput.value : '',
@@ -5155,7 +3809,6 @@
                         if (modal) {
                             modal.hidden = true; body.classList.remove('automation-modal-open');
                         }
-                        try { removeCaseDescriptionEditor(); } catch (e) { /* ignore */ }
                         // clear edit marker if present
                         if (testcaseIdInput) testcaseIdInput.value = '';
                         moduleAddCaseForm.reset();
@@ -5248,25 +3901,7 @@
                         const scenarioInput = document.getElementById('module-add-case-scenario-id'); if (scenarioInput) scenarioInput.value = data && (data.scenario || data.scenario_id) ? (data.scenario || data.scenario_id) : '';
                         if (scenarioInput && typeof loadDependencyOptions === 'function') await loadDependencyOptions(Number(scenarioInput.value || data.scenario || data.scenario_id || 0), data && data.id);
                         const titleInput = document.getElementById('module-add-case-title'); if (titleInput) titleInput.value = data && data.title ? data.title : '';
-                        const descInput = document.getElementById('module-add-case-description');
-                        if (descInput) {
-                            const rawHtml = (data && data.description) ? data.description : '';
-                            try { descInput.dataset.rawHtml = rawHtml || ''; } catch (e) { /* ignore */ }
-                            // For view mode, render like View Scenario description: formatted plain text.
-                            if (action === 'view-case') {
-                                descInput.value = htmlToFormattedText(rawHtml || '');
-                                try {
-                                    descInput.rows = 12;
-                                    descInput.style.whiteSpace = 'pre-wrap';
-                                    // Let rows control the baseline height for details view.
-                                    descInput.style.height = '';
-                                    descInput.style.overflowY = '';
-                                } catch (e) { /* ignore */ }
-                            } else {
-                                // For edit mode, keep raw HTML so TinyMCE can edit it.
-                                descInput.value = rawHtml || '';
-                            }
-                        }
+                        const descInput = document.getElementById('module-add-case-description'); if (descInput) descInput.value = data && data.description ? data.description : '';
                         const stepsInput = document.getElementById('module-add-case-steps'); if (stepsInput) stepsInput.value = Array.isArray(data && data.steps ? data.steps : []) ? (data.steps || []).join('\n') : (data.steps || '');
                         const expectedInput = document.getElementById('module-add-case-expected'); if (expectedInput) {
                             const normalizedExpected = Array.isArray(data && data.expected_results ? data.expected_results : [])
@@ -5315,28 +3950,6 @@
                         caseModal.hidden = false; body.classList.add('automation-modal-open');
                         // set read-only if view
                         const isView = action === 'view-case';
-                        try { applyCaseModalLayout(caseModal, { isDetails: isView }); } catch (e) { /* ignore */ }
-                        // Comments are only shown in details view.
-                        try {
-                            if (isView) {
-                                await loadTestCaseCommentsForViewModal(data && (data.id || data.pk) ? (data.id || data.pk) : cid);
-                            } else {
-                                setViewCaseCommentsVisible(caseModal, false);
-                            }
-                        } catch (e) { /* ignore */ }
-
-                        // Attachments are now handled per comment.
-                        try { setViewCaseAttachmentsVisible(caseModal, false); } catch (e) { /* ignore */ }
-                        // For view mode: do not mount TinyMCE (match View Scenario description behaviour).
-                        // For edit mode: mount TinyMCE editor.
-                        try {
-                            if (isView) {
-                                removeCaseDescriptionEditor();
-                            } else {
-                                initCaseDescriptionEditor({ readOnly: false });
-                            }
-                        } catch (e) { /* ignore */ }
-                        try { applyScenarioAutomationToCaseModal({ modalEl: caseModal, scenarioId: data && (data.scenario || data.scenario_id) ? (data.scenario || data.scenario_id) : null, isDetails: isView }); } catch (e) { /* ignore */ }
                         // hide API Explorer button when viewing a case and update label format
                         try {
                             const openApiBtn = document.getElementById('module-open-api-explorer');
@@ -5353,22 +3966,7 @@
                             }
                         } catch (e) { /* ignore */ }
                         const editableFields = [titleInput, descInput, stepsInput, expectedInput, priorityInput, preconditionsInput, requirementsInput, dependencySelect, dependencyKeyInput, responseEncryptedInput];
-                        editableFields.forEach((n) => {
-                            if (!n) return;
-                            // If TinyMCE is attached to description, control read-only via TinyMCE mode.
-                            if (n.id === 'module-add-case-description') {
-                                try { setTinyMceReadOnly(getCaseDescriptionEditor(), Boolean(isView)); } catch (e) { /* ignore */ }
-                                n.readOnly = isView;
-                                n.disabled = false;
-                                return;
-                            }
-                            if (n.tagName === 'SELECT') {
-                                n.disabled = isView;
-                            } else {
-                                n.readOnly = isView;
-                                n.disabled = isView;
-                            }
-                        });
+                        editableFields.forEach((n) => { if (n) { if (n.tagName === 'SELECT') { n.disabled = isView; } else { n.readOnly = isView; n.disabled = isView; } } });
                         if (dependencyCheckbox) dependencyCheckbox.disabled = isView;
                         const submit = form.querySelector('button[type="submit"]'); if (submit) submit.hidden = isView;
                     } catch (err) {
@@ -5394,486 +3992,7 @@
                 }
                 const form = document.getElementById('module-add-case-form');
                 if (form) form.reset();
-                try { removeCaseDescriptionEditor(); } catch (e) { /* ignore */ }
-                try {
-                    activeViewCaseId = null;
-                    activeViewCaseAttachCommentId = null;
-                    viewCaseCommentsCache = new Map();
-                    removeViewCaseCommentEditor();
-                    removeViewCaseInlineCommentEditor();
-                    setViewCaseCommentsVisible(modal, false);
-                    const addForm = modal ? modal.querySelector('#module-view-case-add-comment-form') : null;
-                    if (addForm) addForm.style.display = 'none';
-                    const comments = modal ? modal.querySelector('#module-view-case-comments') : null;
-                    if (comments) comments.innerHTML = '';
-                    const inlineEditor = modal ? modal.querySelector('#module-view-case-inline-comment-editor') : null;
-                    if (inlineEditor) inlineEditor.style.display = 'none';
-                } catch (e) { /* ignore */ }
-
-                try {
-                    setViewCaseAttachmentsVisible(modal, false);
-                    const attList = modal ? modal.querySelector('#module-view-case-attachments') : null;
-                    if (attList) attList.innerHTML = '';
-                    const attInput = modal ? modal.querySelector('#module-view-case-attachments-input') : null;
-                    if (attInput) attInput.value = '';
-                } catch (e) { /* ignore */ }
-
-                try {
-                    const commentAttInput = modal ? modal.querySelector('#module-view-case-comment-attachments-input') : null;
-                    if (commentAttInput) commentAttInput.value = '';
-                } catch (e) { /* ignore */ }
-                try { if (modal) applyCaseModalLayout(modal, { isDetails: false }); } catch (e) { /* ignore */ }
-                try { if (modal) applyScenarioAutomationToCaseModal({ modalEl: modal, scenario: { is_automated: true }, isDetails: false }); } catch (e) { /* ignore */ }
             } catch (e) { /* ignore */ }
-        });
-
-        // Upload attachments from the Test Case Details modal
-        document.addEventListener('change', async (ev) => {
-            try {
-                const input = ev && ev.target ? ev.target : null;
-                if (!input || input.id !== 'module-view-case-attachments-input') return;
-                const modal = document.querySelector('[data-role="module-add-case-modal"]');
-                if (!modal || modal.hidden) return;
-                if (!modal.contains(input)) return;
-                const caseId = activeViewCaseId || (modal.querySelector('#module-view-case-comment-case-id') ? modal.querySelector('#module-view-case-comment-case-id').value : null);
-                if (!caseId) {
-                    setStatus('Invalid test case.', 'error');
-                    return;
-                }
-                // Copy files before clearing input; clearing can empty FileList.
-                const selectedFiles = Array.from(input.files || []).filter(Boolean);
-                // reset the input immediately so selecting the same file again triggers change
-                try { input.value = ''; } catch (e) { /* ignore */ }
-                await uploadTestCaseAttachmentsForViewModal(caseId, selectedFiles);
-            } catch (e) { /* ignore */ }
-        });
-
-        // Upload attachments from the View Scenario modal
-        document.addEventListener('change', async (ev) => {
-            try {
-                const input = ev && ev.target ? ev.target : null;
-                if (!input || input.id !== 'module-view-scenario-attachments-input') return;
-                const modal = document.querySelector('[data-role="module-add-scenario-modal"]');
-                if (!modal || modal.hidden) return;
-                if (!modal.contains(input)) return;
-                const scenarioId = (typeof state !== 'undefined' && state && state.moduleScenarioCurrentId) ? state.moduleScenarioCurrentId : null;
-                const fallbackId = modal.querySelector('#module-view-scenario-comment-scenario-id') ? modal.querySelector('#module-view-scenario-comment-scenario-id').value : null;
-                const sid = scenarioId || fallbackId;
-                if (!sid) {
-                    setStatus('Invalid scenario.', 'error');
-                    return;
-                }
-                const selectedFiles = Array.from(input.files || []).filter(Boolean);
-                try { input.value = ''; } catch (e) { /* ignore */ }
-                await uploadTestScenarioAttachmentsForViewModal(sid, selectedFiles);
-            } catch (e) { /* ignore */ }
-        });
-
-        // Upload attachments for a specific comment (details modal)
-        document.addEventListener('change', async (ev) => {
-            try {
-                const input = ev && ev.target ? ev.target : null;
-                if (!input || input.id !== 'module-view-case-comment-attachments-input') return;
-                const modal = document.querySelector('[data-role="module-add-case-modal"]');
-                if (!modal || modal.hidden) return;
-                if (!modal.contains(input)) return;
-
-                const commentId = activeViewCaseAttachCommentId;
-                if (!commentId) {
-                    setStatus('Select a comment first.', 'error');
-                    return;
-                }
-
-                const selectedFiles = Array.from(input.files || []).filter(Boolean);
-                try { input.value = ''; } catch (e) { /* ignore */ }
-                await uploadTestCaseCommentAttachmentsForViewModal(commentId, selectedFiles);
-            } catch (e) { /* ignore */ }
-        });
-
-        // Test Case Details comments: delegated handlers
-        document.addEventListener('click', async (ev) => {
-            const target = ev.target && ev.target.closest ? ev.target.closest('[data-action]') : null;
-            if (!target) return;
-
-            const modal = document.querySelector('[data-role="module-add-case-modal"]');
-            if (!modal || modal.hidden) return;
-            if (!modal.contains(target)) return;
-
-            const action = target.dataset.action;
-            const commentId = target.dataset.commentId;
-
-            const safeGetReactionPicker = async (buttonEl, initialReaction) => {
-                try {
-                    if (typeof openEmojiPickerPopover === 'function') {
-                        return await openEmojiPickerPopover(buttonEl, initialReaction);
-                    }
-                } catch (e) { /* ignore */ }
-                return null;
-            };
-
-            const safeUpdateThumbs = (btn, isActive, count) => {
-                try {
-                    if (typeof updateThumbsUpButtonIcon === 'function') {
-                        updateThumbsUpButtonIcon(btn, isActive, count);
-                        return;
-                    }
-                } catch (e) { /* ignore */ }
-                // minimal fallback
-                try {
-                    btn.dataset.liked = isActive ? 'true' : 'false';
-                    const icon = btn.querySelector('[data-role="thumbs-up-icon"]');
-                    const countEl = btn.querySelector('[data-role="thumbs-up-count"]');
-                    if (icon) {
-                        icon.style.filter = isActive ? '' : 'grayscale(1)';
-                        icon.style.opacity = isActive ? '1' : '0.45';
-                    }
-                    if (countEl) {
-                        if (isActive && typeof count === 'number' && count > 0) {
-                            countEl.textContent = String(count);
-                            countEl.style.display = '';
-                        } else {
-                            countEl.style.display = 'none';
-                        }
-                    }
-                } catch (e) { /* ignore */ }
-            };
-
-            if (action === 'pick-view-case-attachments') {
-                ev.preventDefault();
-                const caseId = activeViewCaseId || (modal.querySelector('#module-view-case-comment-case-id') ? modal.querySelector('#module-view-case-comment-case-id').value : null);
-                if (!caseId) {
-                    setStatus('Invalid test case.', 'error');
-                    return;
-                }
-                const input = modal.querySelector('#module-view-case-attachments-input');
-                if (input) input.click();
-                return;
-            }
-
-            if (action === 'pick-view-scenario-attachments') {
-                ev.preventDefault();
-                const scenarioModal = document.querySelector('[data-role="module-add-scenario-modal"]');
-                if (!scenarioModal || scenarioModal.hidden) return;
-                const scenarioId = (typeof state !== 'undefined' && state && state.moduleScenarioCurrentId) ? state.moduleScenarioCurrentId : null;
-                const fallbackId = scenarioModal.querySelector('#module-view-scenario-comment-scenario-id') ? scenarioModal.querySelector('#module-view-scenario-comment-scenario-id').value : null;
-                const sid = scenarioId || fallbackId;
-                if (!sid) {
-                    setStatus('Invalid scenario.', 'error');
-                    return;
-                }
-                const input = scenarioModal.querySelector('#module-view-scenario-attachments-input');
-                if (input) input.click();
-                return;
-            }
-
-            if (action === 'view-case-attach-comment') {
-                ev.preventDefault();
-                if (!commentId) {
-                    setStatus('Invalid comment.', 'error');
-                    return;
-                }
-                activeViewCaseAttachCommentId = String(commentId);
-                const input = modal.querySelector('#module-view-case-comment-attachments-input');
-                if (input) input.click();
-                return;
-            }
-
-            if (action === 'toggle-view-case-add-comment') {
-                ev.preventDefault();
-                const addForm = modal.querySelector('#module-view-case-add-comment-form');
-                if (!addForm) return;
-                // hide inline editor if visible
-                try {
-                    const inlineEditor = modal.querySelector('#module-view-case-inline-comment-editor');
-                    if (inlineEditor) inlineEditor.style.display = 'none';
-                    removeViewCaseInlineCommentEditor();
-                } catch (e) { /* ignore */ }
-                addForm.style.display = 'block';
-                try {
-                    const textarea = modal.querySelector('#module-view-case-comment-content');
-                    if (textarea) textarea.value = '';
-                } catch (e) { /* ignore */ }
-                // Defer init until after layout so TinyMCE can measure properly.
-                try { window.setTimeout(() => { try { initViewCaseCommentEditor(); } catch (e) { /* ignore */ } }, 0); } catch (e) { /* ignore */ }
-                return;
-            }
-
-            if (action === 'cancel-view-case-add-comment') {
-                ev.preventDefault();
-                const addForm = modal.querySelector('#module-view-case-add-comment-form');
-                if (addForm) addForm.style.display = 'none';
-                try { removeViewCaseCommentEditor(); } catch (e) { /* ignore */ }
-                return;
-            }
-
-            if (action === 'post-view-case-add-comment') {
-                ev.preventDefault();
-                const caseId = activeViewCaseId || (modal.querySelector('#module-view-case-comment-case-id') ? modal.querySelector('#module-view-case-comment-case-id').value : null);
-                if (!caseId) {
-                    setStatus('Invalid test case.', 'error');
-                    return;
-                }
-                let content = '';
-                try {
-                    if (typeof tinymce !== 'undefined' && tinymce.get && tinymce.get('module-view-case-comment-content')) {
-                        content = tinymce.get('module-view-case-comment-content').getContent({ format: 'html' }) || '';
-                    } else {
-                        const textarea = modal.querySelector('#module-view-case-comment-content');
-                        content = textarea ? (textarea.value || '') : '';
-                    }
-                } catch (e) { /* ignore */ }
-                if (!String(content || '').trim()) {
-                    setStatus('Please enter a comment.', 'error');
-                    return;
-                }
-                try {
-                    const resp = await fetch('/api/core/test-case-comments/', {
-                        method: 'POST',
-                        credentials: 'same-origin',
-                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
-                        body: JSON.stringify({ test_case: caseId, content })
-                    });
-                    if (!resp.ok) {
-                        const errorData = await resp.json().catch(() => ({}));
-                        setStatus(errorData.detail || 'Failed to save comment.', 'error');
-                        return;
-                    }
-                    setStatus('Comment posted successfully.', 'success');
-                    const addForm = modal.querySelector('#module-view-case-add-comment-form');
-                    if (addForm) addForm.style.display = 'none';
-                    try { removeViewCaseCommentEditor(); } catch (e) { /* ignore */ }
-                    await loadTestCaseCommentsForViewModal(caseId);
-                } catch (e) {
-                    setStatus('Error saving comment.', 'error');
-                }
-                return;
-            }
-
-            if (action === 'view-case-edit-comment' && commentId) {
-                ev.preventDefault();
-                const comment = viewCaseCommentsCache.get(String(commentId));
-                if (!comment) return;
-                const editorWrapper = ensureViewCaseInlineEditor(modal);
-                if (!editorWrapper) return;
-                const form = editorWrapper.querySelector('#module-view-case-inline-comment-form');
-                const label = editorWrapper.querySelector('#module-view-case-inline-editor-label');
-                const btn = editorWrapper.querySelector('#module-view-case-inline-submit-btn');
-                if (form) {
-                    form.dataset.mode = 'edit';
-                    form.dataset.commentId = String(commentId);
-                    form.dataset.parentId = '';
-                }
-                if (label) label.textContent = 'Edit Comment';
-                if (btn) btn.textContent = 'Save';
-                // position under the comment actions
-                try {
-                    const item = modal.querySelector(`[data-comment-id="${CSS.escape(String(commentId))}"]`);
-                    const actionsRow = item ? item.querySelector('.comment-actions') : null;
-                    if (actionsRow) actionsRow.after(editorWrapper);
-                } catch (e) { /* ignore */ }
-                initViewCaseInlineCommentEditor({ modalEl: modal, contentHtml: comment.content || '' });
-                return;
-            }
-
-            if (action === 'view-case-reply-comment' && commentId) {
-                ev.preventDefault();
-                const editorWrapper = ensureViewCaseInlineEditor(modal);
-                if (!editorWrapper) return;
-                const form = editorWrapper.querySelector('#module-view-case-inline-comment-form');
-                const label = editorWrapper.querySelector('#module-view-case-inline-editor-label');
-                const btn = editorWrapper.querySelector('#module-view-case-inline-submit-btn');
-                if (form) {
-                    form.dataset.mode = 'reply';
-                    form.dataset.commentId = '';
-                    form.dataset.parentId = String(commentId);
-                }
-                if (label) label.textContent = 'Reply to Comment';
-                if (btn) btn.textContent = 'Save';
-                try {
-                    const item = modal.querySelector(`[data-comment-id="${CSS.escape(String(commentId))}"]`);
-                    const actionsRow = item ? item.querySelector('.comment-actions') : null;
-                    if (actionsRow) actionsRow.after(editorWrapper);
-                } catch (e) { /* ignore */ }
-                initViewCaseInlineCommentEditor({ modalEl: modal, contentHtml: '' });
-                return;
-            }
-
-            if (action === 'cancel-view-case-inline-comment') {
-                ev.preventDefault();
-                try {
-                    const editorWrapper = modal.querySelector('#module-view-case-inline-comment-editor');
-                    if (editorWrapper) editorWrapper.style.display = 'none';
-                    removeViewCaseInlineCommentEditor();
-                } catch (e) { /* ignore */ }
-                return;
-            }
-
-            if (action === 'submit-view-case-inline-comment') {
-                ev.preventDefault();
-                const editorWrapper = modal.querySelector('#module-view-case-inline-comment-editor');
-                const form = editorWrapper ? editorWrapper.querySelector('#module-view-case-inline-comment-form') : null;
-                if (!form) return;
-                const mode = (form.dataset.mode || '').trim();
-                const editId = (form.dataset.commentId || '').trim();
-                const parentId = (form.dataset.parentId || '').trim();
-                const caseId = activeViewCaseId;
-                if (!caseId) {
-                    setStatus('Invalid test case.', 'error');
-                    return;
-                }
-                let content = '';
-                try {
-                    if (typeof tinymce !== 'undefined' && tinymce.get && tinymce.get('module-view-case-inline-comment-content')) {
-                        content = tinymce.get('module-view-case-inline-comment-content').getContent({ format: 'html' }) || '';
-                    } else {
-                        const textarea = form.querySelector('#module-view-case-inline-comment-content');
-                        content = textarea ? (textarea.value || '') : '';
-                    }
-                } catch (e) { /* ignore */ }
-                if (!String(content || '').trim()) {
-                    setStatus('Please enter a comment.', 'error');
-                    return;
-                }
-                try {
-                    let url = '';
-                    let method = 'POST';
-                    let body = null;
-                    if (mode === 'edit') {
-                        if (!editId) {
-                            setStatus('Invalid comment.', 'error');
-                            return;
-                        }
-                        url = `/api/core/test-case-comments/${encodeURIComponent(String(editId))}/`;
-                        method = 'PATCH';
-                        body = JSON.stringify({ content });
-                    } else if (mode === 'reply') {
-                        if (!parentId) {
-                            setStatus('Invalid reply target.', 'error');
-                            return;
-                        }
-                        url = '/api/core/test-case-comments/';
-                        method = 'POST';
-                        body = JSON.stringify({ test_case: caseId, content, parent: parentId });
-                    } else {
-                        setStatus('Invalid comment mode.', 'error');
-                        return;
-                    }
-                    const resp = await fetch(url, {
-                        method,
-                        credentials: 'same-origin',
-                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
-                        body,
-                    });
-                    if (!resp.ok) {
-                        const errorData = await resp.json().catch(() => ({}));
-                        setStatus(errorData.detail || 'Failed to save comment.', 'error');
-                        return;
-                    }
-                    setStatus(mode === 'edit' ? 'Comment updated successfully.' : 'Reply posted successfully.', 'success');
-                    try {
-                        if (editorWrapper) editorWrapper.style.display = 'none';
-                        removeViewCaseInlineCommentEditor();
-                    } catch (e) { /* ignore */ }
-                    await loadTestCaseCommentsForViewModal(caseId);
-                } catch (e) {
-                    setStatus('Error saving comment.', 'error');
-                }
-                return;
-            }
-
-            if (action === 'view-case-delete-comment' && commentId) {
-                ev.preventDefault();
-                if (!confirm('Are you sure you want to delete this comment?')) return;
-                try {
-                    const resp = await fetch(`/api/core/test-case-comments/${encodeURIComponent(String(commentId))}/`, {
-                        method: 'DELETE',
-                        credentials: 'same-origin',
-                        headers: { 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
-                    });
-                    if (!(resp && (resp.status === 204 || resp.ok))) {
-                        const errorData = await resp.json().catch(() => ({}));
-                        setStatus(errorData.detail || 'Failed to delete comment.', 'error');
-                        return;
-                    }
-                    setStatus('Comment deleted successfully.', 'success');
-                    if (activeViewCaseId) await loadTestCaseCommentsForViewModal(activeViewCaseId);
-                } catch (e) {
-                    setStatus('Error deleting comment.', 'error');
-                }
-                return;
-            }
-
-            if (action === 'view-case-thumbs-up-comment' && commentId) {
-                ev.preventDefault();
-                const btn = target;
-                const wasLiked = btn.dataset.liked === 'true';
-                const wasLikesCount = Number.isFinite(parseInt(btn.dataset.likesCount, 10)) ? parseInt(btn.dataset.likesCount, 10) : 0;
-                const optimisticLiked = !wasLiked;
-                const optimisticCount = optimisticLiked ? Math.max(1, wasLikesCount + 1) : Math.max(0, wasLikesCount - 1);
-                safeUpdateThumbs(btn, optimisticLiked, optimisticCount);
-                try {
-                    btn.disabled = true;
-                    const resp = await fetch(`/api/core/test-case-comments/${encodeURIComponent(String(commentId))}/toggle_like/`, {
-                        method: 'POST',
-                        credentials: 'same-origin',
-                        headers: { 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
-                    });
-                    if (!resp.ok) {
-                        const errorData = await resp.json().catch(() => ({}));
-                        setStatus(errorData.detail || 'Failed to toggle thumbs up.', 'error');
-                        safeUpdateThumbs(btn, wasLiked, wasLikesCount);
-                        return;
-                    }
-                    const data = await resp.json().catch(() => ({}));
-                    safeUpdateThumbs(btn, !!data.liked, typeof data.likes_count === 'number' ? data.likes_count : null);
-                } catch (e) {
-                    setStatus('Error toggling thumbs up.', 'error');
-                    safeUpdateThumbs(btn, wasLiked, wasLikesCount);
-                } finally {
-                    try { btn.disabled = false; } catch (e) { /* ignore */ }
-                }
-                return;
-            }
-
-            if (action === 'view-case-add-reaction-comment' && commentId) {
-                ev.preventDefault();
-                const btn = target;
-                const displayEl = btn.querySelector('[data-role="reaction-display"]');
-                const currentUserReaction = (btn.dataset.userReaction || '').trim();
-                const reaction = await safeGetReactionPicker(btn, currentUserReaction || '😊');
-                if (!reaction) return;
-                try {
-                    btn.disabled = true;
-                    const resp = await fetch(`/api/core/test-case-comments/${encodeURIComponent(String(commentId))}/set_reaction/`, {
-                        method: 'POST',
-                        credentials: 'same-origin',
-                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken(), Accept: 'application/json' },
-                        body: JSON.stringify({ reaction }),
-                    });
-                    if (!resp.ok) {
-                        const errorData = await resp.json().catch(() => ({}));
-                        setStatus(errorData.detail || errorData.reaction || 'Failed to add reaction.', 'error');
-                        return;
-                    }
-                    const data = await resp.json().catch(() => ({}));
-                    const nextUserReaction = data && data.reacted ? (data.reaction || reaction) : '';
-                    btn.dataset.userReaction = nextUserReaction;
-                    if (displayEl) {
-                        const summary = (data && Array.isArray(data.reactions_summary)) ? data.reactions_summary : [];
-                        const summaryText = summary
-                            .filter((x) => x && x.reaction && typeof x.count === 'number' && x.count > 0)
-                            .map((x) => `${x.reaction} ${x.count}`)
-                            .join(' ');
-                        displayEl.textContent = summaryText || '😊';
-                    }
-                    setStatus(data && data.reacted ? 'Reaction saved.' : 'Reaction removed.', 'success');
-                } catch (e) {
-                    setStatus('Error adding reaction.', 'error');
-                } finally {
-                    try { btn.disabled = false; } catch (e) { /* ignore */ }
-                }
-                return;
-            }
         });
 
         // API Explorer: modal to browse collections/directories/requests and select one
@@ -6327,6 +4446,9 @@
                     module: (document.getElementById('scenario-module') && document.getElementById('scenario-module').value) || null,
                     title: (inputs.scenario.title.value || '').trim(),
                     description: inputs.scenario.description.value || '',
+                    preconditions: inputs.scenario.preconditions.value || '',
+                    postconditions: inputs.scenario.postconditions.value || '',
+                    tags: splitList(inputs.scenario.tags.value),
                 };
                 if (!payload.title) {
                     throw new Error('Scenario title is required.');
@@ -6694,18 +4816,10 @@
                                 <span>🗑️</span>
                             </button>` : '';
 
-                        const isLiked = !!comment.user_has_liked;
-                        const likesCount = typeof comment.likes_count === 'number' ? comment.likes_count : 0;
-                        const thumbsUpIconStyle = isLiked ? '' : 'filter: grayscale(1); opacity: 0.45;';
-                        const thumbsUpCountStyle = (isLiked && likesCount > 0) ? 'margin-left: 4px; font-weight: 600;' : 'display: none;';
-
-                        const userReaction = comment.user_reaction || '';
-                        const reactionsSummary = Array.isArray(comment.reactions_summary) ? comment.reactions_summary : [];
-                        const reactionsSummaryText = reactionsSummary
-                            .filter((x) => x && x.reaction && typeof x.count === 'number' && x.count > 0)
-                            .map((x) => `${x.reaction} ${x.count}`)
-                            .join(' ');
-                        const reactionDisplayText = reactionsSummaryText || '😊';
+                        const hasLiked = comment.user_has_liked || false;
+                        const likesCount = comment.likes_count || 0;
+                        const likeClass = hasLiked ? 'comment-action-btn-active' : 'comment-action-btn-inactive';
+                        const likeCountText = likesCount > 0 ? ` (${likesCount})` : '';
 
                         const repliesHtml = (!isReply && comment.replies && comment.replies.length > 0)
                             ? `<div class="comment-replies">${comment.replies.map(reply => renderComment(reply, true)).join('')}</div>`
@@ -6722,12 +4836,11 @@
                                     ${!isReply ? `<button type="button" class="comment-action-btn" data-action="reply-comment" data-comment-id="${comment.id}" title="Reply">
                                         <span>↩️</span>
                                     </button>` : ''}
-                                    <button type="button" class="comment-action-btn" data-action="thumbs-up-comment" data-comment-id="${comment.id}" data-liked="${isLiked ? 'true' : 'false'}" data-likes-count="${likesCount}" aria-pressed="${isLiked ? 'true' : 'false'}" title="Thumbs Up">
-                                        <span data-role="thumbs-up-icon" style="${thumbsUpIconStyle}">👍</span>
-                                        <span data-role="thumbs-up-count" style="${thumbsUpCountStyle}">${likesCount}</span>
+                                    <button type="button" class="comment-action-btn ${likeClass}" data-action="thumbs-up-comment" data-comment-id="${comment.id}" data-liked="${hasLiked}" title="Thumbs Up">
+                                        <span class="like-icon">👍</span>${likeCountText}
                                     </button>
                                     <button type="button" class="comment-action-btn" data-action="add-reaction-comment" data-comment-id="${comment.id}" title="Add Reaction">
-                                        <span data-role="reaction-display">${reactionDisplayText}</span>
+                                        <span>😊</span>
                                     </button>
                                     ${editBtn}
                                     ${deleteBtn}
@@ -6864,399 +4977,6 @@
             }
         };
 
-        const updateThumbsUpButtonIcon = (buttonEl, isActive, likesCount = null) => {
-            if (!buttonEl) return;
-            const iconEl = buttonEl.querySelector('[data-role="thumbs-up-icon"]');
-            if (!iconEl) return;
-
-            const countEl = buttonEl.querySelector('[data-role="thumbs-up-count"]');
-
-            buttonEl.dataset.liked = isActive ? 'true' : 'false';
-            buttonEl.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-
-            const existingCountRaw = buttonEl.dataset.likesCount;
-            const existingCount = Number.isFinite(parseInt(existingCountRaw, 10)) ? parseInt(existingCountRaw, 10) : null;
-            let displayCount = typeof likesCount === 'number' ? likesCount : existingCount;
-
-            // If the current user has liked, the total count should be >= 1.
-            if (isActive) {
-                if (displayCount === null) displayCount = 1;
-                if (displayCount < 1) displayCount = 1;
-            }
-
-            if (displayCount !== null && Number.isFinite(displayCount)) {
-                buttonEl.dataset.likesCount = String(displayCount);
-            }
-
-            if (isActive) {
-                iconEl.style.filter = '';
-                iconEl.style.opacity = '1';
-            } else {
-                iconEl.style.filter = 'grayscale(1)';
-                iconEl.style.opacity = '0.45';
-            }
-
-            if (countEl) {
-                if (isActive && displayCount !== null && displayCount > 0) {
-                    countEl.textContent = String(displayCount);
-                    countEl.style.display = '';
-                    countEl.style.marginLeft = '4px';
-                    countEl.style.fontWeight = '600';
-                } else {
-                    countEl.style.display = 'none';
-                }
-            }
-        };
-
-        const handleThumbsUpCommentClick = async (buttonEl, commentId) => {
-            if (!buttonEl || !commentId) return;
-
-            const url = `/api/core/scenario-comments/${commentId}/toggle_like/`;
-
-            // Optimistic UI update so the count changes immediately on click
-            const wasLiked = buttonEl.dataset.liked === 'true';
-            const wasLikesCountRaw = buttonEl.dataset.likesCount;
-            const wasLikesCount = Number.isFinite(parseInt(wasLikesCountRaw, 10)) ? parseInt(wasLikesCountRaw, 10) : 0;
-            const optimisticLiked = !wasLiked;
-            const optimisticCount = optimisticLiked ? Math.max(1, wasLikesCount + 1) : Math.max(0, wasLikesCount - 1);
-            updateThumbsUpButtonIcon(buttonEl, optimisticLiked, optimisticCount);
-
-            try {
-                buttonEl.disabled = true;
-                const resp = await fetch(url, {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: {
-                        'X-CSRFToken': getCsrfToken(),
-                        'Accept': 'application/json'
-                    }
-                });
-
-                if (resp && resp.ok) {
-                    const data = await resp.json().catch(() => ({}));
-                    updateThumbsUpButtonIcon(buttonEl, !!data.liked, typeof data.likes_count === 'number' ? data.likes_count : null);
-                } else {
-                    const errorData = await resp.json().catch(() => ({}));
-                    setStatus(errorData.detail || 'Failed to toggle thumbs up.', 'error');
-                    // Revert optimistic UI if server rejected
-                    updateThumbsUpButtonIcon(buttonEl, wasLiked, wasLikesCount);
-                }
-            } catch (err) {
-                console.error('Error toggling thumbs up:', err);
-                setStatus('Error toggling thumbs up.', 'error');
-                // Revert optimistic UI on network error
-                updateThumbsUpButtonIcon(buttonEl, wasLiked, wasLikesCount);
-            } finally {
-                buttonEl.disabled = false;
-            }
-        };
-
-        const handleAddReactionCommentClick = async (buttonEl, commentId) => {
-            if (!buttonEl || !commentId) return;
-
-            const displayEl = buttonEl.querySelector('[data-role="reaction-display"]');
-            const currentUserReaction = (buttonEl.dataset.userReaction || '').trim();
-            const reaction = await openEmojiPickerPopover(buttonEl, currentUserReaction || '😊');
-            if (!reaction) return;
-
-            try {
-                buttonEl.disabled = true;
-                const resp = await fetch(`/api/core/scenario-comments/${commentId}/set_reaction/`, {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCsrfToken(),
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify({ reaction })
-                });
-
-                if (resp && resp.ok) {
-                    const data = await resp.json().catch(() => ({}));
-                    const nextUserReaction = data && data.reacted ? (data.reaction || reaction) : '';
-                    buttonEl.dataset.userReaction = nextUserReaction;
-
-                    if (displayEl) {
-                        const summary = (data && Array.isArray(data.reactions_summary)) ? data.reactions_summary : [];
-                        const summaryText = summary
-                            .filter((x) => x && x.reaction && typeof x.count === 'number' && x.count > 0)
-                            .map((x) => `${x.reaction} ${x.count}`)
-                            .join(' ');
-                        displayEl.textContent = summaryText || '😊';
-                    }
-
-                    setStatus(data && data.reacted ? 'Reaction saved.' : 'Reaction removed.', 'success');
-                } else {
-                    const errorData = await resp.json().catch(() => ({}));
-                    setStatus(errorData.detail || errorData.reaction || 'Failed to add reaction.', 'error');
-                }
-            } catch (err) {
-                console.error('Error adding reaction:', err);
-                setStatus('Error adding reaction.', 'error');
-            } finally {
-                buttonEl.disabled = false;
-            }
-        };
-
-        let activeEmojiPicker = null;
-
-        const openEmojiPickerPopover = (anchorEl, initialReaction = '😊') => {
-            return new Promise((resolve) => {
-                if (!anchorEl) return resolve(null);
-
-                // Close any existing picker
-                if (activeEmojiPicker && typeof activeEmojiPicker.close === 'function') {
-                    activeEmojiPicker.close();
-                }
-
-                const EMOJI_CATEGORIES = [
-                    { key: 'people', label: 'People', icon: '🙂' },
-                    { key: 'nature', label: 'Nature', icon: '🌲' },
-                    { key: 'food', label: 'Food', icon: '🍔' },
-                    { key: 'activity', label: 'Activity', icon: '⚽' },
-                    { key: 'objects', label: 'Objects', icon: '💡' },
-                    { key: 'symbols', label: 'Symbols', icon: '❤️' },
-                    { key: 'flags', label: 'Flags', icon: '🏳️' },
-                ];
-
-                const EMOJI_DATA = [
-                    // People
-                    { e: '😀', n: 'grinning face', c: 'people' },
-                    { e: '😃', n: 'grinning face with big eyes', c: 'people' },
-                    { e: '😄', n: 'grinning face with smiling eyes', c: 'people' },
-                    { e: '😁', n: 'beaming face with smiling eyes', c: 'people' },
-                    { e: '😆', n: 'grinning squinting face', c: 'people' },
-                    { e: '😅', n: 'grinning face with sweat', c: 'people' },
-                    { e: '😂', n: 'face with tears of joy', c: 'people' },
-                    { e: '🤣', n: 'rolling on the floor laughing', c: 'people' },
-                    { e: '😊', n: 'smiling face with smiling eyes', c: 'people' },
-                    { e: '🙂', n: 'slightly smiling face', c: 'people' },
-                    { e: '😉', n: 'winking face', c: 'people' },
-                    { e: '😍', n: 'smiling face with heart-eyes', c: 'people' },
-                    { e: '😘', n: 'face blowing a kiss', c: 'people' },
-                    { e: '😎', n: 'smiling face with sunglasses', c: 'people' },
-                    { e: '🤔', n: 'thinking face', c: 'people' },
-                    { e: '😮', n: 'face with open mouth', c: 'people' },
-                    { e: '😢', n: 'crying face', c: 'people' },
-                    { e: '😭', n: 'loudly crying face', c: 'people' },
-                    { e: '😡', n: 'pouting face', c: 'people' },
-                    { e: '👍', n: 'thumbs up', c: 'people' },
-                    { e: '👎', n: 'thumbs down', c: 'people' },
-                    { e: '👏', n: 'clapping hands', c: 'people' },
-                    { e: '🙏', n: 'folded hands', c: 'people' },
-                    { e: '👋', n: 'waving hand', c: 'people' },
-                    { e: '🔥', n: 'fire', c: 'people' },
-
-                    // Nature
-                    { e: '🌲', n: 'tree', c: 'nature' },
-                    { e: '🌿', n: 'herb', c: 'nature' },
-                    { e: '🌸', n: 'cherry blossom', c: 'nature' },
-                    { e: '🌼', n: 'blossom', c: 'nature' },
-                    { e: '🌞', n: 'sun with face', c: 'nature' },
-                    { e: '🌧️', n: 'cloud with rain', c: 'nature' },
-                    { e: '🌈', n: 'rainbow', c: 'nature' },
-
-                    // Food
-                    { e: '🍔', n: 'hamburger', c: 'food' },
-                    { e: '🍕', n: 'pizza', c: 'food' },
-                    { e: '🍟', n: 'french fries', c: 'food' },
-                    { e: '🍜', n: 'steaming bowl', c: 'food' },
-                    { e: '🍣', n: 'sushi', c: 'food' },
-                    { e: '☕', n: 'hot beverage', c: 'food' },
-
-                    // Activity
-                    { e: '⚽', n: 'soccer ball', c: 'activity' },
-                    { e: '🏀', n: 'basketball', c: 'activity' },
-                    { e: '🎾', n: 'tennis', c: 'activity' },
-                    { e: '🎮', n: 'video game', c: 'activity' },
-                    { e: '🎉', n: 'party popper', c: 'activity' },
-
-                    // Objects
-                    { e: '💡', n: 'light bulb', c: 'objects' },
-                    { e: '🖥️', n: 'desktop computer', c: 'objects' },
-                    { e: '📌', n: 'pushpin', c: 'objects' },
-                    { e: '📎', n: 'paperclip', c: 'objects' },
-                    { e: '🛠️', n: 'hammer and wrench', c: 'objects' },
-
-                    // Symbols
-                    { e: '❤️', n: 'red heart', c: 'symbols' },
-                    { e: '✅', n: 'check mark button', c: 'symbols' },
-                    { e: '❌', n: 'cross mark', c: 'symbols' },
-                    { e: '⭐', n: 'star', c: 'symbols' },
-                    { e: '🚀', n: 'rocket', c: 'symbols' },
-
-                    // Flags
-                    { e: '🏳️', n: 'white flag', c: 'flags' },
-                    { e: '🏁', n: 'chequered flag', c: 'flags' },
-                ];
-
-                const modalRoot = anchorEl.closest('[data-role="scenario-comments-modal"]') || document.body;
-                const pop = document.createElement('div');
-                pop.setAttribute('role', 'dialog');
-                pop.setAttribute('aria-label', 'Emoji picker');
-                pop.style.position = 'absolute';
-                pop.style.zIndex = '9999';
-                pop.style.background = '#fff';
-                pop.style.border = '1px solid rgba(0,0,0,0.12)';
-                pop.style.borderRadius = '10px';
-                pop.style.boxShadow = 'var(--automation-shadow, 0 10px 24px -12px rgba(0,0,0,0.25))';
-                pop.style.width = '320px';
-                pop.style.maxWidth = 'calc(100vw - 24px)';
-                pop.style.maxHeight = '360px';
-                pop.style.overflow = 'hidden';
-
-                const header = document.createElement('div');
-                header.style.padding = '10px';
-                header.style.borderBottom = '1px solid rgba(0,0,0,0.08)';
-                header.style.display = 'grid';
-                header.style.gap = '8px';
-
-                const search = document.createElement('input');
-                search.type = 'search';
-                search.placeholder = 'Search...';
-                search.value = '';
-                search.style.width = '100%';
-                search.style.padding = '8px 10px';
-                search.style.borderRadius = '8px';
-                search.style.border = '1px solid rgba(0,0,0,0.18)';
-
-                const cats = document.createElement('div');
-                cats.style.display = 'flex';
-                cats.style.alignItems = 'center';
-                cats.style.gap = '6px';
-                cats.style.overflowX = 'auto';
-                cats.style.paddingBottom = '2px';
-
-                const bodyEl = document.createElement('div');
-                bodyEl.style.padding = '10px';
-                bodyEl.style.overflow = 'auto';
-                bodyEl.style.maxHeight = '290px';
-
-                const grid = document.createElement('div');
-                grid.style.display = 'grid';
-                grid.style.gridTemplateColumns = 'repeat(8, 1fr)';
-                grid.style.gap = '6px';
-
-                let activeCategory = 'people';
-
-                const renderGrid = () => {
-                    const q = (search.value || '').trim().toLowerCase();
-                    grid.innerHTML = '';
-
-                    const filtered = EMOJI_DATA.filter((item) => {
-                        if (activeCategory && item.c !== activeCategory) return false;
-                        if (!q) return true;
-                        return item.n.includes(q) || item.e.includes(q);
-                    });
-
-                    filtered.forEach((item) => {
-                        const btn = document.createElement('button');
-                        btn.type = 'button';
-                        btn.textContent = item.e;
-                        btn.title = item.n;
-                        btn.style.border = 'none';
-                        btn.style.background = 'transparent';
-                        btn.style.cursor = 'pointer';
-                        btn.style.fontSize = '20px';
-                        btn.style.lineHeight = '1';
-                        btn.style.padding = '6px';
-                        btn.style.borderRadius = '8px';
-                        btn.addEventListener('mouseenter', () => {
-                            btn.style.background = 'rgba(0,0,0,0.06)';
-                        });
-                        btn.addEventListener('mouseleave', () => {
-                            btn.style.background = 'transparent';
-                        });
-                        btn.addEventListener('click', () => {
-                            close(item.e);
-                        });
-                        grid.appendChild(btn);
-                    });
-                };
-
-                const setActiveCategory = (catKey) => {
-                    activeCategory = catKey;
-                    Array.from(cats.querySelectorAll('button[data-cat]')).forEach((b) => {
-                        const isActive = b.getAttribute('data-cat') === catKey;
-                        b.style.opacity = isActive ? '1' : '0.55';
-                        b.style.background = isActive ? 'rgba(0,0,0,0.06)' : 'transparent';
-                    });
-                    renderGrid();
-                };
-
-                EMOJI_CATEGORIES.forEach((cat) => {
-                    const btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.setAttribute('data-cat', cat.key);
-                    btn.title = cat.label;
-                    btn.textContent = cat.icon;
-                    btn.style.border = 'none';
-                    btn.style.background = 'transparent';
-                    btn.style.cursor = 'pointer';
-                    btn.style.padding = '6px';
-                    btn.style.borderRadius = '8px';
-                    btn.style.fontSize = '18px';
-                    btn.style.opacity = cat.key === activeCategory ? '1' : '0.55';
-                    btn.addEventListener('click', () => setActiveCategory(cat.key));
-                    cats.appendChild(btn);
-                });
-
-                header.appendChild(search);
-                header.appendChild(cats);
-                bodyEl.appendChild(grid);
-                pop.appendChild(header);
-                pop.appendChild(bodyEl);
-
-                const close = (value = null) => {
-                    cleanup();
-                    resolve(value);
-                };
-
-                const onDocMouseDown = (ev) => {
-                    const t = ev.target;
-                    if (!t) return;
-                    if (pop.contains(t) || anchorEl.contains(t)) return;
-                    close(null);
-                };
-
-                const onDocKeyDown = (ev) => {
-                    if (ev.key === 'Escape') {
-                        ev.preventDefault();
-                        close(null);
-                    }
-                };
-
-                const cleanup = () => {
-                    document.removeEventListener('mousedown', onDocMouseDown, true);
-                    document.removeEventListener('keydown', onDocKeyDown, true);
-                    if (pop && pop.parentNode) pop.parentNode.removeChild(pop);
-                    activeEmojiPicker = null;
-                };
-
-                // Position
-                modalRoot.appendChild(pop);
-                const r = anchorEl.getBoundingClientRect();
-                const rootR = modalRoot === document.body ? { left: 0, top: 0 } : modalRoot.getBoundingClientRect();
-                const left = Math.min(Math.max(8, r.left - rootR.left), (window.innerWidth - 340));
-                const top = Math.max(8, r.bottom - rootR.top + 8);
-                pop.style.left = `${left}px`;
-                pop.style.top = `${top}px`;
-
-                activeEmojiPicker = { close };
-                document.addEventListener('mousedown', onDocMouseDown, true);
-                document.addEventListener('keydown', onDocKeyDown, true);
-
-                // initial render
-                renderGrid();
-                setActiveCategory('people');
-                // focus search
-                setTimeout(() => {
-                    try { search.focus(); } catch (_) { }
-                }, 0);
-            });
-        };
-
         // Handle comment action button clicks (using event delegation)
         document.addEventListener('click', async (ev) => {
             const target = ev.target.closest('[data-action]');
@@ -7274,272 +4994,70 @@
             } else if (action === 'delete-comment' && commentId) {
                 ev.preventDefault();
                 await deleteComment(commentId);
+            } else if (action === 'thumbs-up-comment' && commentId) {
+                ev.preventDefault();
+                await toggleLike(commentId, target);
             }
         });
 
-        // Handle thumbs-up click separately to avoid impacting existing action handler logic
-        document.addEventListener('click', async (ev) => {
-            const target = ev.target.closest('[data-action="thumbs-up-comment"]');
-            if (!target) return;
-            const commentId = target.dataset.commentId;
-            if (!commentId) return;
+        const toggleLike = async (commentId, buttonElement) => {
+            try {
+                const resp = await fetch(`/api/core/scenario-comments/${commentId}/toggle_like/`, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken()
+                    }
+                });
 
-            ev.preventDefault();
-            await handleThumbsUpCommentClick(target, commentId);
-        });
+                if (resp && resp.ok) {
+                    const data = await resp.json();
 
-        // Handle add-reaction click separately to avoid impacting existing action handler logic
-        document.addEventListener('click', async (ev) => {
-            const target = ev.target.closest('[data-action="add-reaction-comment"]');
-            if (!target) return;
-            const commentId = target.dataset.commentId;
-            if (!commentId) return;
+                    // Update button state
+                    if (data.liked) {
+                        buttonElement.classList.add('comment-action-btn-active');
+                        buttonElement.classList.remove('comment-action-btn-inactive');
+                        buttonElement.dataset.liked = 'true';
+                    } else {
+                        buttonElement.classList.remove('comment-action-btn-active');
+                        buttonElement.classList.add('comment-action-btn-inactive');
+                        buttonElement.dataset.liked = 'false';
+                    }
 
-            ev.preventDefault();
-            await handleAddReactionCommentClick(target, commentId);
-        });
+                    // Update like count display in real-time
+                    const likesCount = data.likes_count || 0;
+                    const countText = likesCount > 0 ? ` (${likesCount})` : '';
+                    const icon = buttonElement.querySelector('.like-icon');
 
-        const closeScenarioCommentsModal = () => {
-            const modal = document.querySelector('[data-role="scenario-comments-modal"]');
-            if (modal) {
-                modal.hidden = true;
-                body.classList.remove('automation-modal-open');
-            }
-            // Cleanup TinyMCE instances
-            if (typeof tinymce !== 'undefined') {
-                tinymce.remove('#comment-content');
-                tinymce.remove('#inline-comment-content');
+                    if (icon) {
+                        // Remove all text nodes after the icon
+                        let nextNode = icon.nextSibling;
+                        while (nextNode) {
+                            const nodeToRemove = nextNode;
+                            nextNode = nextNode.nextSibling;
+                            if (nodeToRemove.nodeType === Node.TEXT_NODE) {
+                                buttonElement.removeChild(nodeToRemove);
+                            }
+                        }
+
+                        // Add the new count text if count > 0
+                        if (countText) {
+                            buttonElement.appendChild(document.createTextNode(countText));
+                        }
+                    }
+                } else {
+                    const errorData = await resp.json().catch(() => ({}));
+                    setStatus(errorData.detail || 'Failed to toggle like.', 'error');
+                }
+            } catch (err) {
+                console.error('Error toggling like:', err);
+                setStatus('Error toggling like.', 'error');
             }
         };
-
-        // Handle add comment button click (+ icon in header)
-        document.addEventListener('click', (ev) => {
-            const target = ev.target.closest('#add-comment-btn');
-            if (target) {
-                ev.preventDefault();
-                const addForm = document.getElementById('add-comment-form');
-                const inlineEditor = document.getElementById('inline-comment-editor');
-
-                // Hide inline editor if visible
-                if (inlineEditor) inlineEditor.style.display = 'none';
-
-                // Show add form
-                if (addForm) {
-                    addForm.style.display = 'block';
-
-                    // Initialize TinyMCE for add form
-                    if (typeof tinymce !== 'undefined') {
-                        tinymce.remove('#comment-content');
-                        tinymce.init({
-                            selector: '#comment-content',
-                            height: 200,
-                            menubar: false,
-                            plugins: [
-                                'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
-                                'searchreplace', 'visualblocks', 'code', 'fullscreen',
-                                'insertdatetime', 'table', 'help', 'wordcount'
-                            ],
-                            toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
-                                'alignleft aligncenter alignright alignjustify | ' +
-                                'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
-                            content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }',
-                            init_instance_callback: function (editor) {
-                                editor.focus();
-                            }
-                        });
-                    }
-                }
-            }
-        });
-
-        // Handle cancel add comment
-        document.addEventListener('click', (ev) => {
-            const target = ev.target.closest('#cancel-add-comment');
-            if (target) {
-                ev.preventDefault();
-                const addForm = document.getElementById('add-comment-form');
-                if (addForm) {
-                    addForm.style.display = 'none';
-                    if (typeof tinymce !== 'undefined') {
-                        tinymce.remove('#comment-content');
-                    }
-                }
-            }
-        });
-
-        // Handle cancel inline editor
-        document.addEventListener('click', (ev) => {
-            const target = ev.target.closest('#cancel-inline-comment');
-            if (target) {
-                ev.preventDefault();
-                const inlineEditor = document.getElementById('inline-comment-editor');
-                if (inlineEditor) {
-                    inlineEditor.style.display = 'none';
-                    // Move back to original position to prevent being orphaned
-                    const commentsList = document.getElementById('comments-list');
-                    if (commentsList && commentsList.parentNode) {
-                        commentsList.parentNode.insertBefore(inlineEditor, commentsList.nextSibling);
-                    }
-                    if (typeof tinymce !== 'undefined') {
-                        tinymce.remove('#inline-comment-content');
-                    }
-                }
-            }
-        });
-
-        // Handle close comments modal
-        document.addEventListener('click', (ev) => {
-            const target = ev.target;
-            if (target && target.dataset && target.dataset.action === 'close-scenario-comments-modal') {
-                ev.preventDefault();
-                closeScenarioCommentsModal();
-            }
-        });
-
-        // Handle add comment form submission (top form - only for adding new comments)
-        const addCommentForm = document.getElementById('add-comment-form');
-        if (addCommentForm) {
-            addCommentForm.addEventListener('submit', async (ev) => {
-                ev.preventDefault();
-
-                const scenarioIdInput = document.getElementById('comment-scenario-id');
-                const scenarioId = scenarioIdInput ? scenarioIdInput.value : null;
-
-                let content = '';
-                if (typeof tinymce !== 'undefined' && tinymce.get('comment-content')) {
-                    content = tinymce.get('comment-content').getContent();
-                } else {
-                    const contentInput = document.getElementById('comment-content');
-                    content = contentInput ? contentInput.value.trim() : '';
-                }
-
-                if (!content) {
-                    setStatus('Please enter a comment.', 'error');
-                    return;
-                }
-
-                if (!scenarioId) {
-                    setStatus('Invalid scenario.', 'error');
-                    return;
-                }
-
-                try {
-                    const resp = await fetch('/api/core/scenario-comments/', {
-                        method: 'POST',
-                        credentials: 'same-origin',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRFToken': getCsrfToken()
-                        },
-                        body: JSON.stringify({ scenario: scenarioId, content: content })
-                    });
-
-                    if (resp && resp.ok) {
-                        setStatus('Comment posted successfully.', 'success');
-                        if (typeof tinymce !== 'undefined' && tinymce.get('comment-content')) {
-                            tinymce.get('comment-content').setContent('');
-                        }
-                        addCommentForm.style.display = 'none';
-                        if (typeof tinymce !== 'undefined') {
-                            tinymce.remove('#comment-content');
-                        }
-                        await loadComments(scenarioId);
-                    } else {
-                        const errorData = await resp.json().catch(() => ({}));
-                        setStatus(errorData.detail || 'Failed to save comment.', 'error');
-                    }
-                } catch (err) {
-                    console.error('Error saving comment:', err);
-                    setStatus('Error saving comment.', 'error');
-                }
-            });
-        }
-
-        // Handle inline comment form submission (for edit/reply)
-        const inlineCommentForm = document.getElementById('inline-comment-form');
-        if (inlineCommentForm) {
-            inlineCommentForm.addEventListener('submit', async (ev) => {
-                ev.preventDefault();
-
-                const mode = inlineCommentForm.getAttribute('data-mode');
-                const commentId = inlineCommentForm.getAttribute('data-comment-id');
-                const parentId = inlineCommentForm.getAttribute('data-parent-id');
-                const scenarioIdInput = document.getElementById('comment-scenario-id');
-                const scenarioId = scenarioIdInput ? scenarioIdInput.value : null;
-
-                let content = '';
-                if (typeof tinymce !== 'undefined' && tinymce.get('inline-comment-content')) {
-                    content = tinymce.get('inline-comment-content').getContent();
-                } else {
-                    const contentInput = document.getElementById('inline-comment-content');
-                    content = contentInput ? contentInput.value.trim() : '';
-                }
-
-                if (!content) {
-                    setStatus('Please enter a comment.', 'error');
-                    return;
-                }
-
-                try {
-                    let url, method, body;
-
-                    if (mode === 'edit') {
-                        url = `/api/core/scenario-comments/${commentId}/`;
-                        method = 'PATCH';
-                        body = JSON.stringify({ content: content });
-                    } else if (mode === 'reply') {
-                        if (!scenarioId || !parentId) {
-                            setStatus('Invalid reply target.', 'error');
-                            return;
-                        }
-                        url = '/api/core/scenario-comments/';
-                        method = 'POST';
-                        body = JSON.stringify({ scenario: scenarioId, content: content, parent: parentId });
-                    }
-
-                    const resp = await fetch(url, {
-                        method: method,
-                        credentials: 'same-origin',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRFToken': getCsrfToken()
-                        },
-                        body: body
-                    });
-
-                    if (resp && resp.ok) {
-                        const statusMsg = mode === 'edit' ? 'Comment updated successfully.' : 'Reply posted successfully.';
-                        setStatus(statusMsg, 'success');
-
-                        // Hide and cleanup inline editor, then move it back to original position
-                        const inlineEditor = document.getElementById('inline-comment-editor');
-                        if (inlineEditor) {
-                            inlineEditor.style.display = 'none';
-                            // Move back to original position (after comments-list) to prevent being destroyed
-                            const commentsList = document.getElementById('comments-list');
-                            if (commentsList && commentsList.parentNode) {
-                                commentsList.parentNode.insertBefore(inlineEditor, commentsList.nextSibling);
-                            }
-                        }
-                        if (typeof tinymce !== 'undefined') {
-                            tinymce.remove('#inline-comment-content');
-                        }
-
-                        await loadComments(scenarioId);
-                    } else {
-                        const errorData = await resp.json().catch(() => ({}));
-                        setStatus(errorData.detail || 'Failed to save comment.', 'error');
-                    }
-                } catch (err) {
-                    console.error('Error saving comment:', err);
-                    setStatus('Error saving comment.', 'error');
-                }
-            });
-        }
 
         // Make openScenarioCommentsModal available globally
         window.openScenarioCommentsModal = openScenarioCommentsModal;
 
     });
-
 })();

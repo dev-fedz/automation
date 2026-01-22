@@ -1,12 +1,20 @@
 <ul class="sidebar-menu" data-testid="sidebar-menu">
+    {% if perms.accounts.can_view_dashboard %}
     <li class="menu-item" data-menu="dashboard"><a href="/" data-testid="menu-dashboard">Dashboard</a></li>
+    {% endif %}
+    {% if 'user_accounts' in ENABLED_MODULE_CODENAMES or 'user_roles' in ENABLED_MODULE_CODENAMES %}
     <li class="has-submenu">
                 <a href="#" data-testid="menu-user-mgmt">User Management</a>
         <ul class="submenu">
+                        {% if 'user_accounts' in ENABLED_MODULE_CODENAMES %}
                         <li class="menu-item" data-menu="users"><a href="/users/" data-testid="menu-users">Users</a></li>
+                        {% endif %}
+                        {% if 'user_roles' in ENABLED_MODULE_CODENAMES %}
                         <li class="menu-item" data-menu="roles"><a href="/roles/" data-testid="menu-roles">Role</a></li>
+                        {% endif %}
         </ul>
     </li>
+    {% endif %}
     <li class="menu-item" data-menu="api-tester"><a href="{% url 'api-tester' %}" data-testid="menu-api-tester">API Tester</a></li>
     <li class="has-submenu" data-menu="projects">
         <a href="#" data-testid="menu-projects">Projects</a>
@@ -72,9 +80,9 @@ document.addEventListener('DOMContentLoaded', function(){
             }
         });
         if(!matched){
-            // default highlight dashboard
-            const dash = document.querySelector('[data-menu="dashboard"]');
-            if(dash) dash.classList.add('active');
+            // default highlight the first available menu item
+            const first = document.querySelector('.sidebar-menu .menu-item');
+            if(first) first.classList.add('active');
         }
         // click change active
         document.querySelectorAll('.sidebar-menu a[href]').forEach(function(a){

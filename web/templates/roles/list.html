@@ -16,7 +16,10 @@
         <p class="panel-subtitle">Assign modules and fine-grained permissions for every workspace role.</p>
       </div>
       <div class="panel-actions">
+        
+        {% if perms.accounts.can_add_group %}
         <a class="btn-primary" href="/roles/create/" data-testid="role-create-link">Create Role</a>
+        {% endif %}
       </div>
     </div>
 
@@ -52,9 +55,15 @@
             </td>
             <td data-label="Actions">
               <div class="table-action-group">
+                {% if perms.accounts.can_view_group %}
                 <button type="button" class="action-button" data-role-view="{{ role.id }}" data-testid="role-view-{{ role.id }}">View</button>
+                {% endif %}
+                {% if perms.accounts.can_change_group %}
                 <a class="action-button" href="/roles/{{ role.id }}/edit/" data-testid="role-edit-{{ role.id }}">Edit</a>
+                {% endif %}
+                {% if perms.accounts.can_delete_group %}
                 <button type="button" class="action-button" data-variant="danger" data-role-delete="{{ role.id }}" data-testid="role-delete-{{ role.id }}">Delete</button>
+                {% endif %}
               </div>
             </td>
           </tr>

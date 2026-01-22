@@ -6,6 +6,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.conf.urls.static import static
 from django.http import JsonResponse, HttpResponseNotFound, HttpResponseServerError
+from django.http import HttpResponseForbidden
 from django.shortcuts import render, redirect
 from django.urls import include, path
 from django.views.decorators.http import require_GET
@@ -35,8 +36,65 @@ def login_view(request):
 		return redirect('dashboard')
 	return render(request, 'base/login.html')
 
+
+def _first_enabled_module_url_for_user(user):
+	"""Return a URL for the first enabled module for the user, or None.
+
+	"Enabled" is derived from the user's role-module assignments (not from sidebar markup).
+	Order is determined by Module.order then id.
+	"""
+	# Avoid hard dependency if accounts app is removed.
+	if not django_apps.is_installed('apps.accounts'):
+		return None
+
+	from apps.accounts.models import Module  # local import
+
+	def url_for_module_code(code: str):
+		# Only include modules that have a real page route.
+		# Dashboard is handled separately (requires can_view_dashboard).
+		if code in {'dashboard'}:
+			return None
+		if code in {'user_accounts', 'user_mgmt'}:
+			return '/users/'
+		if code in {'user_roles'}:
+			return '/roles/'
+		if code in {'api_tester'}:
+			return '/automation/api-tester/'
+		if code in {'projects_project'}:
+			return '/automation/test-plans/'
+		if code in {'projects_module'}:
+			return '/data-management/test-modules/'
+		if code in {'projects_scenario'}:
+			return '/automation/test-scenarios/'
+		if code in {'projects_testcase'}:
+			return '/automation/test-cases/'
+		if code in {'automation'}:
+			return '/automation/'
+		if code in {'api_environment'}:
+			return '/data-management/environments/'
+		return None
+
+	qs = Module.objects.all()
+	if not user.is_superuser:
+		groups = user.groups.all()
+		qs = qs.filter(rolemodule__role__in=groups).distinct()
+	qs = qs.order_by('order', 'id')
+
+	for m in qs:
+		url = url_for_module_code(str(m.codename or '').strip())
+		if url:
+			return url
+	return None
+
 @login_required(login_url='/login/')
 def dashboard_view(request):  # protected
+	# If the user doesn't have dashboard access, don't render the dashboard content.
+	# Redirect to the first enabled module instead.
+	if not request.user.has_perm('accounts.can_view_dashboard'):
+		target = _first_enabled_module_url_for_user(request.user)
+		if target:
+			return redirect(target)
+		return HttpResponseForbidden('No enabled modules for this account.')
 	return render(request, 'dashboard/index.html')
 
 def logout_view(request):

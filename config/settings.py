@@ -117,6 +117,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                     "config.context_processors.static_version",
                     "config.context_processors.breadcrumbs",
+                    "config.context_processors.enabled_modules",
             ],
         },
     },
