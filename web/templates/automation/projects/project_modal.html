@@ -1,0 +1,27 @@
+<div class="automation-modal" data-role="project-modal" hidden>
+    <div class="automation-modal__backdrop" data-action="close-project-modal"></div>
+    <div class="automation-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="automation-project-modal-title">
+        <header class="automation-modal__header">
+            <h2 id="automation-project-modal-title">Create Project</h2>
+            <button type="button" class="automation-modal__close" data-action="close-project-modal" aria-label="Close project modal">&times;</button>
+        </header>
+        <form id="project-form" class="automation-form" autocomplete="off">
+            <div class="form-alert" data-role="form-errors" hidden></div>
+            <fieldset>
+                <legend class="sr-only">Project details</legend>
+                <div class="form-row">
+                    <label for="project-name">Name<span aria-hidden="true">*</span></label>
+                    <input type="text" id="project-name" name="name" required maxlength="150" placeholder="Billing Automation">
+                </div>
+                <div class="form-row">
+                    <label for="project-description">Description</label>
+                    <textarea id="project-description" name="description" rows="4" placeholder="Short summary for the team."></textarea>
+                </div>
+            </fieldset>
+            <div class="form-actions">
+                <button type="submit" class="btn-primary" data-role="project-submit">Save</button>
+                <button type="button" class="btn-secondary" data-action="close-project-modal">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>

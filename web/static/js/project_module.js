@@ -96,6 +96,23 @@
         return;
     }
 
+    const hasPermissionMarker = (id) => !!root.querySelector(`#${id}`);
+    const boolFromDataset = (value) => (String(value || '') === '1');
+
+    // Prefer dataset if present (backwards compatible), otherwise infer via template-controlled markers.
+    const canViewProject = root.dataset && Object.prototype.hasOwnProperty.call(root.dataset, 'canViewProject')
+        ? boolFromDataset(root.dataset.canViewProject)
+        : hasPermissionMarker('perm-can-view-project');
+    const canChangeProject = root.dataset && Object.prototype.hasOwnProperty.call(root.dataset, 'canChangeProject')
+        ? boolFromDataset(root.dataset.canChangeProject)
+        : hasPermissionMarker('perm-can-change-project');
+    const canCreateProject = root.dataset && Object.prototype.hasOwnProperty.call(root.dataset, 'canCreateProject')
+        ? boolFromDataset(root.dataset.canCreateProject)
+        : hasPermissionMarker('perm-can-create-project');
+
+    // Match server-side `{% if %}` intent: don't automatically treat change as view.
+    const canViewProjectEffective = canViewProject;
+
     let projects = parseJsonScript('automation-initial-projects');
     if (!Array.isArray(projects)) {
         projects = [];
@@ -147,6 +164,14 @@
         const rows = projects.map((project) => {
             const counts = resolveCounts(project);
             const description = project.description ? `<div class="table-secondary">${escapeHtml(project.description)}</div>` : '';
+            const actions = [
+                canViewProjectEffective
+                    ? `<button type="button" class="action-button" data-action="view-project" data-project-id="${escapeHtml(project.id)}">View</button>`
+                    : '',
+                canChangeProject
+                    ? `<button type="button" class="action-button" data-action="edit-project" data-project-id="${escapeHtml(project.id)}">Edit</button>`
+                    : '',
+            ].filter(Boolean).join('');
             return (
                 `<tr data-project-id="${escapeHtml(project.id)}">` +
                 `<td data-label="Name"><strong>${escapeHtml(project.name || 'Untitled project')}</strong>${description}</td>` +
@@ -154,8 +179,7 @@
                 `<td data-label="Scenarios">${escapeHtml(counts.scenarios)}</td>` +
                 '<td data-label="Actions">' +
                 '<div class="table-action-group">' +
-                `<button type="button" class="action-button" data-action="view-project" data-project-id="${escapeHtml(project.id)}">View</button>` +
-                `<button type="button" class="action-button" data-action="edit-project" data-project-id="${escapeHtml(project.id)}">Edit</button>` +
+                actions +
                 '</div>' +
                 '</td>' +
                 '</tr>'
@@ -170,10 +194,10 @@
         }
         if (visible) {
             modal.removeAttribute('hidden');
-            document.body.classList.add('modal-open');
+            document.body.classList.add('automation-modal-open');
         } else {
             modal.setAttribute('hidden', 'hidden');
-            document.body.classList.remove('modal-open');
+            document.body.classList.remove('automation-modal-open');
         }
     };
 
@@ -210,6 +234,15 @@
     };
 
     const openModal = (mode, project) => {
+        // Enforce permissions at the modal level as well (template alone can't vary per-mode).
+        if (mode === 'create' && !canCreateProject) {
+            showToast('You do not have permission to create projects.', 'error');
+            return;
+        }
+        if (mode === 'edit' && !canChangeProject) {
+            mode = 'view';
+        }
+
         state.mode = mode;
         state.projectId = project && project.id ? project.id : null;
         resetFormAlert();
@@ -230,6 +263,14 @@
             form.reset();
             nameInput.value = project && project.name ? project.name : '';
             descriptionInput.value = project && project.description ? project.description : '';
+        }
+
+        // Ensure the submit button is only visible when the user can actually submit.
+        const canSubmit = (mode === 'create' && canCreateProject) || (mode === 'edit' && canChangeProject);
+        if (!canSubmit) {
+            submitButton.setAttribute('hidden', 'hidden');
+        } else {
+            submitButton.removeAttribute('hidden');
         }
         toggleModal(true);
     };
@@ -386,6 +427,12 @@
             return;
         }
         if (action === 'view-project' || action === 'edit-project') {
+            if (action === 'view-project' && !canViewProjectEffective) {
+                return;
+            }
+            if (action === 'edit-project' && !canChangeProject) {
+                return;
+            }
             const projectId = trigger.getAttribute('data-project-id');
             const project = findProject(projectId);
             if (!project) {

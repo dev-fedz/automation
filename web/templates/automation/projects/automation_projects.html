@@ -10,6 +10,9 @@
 
 {% block content %}
 <div class="automation-dashboard" id="automation-app">
+    {% if perms.accounts.can_view_project %}<span id="perm-can-view-project" hidden></span>{% endif %}
+    {% if perms.accounts.can_change_project %}<span id="perm-can-change-project" hidden></span>{% endif %}
+    {% if perms.accounts.can_create_project %}<span id="perm-can-create-project" hidden></span>{% endif %}
     <section class="automation-panel" data-panel="projects" aria-labelledby="headline-projects">
         <div class="panel-header">
             <div>
@@ -17,7 +20,9 @@
                 <p class="panel-subtitle">Track automation readiness per project with a quick view of modules and scenarios.</p>
             </div>
             <div class="panel-actions">
+                {% if perms.accounts.can_create_project %}
                 <button type="button" class="btn-primary" data-action="open-project-modal">Create Project</button>
+                {% endif %}
             </div>
         </div>
         <div class="card table-card automation-table-card" aria-live="polite">
@@ -42,8 +47,12 @@
                                 <td data-label="Scenarios">{{ plan.scenarios_count|default:plan.scenarios|length }}</td>
                                 <td data-label="Actions">
                                     <div class="table-action-group">
+                                        {% if perms.accounts.can_view_project %}
                                         <button type="button" class="action-button" data-action="view-project" data-project-id="{{ plan.id }}">View</button>
+                                        {% endif %}
+                                        {% if perms.accounts.can_change_project %}
                                         <button type="button" class="action-button" data-action="edit-project" data-project-id="{{ plan.id }}">Edit</button>
+                                        {% endif %}
                                     </div>
                                 </td>
                             </tr>
@@ -58,33 +67,7 @@
         </div>
     </section>
 
-    <div class="automation-modal" data-role="project-modal" hidden>
-        <div class="automation-modal__backdrop" data-action="close-project-modal"></div>
-        <div class="automation-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="automation-project-modal-title">
-            <header class="automation-modal__header">
-                <h2 id="automation-project-modal-title">Create Project</h2>
-                <button type="button" class="automation-modal__close" data-action="close-project-modal" aria-label="Close project modal">&times;</button>
-            </header>
-            <form id="project-form" class="automation-form" autocomplete="off">
-                <div class="form-alert" data-role="form-errors" hidden></div>
-                <fieldset>
-                    <legend class="sr-only">Project details</legend>
-                    <div class="form-row">
-                        <label for="project-name">Name<span aria-hidden="true">*</span></label>
-                        <input type="text" id="project-name" name="name" required maxlength="150" placeholder="Billing Automation">
-                    </div>
-                    <div class="form-row">
-                        <label for="project-description">Description</label>
-                        <textarea id="project-description" name="description" rows="4" placeholder="Short summary for the team."></textarea>
-                    </div>
-                </fieldset>
-                <div class="form-actions">
-                    <button type="submit" class="btn-primary" data-role="project-submit">Save</button>
-                    <button type="button" class="btn-secondary" data-action="close-project-modal">Cancel</button>
-                </div>
-            </form>
-        </div>
-    </div>
+    {% include "automation/projects/project_modal.html" %}
 
     {{ initial_plans|json_script:"automation-initial-projects" }}
     {{ api_endpoints|json_script:"automation-api-endpoints" }}
@@ -93,5 +76,5 @@
 
 {% block body_js %}
     {{ block.super }}
-    <script src="{% static 'js/project_module.js' %}"></script>
+    <script src="{% static 'js/project_module.js' %}?v={{ STATIC_VERSION }}"></script>
 {% endblock %}

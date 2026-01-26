@@ -2006,15 +2006,16 @@ def automation_testcase_reports_export(request):
     return resp
 
 
+@ensure_csrf_cookie
 @login_required
-def automation_test_plans(request):
+def automation_projects(request):
     data = _prepare_automation_data()
     context = {
         "initial_plans": data["plans"],
         "initial_metrics": data["metrics"],
         "api_endpoints": data["api_endpoints"],
     }
-    return render(request, "core/automation_test_plans.html", context)
+    return render(request, "automation/projects/automation_projects.html", context)
 
 
 @ensure_csrf_cookie

@@ -15,16 +15,28 @@
         </ul>
     </li>
     {% endif %}
+    {% if perms.accounts.can_use_api_tester %}
     <li class="menu-item" data-menu="api-tester"><a href="{% url 'api-tester' %}" data-testid="menu-api-tester">API Tester</a></li>
+    {% endif %}
+    {% if 'projects_project' in ENABLED_MODULE_CODENAMES or 'projects_module' in ENABLED_MODULE_CODENAMES or 'projects_scenario' in ENABLED_MODULE_CODENAMES or 'projects_testcase' in ENABLED_MODULE_CODENAMES %}
     <li class="has-submenu" data-menu="projects">
         <a href="#" data-testid="menu-projects">Projects</a>
         <ul class="submenu">
+            {% if 'projects_project' in ENABLED_MODULE_CODENAMES %}
             <li class="menu-item" data-menu="projects-project"><a href="{% url 'automation-test-plans' %}" data-testid="menu-projects-project">Project</a></li>
+            {% endif %}
+            {% if 'projects_module' in ENABLED_MODULE_CODENAMES %}
             <li class="menu-item" data-menu="projects-modules"><a href="{% url 'data-management-test-modules' %}" data-testid="menu-projects-modules">Modules</a></li>
+            {% endif %}
+            {% if 'projects_scenario' in ENABLED_MODULE_CODENAMES %}
             <li class="menu-item" data-menu="projects-scenarios"><a href="{% url 'automation-test-scenarios' %}" data-testid="menu-projects-scenarios">Scenarios</a></li>
+            {% endif %}
+            {% if 'projects_testcase' in ENABLED_MODULE_CODENAMES %}
             <li class="menu-item" data-menu="projects-test-cases"><a href="{% url 'automation-test-cases' %}" data-testid="menu-projects-cases">Test Case</a></li>
+            {% endif %}
         </ul>
     </li>
+    {% endif %}
     <li class="has-submenu" data-menu="automation">
         <a href="#" data-testid="menu-automation">Automation</a>
         <ul class="submenu">

@@ -161,7 +161,9 @@
                     <select id="module-filter" class="inline-select" data-action="module-filter" disabled>
                         <option value="">All modules</option>
                     </select>
+                    {% if perms.accounts.can_create_project_scenario %}
                     <button type="button" class="btn-primary" id="open-new-scenario" data-action="open-new-scenario">New Scenario</button>
+                    {% endif %}
                 </div>
             </div>
             <div class="card table-card automation-table-card" aria-live="polite">

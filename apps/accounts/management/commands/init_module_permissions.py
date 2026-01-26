@@ -51,7 +51,7 @@ class Command(BaseCommand):
 				('Delete (Archive)', 'can_delete_project_testcase'),
 			],
 			'api_tester': [
-				('Read (View)', 'can_view_user'),
+				('Read (View)', 'can_use_api_tester'),
 			],
 			'automation': [
 				('Read (Overview)', 'can_view_automation'),

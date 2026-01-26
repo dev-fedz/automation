@@ -22,7 +22,9 @@
                     <select id="test-modules-filter-project" class="inline-select" aria-label="Filter by project">
                         <option value="">All projects</option>
                     </select>
+                    {% if perms.accounts.can_create_project_module %}
                     <button type="button" class="btn-primary" data-action="open-test-modules-modal">New Module</button>
+                    {% endif %}
                 </div>
             </div>
             <div class="card table-card automation-table-card" aria-live="polite">
