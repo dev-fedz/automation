@@ -9,7 +9,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="automation-dashboard" id="data-management-app">
+<div class="automation-dashboard" id="data-management-app" data-current-user-id="{% if request.user.is_authenticated %}{{ request.user.id }}{% else %}null{% endif %}">
     <section class="automation-panel" data-panel="data-management" aria-labelledby="headline-data-management">
         <div class="panel-header">
             <div>

@@ -9,7 +9,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="automation-dashboard" id="data-management-app">
+<div class="automation-dashboard" id="data-management-app" data-current-user-id="{% if request.user.is_authenticated %}{{ request.user.id }}{% else %}null{% endif %}">
     {% if perms.accounts.can_view_project_module %}<span id="perm-can-view-project-module" hidden></span>{% endif %}
     {% if perms.accounts.can_change_project_module %}<span id="perm-can-change-project-module" hidden></span>{% endif %}
     {% if perms.accounts.can_delete_project_module %}<span id="perm-can-delete-project-module" hidden></span>{% endif %}

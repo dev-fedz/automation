@@ -1996,3 +1996,17 @@ body.automation-modal-open {
 .panel-controls input[type="date"] {
     width: 150px;
 }
+
+/* Scenario/TestCase comments: keep action buttons visible (wrap instead of clipping) */
+.comment-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.comment-action-btn[disabled],
+.comment-action-btn[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

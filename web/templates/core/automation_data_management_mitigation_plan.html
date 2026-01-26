@@ -9,7 +9,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="automation-dashboard" id="data-management-app">
+<div class="automation-dashboard" id="data-management-app" data-current-user-id="{% if request.user.is_authenticated %}{{ request.user.id }}{% else %}null{% endif %}">
     <div class="automation-grid data-management-grid">
 
         <section class="automation-panel data-card" data-entity="mitigation-plans" data-section="mitigation" aria-labelledby="headline-mitigation" id="section-mitigation">

@@ -3079,7 +3079,6 @@
                                 <div class="table-action-group">
                                     ${viewBtn}
                                     ${editBtn}
-                                    <button type="button" class="action-button" data-action="comment-scenario" data-scenario-id="${scenario.id}">Comment</button>
                                     ${deleteBtn}
                                 </div>
                             </td>
@@ -3593,14 +3592,11 @@
                 if (!tableEl || !tableEl.contains(trigger)) return; // ignore clicks outside our table
                 const action = trigger.dataset && trigger.dataset.action ? trigger.dataset.action : null;
                 if (!action) return;
-                if (!['view-scenario', 'edit-scenario', 'add-case', 'delete-scenario', 'comment-scenario'].includes(action)) return;
+                if (!['view-scenario', 'edit-scenario', 'add-case', 'delete-scenario'].includes(action)) return;
                 const sid = trigger.dataset && trigger.dataset.scenarioId ? trigger.dataset.scenarioId : null;
                 if (!sid) return;
                 ev.preventDefault();
-                if (action === 'comment-scenario') {
-                    // Open comments modal
-                    openScenarioCommentsModal(sid);
-                } else if (action === 'view-scenario' || action === 'edit-scenario') {
+                if (action === 'view-scenario' || action === 'edit-scenario') {
                     // reuse existing openPlanModal / view handlers - for simplicity
                     // fetch scenario detail and open a simple modal via existing plan modal if present
                     try {
@@ -4838,20 +4834,36 @@
 
                     // Get current user ID from data attribute
                     const appElement = document.getElementById('automation-app');
-                    const currentUserId = appElement && appElement.dataset.currentUserId !== 'null'
-                        ? parseInt(appElement.dataset.currentUserId, 10)
-                        : null;
+                    const currentUserId = (() => {
+                        try {
+                            const raw = appElement && appElement.dataset ? appElement.dataset.currentUserId : null;
+                            if (!raw || raw === 'null') return null;
+                            const id = parseInt(String(raw), 10);
+                            return Number.isFinite(id) ? id : null;
+                        } catch (e) {
+                            return null;
+                        }
+                    })();
 
                     const renderComment = (comment, isReply = false) => {
-                        const canEdit = currentUserId && comment.user === currentUserId;
-                        const editBtn = canEdit ? `
-                            <button type="button" class="comment-action-btn" data-action="edit-comment" data-comment-id="${comment.id}" title="Edit">
+                        const canEdit = currentUserId && Number(comment.user) === Number(currentUserId);
+                        const editBtnDisabledAttr = canEdit ? '' : 'disabled aria-disabled="true"';
+                        const deleteBtnDisabledAttr = canEdit ? '' : 'disabled aria-disabled="true"';
+                        const editBtn = `
+                            <button type="button" class="comment-action-btn" data-action="edit-comment" data-comment-id="${comment.id}" title="Edit" ${editBtnDisabledAttr}>
                                 <span>✏️</span>
-                            </button>` : '';
-                        const deleteBtn = canEdit ? `
-                            <button type="button" class="comment-action-btn" data-action="delete-comment" data-comment-id="${comment.id}" title="Delete">
+                            </button>`;
+                        const deleteBtn = `
+                            <button type="button" class="comment-action-btn" data-action="delete-comment" data-comment-id="${comment.id}" title="Delete" ${deleteBtnDisabledAttr}>
                                 <span>🗑️</span>
-                            </button>` : '';
+                            </button>`;
+
+                        const replyBtnDisabledAttr = isReply ? 'disabled aria-disabled="true"' : '';
+
+                        const attachBtn = `
+                            <button type="button" class="comment-action-btn" data-action="attach-comment" data-comment-id="${comment.id}" title="Attach file">
+                                <span>📎</span>
+                            </button>`;
 
                         const hasLiked = comment.user_has_liked || false;
                         const likesCount = comment.likes_count || 0;
@@ -4870,15 +4882,16 @@
                                 </div>
                                 <div class="comment-content" data-comment-content>${comment.content || ''}</div>
                                 <div class="comment-actions">
-                                    ${!isReply ? `<button type="button" class="comment-action-btn" data-action="reply-comment" data-comment-id="${comment.id}" title="Reply">
+                                    <button type="button" class="comment-action-btn" data-action="reply-comment" data-comment-id="${comment.id}" title="Reply" ${replyBtnDisabledAttr}>
                                         <span>↩️</span>
-                                    </button>` : ''}
+                                    </button>
                                     <button type="button" class="comment-action-btn ${likeClass}" data-action="thumbs-up-comment" data-comment-id="${comment.id}" data-liked="${hasLiked}" title="Thumbs Up">
                                         <span class="like-icon">👍</span>${likeCountText}
                                     </button>
                                     <button type="button" class="comment-action-btn" data-action="add-reaction-comment" data-comment-id="${comment.id}" title="Add Reaction">
                                         <span>😊</span>
                                     </button>
+                                    ${attachBtn}
                                     ${editBtn}
                                     ${deleteBtn}
                                 </div>
@@ -5060,8 +5073,86 @@
             } else if (action === 'thumbs-up-comment' && commentId) {
                 ev.preventDefault();
                 await toggleLike(commentId, target);
+            } else if (action === 'attach-comment' && commentId) {
+                ev.preventDefault();
+                try {
+                    window.__scenarioCommentsAttachCommentId = String(commentId);
+                } catch (e) { /* ignore */ }
+                const fileInput = document.getElementById('scenario-comments-attachments-input');
+                if (fileInput && typeof fileInput.click === 'function') {
+                    try { fileInput.click(); } catch (e) { /* ignore */ }
+                }
             }
         });
+
+        // Scenario comments modal: attachments upload
+        try {
+            const fileInput = document.getElementById('scenario-comments-attachments-input');
+            if (fileInput && !fileInput.dataset.attachBound) {
+                fileInput.dataset.attachBound = '1';
+                fileInput.addEventListener('change', async () => {
+                    const commentId = (() => {
+                        try {
+                            const id = window.__scenarioCommentsAttachCommentId;
+                            window.__scenarioCommentsAttachCommentId = null;
+                            return id ? String(id) : null;
+                        } catch (e) {
+                            return null;
+                        }
+                    })();
+
+                    if (!commentId) {
+                        try { fileInput.value = ''; } catch (e) { /* ignore */ }
+                        return;
+                    }
+
+                    const selectedFiles = (() => {
+                        try { return Array.from(fileInput.files || []); } catch (e) { return []; }
+                    })();
+
+                    if (!selectedFiles.length) {
+                        try { fileInput.value = ''; } catch (e) { /* ignore */ }
+                        return;
+                    }
+
+                    const scenarioIdInput = document.getElementById('comment-scenario-id');
+                    const scenarioId = scenarioIdInput ? scenarioIdInput.value : null;
+
+                    const url = `/api/core/scenario-comments/${encodeURIComponent(String(commentId))}/attachments/`;
+                    const formData = new FormData();
+                    selectedFiles.forEach((f) => formData.append('files', f));
+
+                    try {
+                        fileInput.disabled = true;
+                        const resp = await fetch(url, {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'X-CSRFToken': getCsrfToken() },
+                            body: formData,
+                        });
+                        if (!resp.ok) {
+                            let msg = 'Upload failed.';
+                            try {
+                                const data = await resp.json();
+                                if (data && data.detail) msg = String(data.detail);
+                            } catch (e) { /* ignore */ }
+                            throw new Error(msg);
+                        }
+                        setStatus('Attachment uploaded.', 'success');
+                        if (scenarioId) {
+                            await loadComments(scenarioId);
+                        }
+                    } catch (err) {
+                        setStatus(err instanceof Error ? err.message : 'Failed to upload attachment.', 'error');
+                    } finally {
+                        try { fileInput.value = ''; } catch (e) { /* ignore */ }
+                        fileInput.disabled = false;
+                    }
+                });
+            }
+        } catch (e) {
+            // ignore
+        }
 
         const toggleLike = async (commentId, buttonElement) => {
             try {

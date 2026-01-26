@@ -1802,14 +1802,16 @@
                     if (!comment) return '';
 
                     const canEdit = currentUserId && Number(comment.user) === Number(currentUserId);
-                    const editBtn = canEdit ? `
-                        <button type="button" class="comment-action-btn" data-action="view-scenario-edit-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Edit">
+                    const editBtnDisabledAttr = canEdit ? '' : 'disabled aria-disabled="true"';
+                    const deleteBtnDisabledAttr = canEdit ? '' : 'disabled aria-disabled="true"';
+                    const editBtn = `
+                        <button type="button" class="comment-action-btn" data-action="view-scenario-edit-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Edit" ${editBtnDisabledAttr}>
                             <span>✏️</span>
-                        </button>` : '';
-                    const deleteBtn = canEdit ? `
-                        <button type="button" class="comment-action-btn" data-action="view-scenario-delete-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Delete">
+                        </button>`;
+                    const deleteBtn = `
+                        <button type="button" class="comment-action-btn" data-action="view-scenario-delete-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Delete" ${deleteBtnDisabledAttr}>
                             <span>🗑️</span>
-                        </button>` : '';
+                        </button>`;
 
                     const attachBtn = `
                         <button type="button" class="comment-action-btn" data-action="view-scenario-attach-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Attach file">
@@ -1906,7 +1908,7 @@
                             </div>
                             <div class="comment-content" data-comment-content data-raw-html="${escapeHtml(rawCommentHtml)}">${commentDisplayHtml}</div>
                             <div class="comment-actions">
-                                ${!isReply ? `<button type="button" class="comment-action-btn" data-action="view-scenario-reply-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Reply"><span>↩️</span></button>` : ''}
+                                <button type="button" class="comment-action-btn" data-action="view-scenario-reply-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Reply" ${isReply ? 'disabled aria-disabled="true"' : ''}><span>↩️</span></button>
                                 <button type="button" class="comment-action-btn" data-action="view-scenario-thumbs-up-comment" data-comment-id="${escapeHtml(comment.id || '')}" data-liked="${isLiked ? 'true' : 'false'}" data-likes-count="${escapeHtml(String(likesCount))}" aria-pressed="${isLiked ? 'true' : 'false'}" title="Thumbs Up">
                                     <span data-role="thumbs-up-icon" style="${thumbsUpIconStyle}">👍</span>
                                     <span data-role="thumbs-up-count" style="${thumbsUpCountStyle}">${escapeHtml(String(likesCount))}</span>
