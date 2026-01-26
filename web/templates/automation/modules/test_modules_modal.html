@@ -1,0 +1,42 @@
+<div class="automation-modal" data-role="test-modules-modal" hidden>
+    <div class="automation-modal__backdrop" data-action="close-test-modules-modal"></div>
+    <div class="automation-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="test-modules-modal-title">
+        <header class="automation-modal__header">
+            <h2 id="test-modules-modal-title">New Test Module</h2>
+            <button type="button" class="automation-modal__close" data-action="close-test-modules-modal" aria-label="Close test modules modal">&times;</button>
+        </header>
+        <form id="test-modules-form" class="automation-form" autocomplete="off">
+            <fieldset>
+                <legend class="sr-only">Module details</legend>
+                <div class="form-row">
+                    <label for="test-modules-title">Title<span aria-hidden="true">*</span></label>
+                    <input type="text" id="test-modules-title" name="title" required maxlength="255" placeholder="User Management">
+                </div>
+                <div class="form-row">
+                    <label for="test-modules-description">Description</label>
+                    <textarea id="test-modules-description" name="description" rows="3" placeholder="Describe the module under test."></textarea>
+                </div>
+                <div class="form-row">
+                    <label for="test-modules-project">Project</label>
+                    <select id="test-modules-project" name="project">
+                        <option value="">— Select project —</option>
+                    </select>
+                </div>
+            </fieldset>
+            <div class="form-meta" data-role="test-modules-meta" hidden>
+                <div class="form-meta__entry">
+                    <span class="form-meta__label">Created</span>
+                    <span class="form-meta__value"><time data-role="test-modules-created">&mdash;</time></span>
+                </div>
+                <div class="form-meta__entry">
+                    <span class="form-meta__label">Updated</span>
+                    <span class="form-meta__value"><time data-role="test-modules-updated">&mdash;</time></span>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn-primary" data-role="test-modules-submit">Save</button>
+                <button type="button" class="btn-secondary" data-action="close-test-modules-modal">Close</button>
+            </div>
+        </form>
+    </div>
+</div>

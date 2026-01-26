@@ -488,6 +488,15 @@
         const initialSection = readScriptJson("data-management-initial-section") || "";
         const apiEndpoints = readScriptJson("automation-api-endpoints") || {};
 
+        const hasPermissionMarker = (id) => !!root.querySelector(`#${id}`);
+        const canViewProjectModule = hasPermissionMarker('perm-can-view-project-module');
+        const canChangeProjectModule = hasPermissionMarker('perm-can-change-project-module');
+        const canDeleteProjectModule = hasPermissionMarker('perm-can-delete-project-module');
+        const canCreateProjectScenario = hasPermissionMarker('perm-can-create-project-scenario');
+        const canViewProjectScenario = hasPermissionMarker('perm-can-view-project-scenario');
+        const canChangeProjectScenario = hasPermissionMarker('perm-can-change-project-scenario');
+        const canDeleteProjectScenario = hasPermissionMarker('perm-can-delete-project-scenario');
+
         const endpoints = {
             environments: ensureTrailingSlash(apiEndpoints.environments || ""),
             risks: ensureTrailingSlash(apiEndpoints.risks || ""),
@@ -848,8 +857,9 @@
                                 <td class="scenario-updated">${escapeHtml(formatDateTime(s.updated_at || null))}</td>
                                 <td class="scenario-actions">
                                     <div class="table-action-group">
-                                        <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${s.id}">View</button>
-                                        <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${s.id}" data-variant="danger">Delete</button>
+                                        ${canViewProjectScenario ? `<button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${s.id}">View</button>` : ''}
+                                        ${canChangeProjectScenario ? `<button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${s.id}">Edit</button>` : ''}
+                                        ${canDeleteProjectScenario ? `<button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${s.id}" data-variant="danger">Delete</button>` : ''}
                                     </div>
                                 </td>
                             </tr>
@@ -867,9 +877,9 @@
                         <td>${escapeHtml(formatDateTime(m.updated_at || null))}</td>
                         <td>
                             <div class="table-action-group">
-                                <button type="button" class="action-button" data-action="view-test-module" data-module-id="${m.id}">View</button>
-                                <button type="button" class="action-button" data-action="edit-test-module" data-module-id="${m.id}">Edit</button>
-                                <button type="button" class="action-button" data-action="delete-test-module" data-module-id="${m.id}" data-variant="danger">Delete</button>
+                                ${canViewProjectModule ? `<button type="button" class="action-button" data-action="view-test-module" data-module-id="${m.id}">View</button>` : ''}
+                                ${canChangeProjectModule ? `<button type="button" class="action-button" data-action="edit-test-module" data-module-id="${m.id}">Edit</button>` : ''}
+                                ${canDeleteProjectModule ? `<button type="button" class="action-button" data-action="delete-test-module" data-module-id="${m.id}" data-variant="danger">Delete</button>` : ''}
                             </div>
                         </td>
                     </tr>
@@ -878,7 +888,7 @@
                             <div class="module-body">
                                 <div class="module-body-actions">
                                     <input type="search" class="automation-search" placeholder="Search scenarios" data-action="module-scenario-search" data-module-id="${m.id}" value="${escapeHtml(state.moduleScenarioSearch && state.moduleScenarioSearch[m.id] ? state.moduleScenarioSearch[m.id] : '')}">
-                                    <button type="button" class="btn-primary" data-action="add-scenario-to-module" data-module-id="${m.id}">Add Scenario</button>
+                                    ${canCreateProjectScenario ? `<button type="button" class="btn-primary" data-action="add-scenario-to-module" data-module-id="${m.id}">Add Scenario</button>` : ''}
                                 </div>
                                 <div class="module-scenarios-wrapper">
                                     <table class="module-scenarios-table">

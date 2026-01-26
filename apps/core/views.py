@@ -2207,7 +2207,7 @@ def automation_data_management_test_tools(request, section: str | None = None):
 
 @ensure_csrf_cookie
 @login_required
-def automation_data_management_test_modules(request, section: str | None = None):
+def automation_project_modules(request, section: str | None = None):
     """Render Test Modules focused data management page."""
     data = _prepare_automation_data()
     context = {
@@ -2217,10 +2217,11 @@ def automation_data_management_test_modules(request, section: str | None = None)
         "initial_mitigation_plans": data["mitigation_plans"],
         "initial_risk_mitigations": data["risk_mitigations"],
         "initial_plans": data.get("plans", []),
+        "initial_test_modules": data.get("test_modules", []),
         "api_endpoints": data["api_endpoints"],
         "initial_section": section or "test-modules",
     }
-    return render(request, "core/automation_data_management_test_modules.html", context)
+    return render(request, "automation/modules/automation_project_modules.html", context)
 
 
 
