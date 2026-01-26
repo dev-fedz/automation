@@ -2974,6 +2974,22 @@
         };
 
         const renderScenarioList = () => {
+            const htmlToPlainText = (value) => {
+                if (!value) return '';
+                try {
+                    const raw = String(value);
+                    if (typeof document === 'undefined' || !document.createElement) {
+                        return raw.replace(/\s+/g, ' ').trim();
+                    }
+                    const wrapper = document.createElement('div');
+                    wrapper.innerHTML = raw;
+                    const text = (wrapper.textContent || '').replace(/\u00A0/g, ' ');
+                    return text.replace(/\s+/g, ' ').trim();
+                } catch (e) {
+                    try { return String(value).replace(/\s+/g, ' ').trim(); } catch (_e) { return ''; }
+                }
+            };
+
             // support pages that render scenarios in a table body (`scenarioTableBody`)
             // or a legacy `scenarioList` container. If neither exists, bail out.
             if (!els.scenarioTableBody && !els.scenarioList) {
@@ -3070,7 +3086,7 @@
                     return `
                         <tr data-scenario-id="${scenario.id}">
                             <td>${escapeHtml(scenario.title || '')}</td>
-                            <td>${escapeHtml(scenario.description || '')}</td>
+                            <td>${escapeHtml(htmlToPlainText(scenario.description || ''))}</td>
                             <td>${escapeHtml(moduleLabel)}</td>
                             <td>${escapeHtml(formatDateTime(scenario.created_at || null))}</td>
                             <td>${escapeHtml(formatDateTime(scenario.updated_at || null))}</td>
@@ -3148,7 +3164,7 @@
                                         return `
                                             <tr data-scenario-id="${scenario.id}">
                                                 <td>${escapeHtml(scenario.title || '')}</td>
-                                                <td>${escapeHtml(scenario.description || '')}</td>
+                                                <td>${escapeHtml(htmlToPlainText(scenario.description || ''))}</td>
                                                 <td>${escapeHtml(moduleLabel)}</td>
                                                 <td>${escapeHtml(formatDateTime(scenario.created_at || null))}</td>
                                                 <td>${escapeHtml(formatDateTime(scenario.updated_at || null))}</td>
@@ -3182,7 +3198,7 @@
                                     return `
                                         <tr data-scenario-id="${scenario.id}">
                                             <td>${escapeHtml(scenario.title || '')}</td>
-                                            <td>${escapeHtml(scenario.description || '')}</td>
+                                            <td>${escapeHtml(htmlToPlainText(scenario.description || ''))}</td>
                                             <td>${escapeHtml(moduleLabel)}</td>
                                             <td>${escapeHtml(formatDateTime(scenario.created_at || null))}</td>
                                             <td>${escapeHtml(formatDateTime(scenario.updated_at || null))}</td>
