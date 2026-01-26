@@ -423,6 +423,27 @@
         const initialSelectedPlan = readScriptJson('automation-initial-selected-plan');
         const initialSelectedScenario = readScriptJson('automation-initial-selected-scenario');
 
+        const scenarioPermissions = {
+            canView: Boolean(document.getElementById('perm-can-view-project-scenario')),
+            canChange: Boolean(document.getElementById('perm-can-change-project-scenario')),
+            canDelete: Boolean(document.getElementById('perm-can-delete-project-scenario')),
+        };
+
+        const applyScenarioActionPermissionsToDom = () => {
+            const tbody = root.querySelector('[data-role="scenario-table-body"]');
+            if (!tbody) return;
+
+            if (!scenarioPermissions.canView) {
+                tbody.querySelectorAll('[data-action="view-scenario"]').forEach((btn) => btn.remove());
+            }
+            if (!scenarioPermissions.canChange) {
+                tbody.querySelectorAll('[data-action="edit-scenario"]').forEach((btn) => btn.remove());
+            }
+            if (!scenarioPermissions.canDelete) {
+                tbody.querySelectorAll('[data-action="delete-scenario"]').forEach((btn) => btn.remove());
+            }
+        };
+
         const els = {
             status: root.querySelector('[data-role="status"]'),
             planList: root.querySelector('[data-role="plan-list"]'),
@@ -457,6 +478,9 @@
 
         const planModalCloseButtons = Array.from(root.querySelectorAll('[data-action="close-plan-modal"]'));
         const body = document.body;
+
+        // Apply permissions to any server-rendered scenario rows immediately.
+        applyScenarioActionPermissionsToDom();
 
         const dependencyControls = {
             checkbox: document.getElementById('module-add-case-requires-dependency'),
@@ -3033,6 +3057,16 @@
                     const automatedBadge = isAutomated
                         ? '<span style="display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;background:#28a745;color:white;border-radius:4px;font-weight:bold;">✓</span>'
                         : '<span style="display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;background:#dc3545;color:white;border-radius:4px;font-weight:bold;">✗</span>';
+
+                    const viewBtn = scenarioPermissions.canView
+                        ? `<button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>`
+                        : '';
+                    const editBtn = scenarioPermissions.canChange
+                        ? `<button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>`
+                        : '';
+                    const deleteBtn = scenarioPermissions.canDelete
+                        ? `<button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>`
+                        : '';
                     return `
                         <tr data-scenario-id="${scenario.id}">
                             <td>${escapeHtml(scenario.title || '')}</td>
@@ -3043,16 +3077,17 @@
                             <td style="text-align:center;">${automatedBadge}</td>
                             <td>
                                 <div class="table-action-group">
-                                    <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>
-                                    <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>
+                                    ${viewBtn}
+                                    ${editBtn}
                                     <button type="button" class="action-button" data-action="comment-scenario" data-scenario-id="${scenario.id}">Comment</button>
-                                    <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>
+                                    ${deleteBtn}
                                 </div>
                             </td>
                         </tr>
                     `;
                 }).join('');
                 tbody.innerHTML = rows;
+                applyScenarioActionPermissionsToDom();
                 return;
             }
         };
@@ -3120,15 +3155,16 @@
                                                 <td>${escapeHtml(formatDateTime(scenario.updated_at || null))}</td>
                                                 <td>
                                                     <div class="table-action-group">
-                                                        <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>
-                                                        <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>
-                                                        <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>
+                                                            ${scenarioPermissions.canView ? `<button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>` : ''}
+                                                            ${scenarioPermissions.canChange ? `<button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>` : ''}
+                                                            ${scenarioPermissions.canDelete ? `<button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>` : ''}
                                                     </div>
                                                 </td>
                                             </tr>
                                         `;
                                     }).join('');
                                     tbody.innerHTML = rows;
+                                    applyScenarioActionPermissionsToDom();
                                 }
                             }
                         } else {
@@ -3153,15 +3189,16 @@
                                             <td>${escapeHtml(formatDateTime(scenario.updated_at || null))}</td>
                                             <td>
                                                 <div class="table-action-group">
-                                                    <button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>
-                                                    <button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>
-                                                    <button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>
+                                                    ${scenarioPermissions.canView ? `<button type="button" class="action-button" data-action="view-scenario" data-scenario-id="${scenario.id}">View</button>` : ''}
+                                                    ${scenarioPermissions.canChange ? `<button type="button" class="action-button" data-action="edit-scenario" data-scenario-id="${scenario.id}">Edit</button>` : ''}
+                                                    ${scenarioPermissions.canDelete ? `<button type="button" class="action-button" data-action="delete-scenario" data-scenario-id="${scenario.id}" data-variant="danger">Delete</button>` : ''}
                                                 </div>
                                             </td>
                                         </tr>
                                     `;
                                 }).join('');
                                 tbody.innerHTML = rows;
+                                applyScenarioActionPermissionsToDom();
                             }
                         }
                         renderAll();
@@ -4977,6 +5014,26 @@
             }
         };
 
+        const closeScenarioCommentsModal = () => {
+            const modal = document.querySelector('[data-role="scenario-comments-modal"]');
+            if (modal) {
+                modal.hidden = true;
+            }
+
+            body.classList.remove('automation-modal-open');
+
+            const addForm = document.getElementById('add-comment-form');
+            if (addForm) addForm.style.display = 'none';
+
+            const inlineEditor = document.getElementById('inline-comment-editor');
+            if (inlineEditor) inlineEditor.style.display = 'none';
+
+            if (typeof tinymce !== 'undefined') {
+                tinymce.remove('#comment-content');
+                tinymce.remove('#inline-comment-content');
+            }
+        };
+
         // Handle comment action button clicks (using event delegation)
         document.addEventListener('click', async (ev) => {
             const target = ev.target.closest('[data-action]');
@@ -4984,6 +5041,12 @@
 
             const action = target.dataset.action;
             const commentId = target.dataset.commentId;
+
+            if (action === 'close-scenario-comments-modal') {
+                ev.preventDefault();
+                closeScenarioCommentsModal();
+                return;
+            }
 
             if (action === 'edit-comment' && commentId) {
                 ev.preventDefault();

@@ -136,7 +136,7 @@ urlpatterns = [
 	path('automation/reports/export/', app_views.automation_reports_export, name='automation-reports-export'),
 	path('automation/reports/testcases/export/', app_views.automation_testcase_reports_export, name='automation-testcase-reports-export'),
 	path('automation/test-plans/', app_views.automation_projects, name='automation-test-plans'),
-	path('automation/test-scenarios/', app_views.automation_test_scenarios, name='automation-test-scenarios'),
+	path('automation/test-scenarios/', app_views.automation_project_scenarios, name='automation-test-scenarios'),
 	path('automation/test-cases/', app_views.automation_test_cases, name='automation-test-cases'),
 	path('automation/test-plan-maintenance/', app_views.automation_test_plan_maintenance, name='automation-test-plan-maintenance'),
 	path('automation/data-management/', RedirectView.as_view(pattern_name='data-management', permanent=False)),

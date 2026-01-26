@@ -2020,7 +2020,7 @@ def automation_projects(request):
 
 @ensure_csrf_cookie
 @login_required
-def automation_test_scenarios(request):
+def automation_project_scenarios(request):
     data = _prepare_automation_data()
     # include initial modules so the scenarios page can show module filters/selects
     context = {
@@ -2036,7 +2036,7 @@ def automation_test_scenarios(request):
         ).data
     except Exception:
         context["initial_modules"] = []
-    return render(request, "core/automation_test_scenarios.html", context)
+    return render(request, "automation/scenarios/automation_project_scenarios.html", context)
 
 
 @ensure_csrf_cookie
