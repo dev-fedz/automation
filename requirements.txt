@@ -51,3 +51,4 @@ whitenoise==6.4.0
 num2words==0.5.12
 django-tinymce==3.7.1
 pycryptodome==3.20.0
+pyotp==2.9.0

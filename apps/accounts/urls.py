@@ -6,6 +6,10 @@ app_name = 'accounts'
 
 auth_patterns = [
     path('login/', views.LoginApi.as_view(), name='login'),
+    path('2fa/setup/', views.TwoFactorSetupAPI.as_view(), name='2fa-setup'),
+    path('2fa/confirm/', views.TwoFactorConfirmAPI.as_view(), name='2fa-confirm'),
+    path('2fa/setup/verify/', views.TwoFactorSetupVerifyAPI.as_view(), name='2fa-setup-verify'),
+    path('2fa/verify/', views.TwoFactorVerifyAPI.as_view(), name='2fa-verify'),
     path('logout/', views.LogoutApi.as_view(), name='logout'),
     path('validate-password/', views.ValidatePasswordAPI.as_view(), name='validate-password'),
     path('change-password/', views.ChangePasswordAPI.as_view(), name='change-password'),

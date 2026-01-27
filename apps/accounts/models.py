@@ -53,6 +53,8 @@ class User(SoftDeleteMixin, AbstractUser):
     is_temporary = models.BooleanField(default=False)
     otp = models.CharField(max_length=20, null=True, blank=True)
     login_attempt = models.IntegerField(default=0)
+    two_factor_secret = models.CharField(max_length=64, null=True, blank=True)
+    two_factor_enabled = models.BooleanField(default=False)
     mobile_no = models.CharField(max_length=150, null=True, blank=True)
     employee_no = models.CharField(max_length=50, null=True, blank=True, unique=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)

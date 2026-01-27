@@ -1,4 +1,6 @@
 import random
+import base64
+import io
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import exceptions
@@ -7,6 +9,8 @@ from django.contrib.auth.models import Group
 
 from . import models
 import os, time
+import qrcode
+import pyotp
 try:  # optional redis dependency
     import redis  # type: ignore
 except Exception:  # pragma: no cover
@@ -130,6 +134,30 @@ def otp(*, user: models.User):
     user.otp = code
     user.save()
     return True
+
+
+def two_factor_generate_secret() -> str:
+    return pyotp.random_base32()
+
+
+def two_factor_build_uri(*, user: models.User, secret: str) -> str:
+    issuer = os.environ.get('TOTP_ISSUER', 'AutomationApp')
+    name = user.email or user.username
+    return pyotp.totp.TOTP(secret).provisioning_uri(name=name, issuer_name=issuer)
+
+
+def two_factor_qr_data_uri(*, otpauth_url: str) -> str:
+    img = qrcode.make(otpauth_url)
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    encoded = base64.b64encode(buf.getvalue()).decode('ascii')
+    return f"data:image/png;base64,{encoded}"
+
+
+def two_factor_verify(*, secret: str, code: str) -> bool:
+    if not secret:
+        return False
+    return pyotp.TOTP(secret).verify(code, valid_window=1)
 
 
 def user_update(*, user: models.User, data: dict):

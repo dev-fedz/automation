@@ -45,6 +45,31 @@
     </div>
   </div>
 </div>
+
+<div class="modal" id="twofa-modal" aria-hidden="true" data-2fa-modal>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="twofa-title">
+        <div class="modal-header">
+            <h3 id="twofa-title" data-2fa-modal-title>Two-Factor Authentication</h3>
+            <button type="button" class="automation-modal__close" data-2fa-modal-close aria-label="Close">✕</button>
+        </div>
+        <div class="modal-body">
+            <p class="modal-status" data-2fa-modal-status>Two-factor authentication required.</p>
+            <div class="qr-box" data-2fa-modal-qr-wrap hidden style="display:none;">
+                <img data-2fa-modal-qr alt="2FA QR code" />
+            </div>
+            <label>
+                Verification code
+                <input type="text" data-2fa-modal-otp inputmode="numeric" autocomplete="one-time-code" placeholder="123456">
+            </label>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-2fa-modal-close>Cancel</button>
+            <button type="button" class="btn btn-primary" data-2fa-modal-submit>Verify</button>
+        </div>
+    </div>
+</div>
+
+<div class="toast-container" data-toast-container></div>
 <script>
 // simple enter submit -> handled by existing JS login logic
 </script>

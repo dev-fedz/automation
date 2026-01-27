@@ -66,6 +66,20 @@ class TemporaryPasswordSerializer(serializers.Serializer):
     email = serializers.CharField(write_only=True)
 
 
+class TwoFactorVerifySerializer(serializers.Serializer):
+    token = serializers.CharField(write_only=True)
+    otp = serializers.CharField(write_only=True)
+
+
+class TwoFactorConfirmSerializer(serializers.Serializer):
+    otp = serializers.CharField(write_only=True)
+
+
+class TwoFactorSetupVerifySerializer(serializers.Serializer):
+    token = serializers.CharField(write_only=True)
+    otp = serializers.CharField(write_only=True)
+
+
 class UserDetailsSerializer(serializers.ModelSerializer):
     class RoleModuleObjectSerializer(serializers.Serializer):
         name = serializers.CharField()

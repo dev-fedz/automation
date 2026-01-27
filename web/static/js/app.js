@@ -10,14 +10,116 @@ async function apiFetch(url, options = {}) {
 function setupLogin() {
   const form = document.getElementById('login-form');
   if (!form) return;
+  let pending2faToken = null;
+  let pending2faSetupToken = null;
+  const modal = document.querySelector('[data-2fa-modal]');
+  const modalTitle = document.querySelector('[data-2fa-modal-title]');
+  const modalStatus = document.querySelector('[data-2fa-modal-status]');
+  const modalOtp = document.querySelector('[data-2fa-modal-otp]');
+  const modalQrWrap = document.querySelector('[data-2fa-modal-qr-wrap]');
+  const modalQr = document.querySelector('[data-2fa-modal-qr]');
+  const modalCloseButtons = document.querySelectorAll('[data-2fa-modal-close]');
+  const modalSubmit = document.querySelector('[data-2fa-modal-submit]');
+  const toastContainer = document.querySelector('[data-toast-container]');
+
+  function showToast(message, type = 'success') {
+    if (!toastContainer) return;
+    const toast = document.createElement('div');
+    toast.className = `toast toast--${type}`;
+    toast.setAttribute('data-show', 'true');
+    toast.textContent = message;
+    toastContainer.appendChild(toast);
+    setTimeout(() => {
+      toast.setAttribute('data-show', 'false');
+      setTimeout(() => toast.remove(), 250);
+    }, 1200);
+  }
+
+  function openModal({ title, status, showQr, qrSrc }) {
+    if (!modal) return;
+    if (modalTitle && title) modalTitle.textContent = title;
+    if (modalStatus && status) modalStatus.textContent = status;
+    if (modalQrWrap) {
+      modalQrWrap.hidden = !showQr;
+      modalQrWrap.style.display = showQr ? 'flex' : 'none';
+    }
+    if (modalQr) modalQr.src = showQr && qrSrc ? qrSrc : '';
+    if (modalOtp) modalOtp.value = '';
+    modal.setAttribute('aria-hidden', 'false');
+    if (modalOtp) modalOtp.focus();
+  }
+
+  function closeModal() {
+    if (!modal) return;
+    modal.setAttribute('aria-hidden', 'true');
+  }
+
+  if (modalCloseButtons.length) {
+    modalCloseButtons.forEach((btn) => btn.addEventListener('click', () => {
+      pending2faToken = null;
+      pending2faSetupToken = null;
+      closeModal();
+    }));
+  }
+
+  async function submitModalOtp() {
+    const otp = modalOtp ? modalOtp.value.trim() : '';
+    if (!otp) { alert('Enter the verification code'); return; }
+    if (pending2faSetupToken) {
+      const resp = await apiFetch('/api/accounts/auth/2fa/setup/verify/', { method: 'POST', body: JSON.stringify({ token: pending2faSetupToken, otp }) });
+      if (!resp.ok) { alert('Verification failed'); return; }
+      const data = await resp.json();
+      localStorage.setItem('authToken', data.token);
+      showToast('2FA setup complete. Logged in.');
+      setTimeout(() => { window.location = '/dashboard/'; }, 600);
+      return;
+    }
+    if (pending2faToken) {
+      const resp = await apiFetch('/api/accounts/auth/2fa/verify/', { method: 'POST', body: JSON.stringify({ token: pending2faToken, otp }) });
+      if (!resp.ok) { alert('Verification failed'); return; }
+      const data = await resp.json();
+      localStorage.setItem('authToken', data.token);
+      showToast('Login successful.');
+      setTimeout(() => { window.location = '/dashboard/'; }, 600);
+    }
+  }
+
+  if (modalSubmit) modalSubmit.addEventListener('click', submitModalOtp);
+  if (modalOtp) {
+    modalOtp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitModalOtp();
+      }
+    });
+  }
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const email = form.querySelector('input[name=email]').value;
-    const password = form.querySelector('input[name=password]').value;
     try {
+      const email = form.querySelector('input[name=email]').value;
+      const password = form.querySelector('input[name=password]').value;
       const resp = await apiFetch('/api/accounts/auth/login/', { method: 'POST', body: JSON.stringify({ email, password }) });
       if (!resp.ok) { alert('Login failed'); return; }
       const data = await resp.json();
+      if (data && data['2fa_setup_required']) {
+        pending2faSetupToken = data['temp_token'];
+        openModal({
+          title: 'Set up Two-Factor Authentication',
+          status: 'Scan the QR in Microsoft Authenticator, then enter the 6-digit code.',
+          showQr: true,
+          qrSrc: data['qr'],
+        });
+        return;
+      }
+      if (data && data['2fa_required']) {
+        pending2faToken = data['temp_token'];
+        openModal({
+          title: 'Two-Factor Authentication',
+          status: 'Enter your 6-digit code from Microsoft Authenticator.',
+          showQr: false,
+        });
+        return;
+      }
       localStorage.setItem('authToken', data.token);
       window.location = '/dashboard/';
     } catch (_) { alert('Network error'); }

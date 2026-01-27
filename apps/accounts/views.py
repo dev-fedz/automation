@@ -1,10 +1,12 @@
 from django.contrib.auth import login
+from django.core import signing
 from django.contrib.auth.models import Group
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_http_methods
 from django.contrib import messages
 from django_filters.rest_framework import DjangoFilterBackend
 from knox.views import LoginView as KnoxLoginView, LogoutView as KnoxLogoutView
+from knox.models import AuthToken
 from rest_framework import exceptions, status
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.generics import ListAPIView
@@ -50,7 +52,6 @@ class LoginApi(KnoxLoginView):
         serializer = self.serializer_class(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data['user']
-        login(request, user)
         # reset attempts & unlock on successful auth
         update_fields = []
         if user.login_attempt != 0:
@@ -61,6 +62,29 @@ class LoginApi(KnoxLoginView):
             update_fields.append('status')
         if update_fields:
             user.save(update_fields=update_fields)
+
+        if user.two_factor_enabled:
+            temp_token = signing.dumps({'uid': user.pk, 'purpose': '2fa'}, salt='accounts.2fa')
+            return Response({'2fa_required': True, 'temp_token': temp_token}, status=status.HTTP_200_OK)
+
+        # If 2FA is not enabled yet, return setup QR + temp token
+        if not user.two_factor_secret:
+            secret = services.two_factor_generate_secret()
+            user.two_factor_secret = secret
+            user.two_factor_enabled = False
+            user.save(update_fields=['two_factor_secret', 'two_factor_enabled'])
+        else:
+            secret = user.two_factor_secret
+        otpauth_url = services.two_factor_build_uri(user=user, secret=secret)
+        qr = services.two_factor_qr_data_uri(otpauth_url=otpauth_url)
+        temp_token = signing.dumps({'uid': user.pk, 'purpose': '2fa-setup'}, salt='accounts.2fa')
+        return Response({
+            '2fa_setup_required': True,
+            'temp_token': temp_token,
+            'qr': qr,
+        }, status=status.HTTP_200_OK)
+
+        login(request, user)
         try:
             services.log_user_action(user=user, action=models.UserAuditTrail.Actions.LOGIN)
         except Exception:
@@ -146,6 +170,115 @@ class OtpAPI(APIView):
             raise exceptions.NotFound('User not found')
         services.otp(user=user)
         return Response(status=status.HTTP_200_OK)
+
+
+class TwoFactorSetupAPI(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        user = request.user
+        if not user.two_factor_secret or request.data.get('reset'):
+            secret = services.two_factor_generate_secret()
+            user.two_factor_secret = secret
+            user.two_factor_enabled = False
+            user.save(update_fields=['two_factor_secret', 'two_factor_enabled'])
+        else:
+            secret = user.two_factor_secret
+        otpauth_url = services.two_factor_build_uri(user=user, secret=secret)
+        qr = services.two_factor_qr_data_uri(otpauth_url=otpauth_url)
+        return Response({
+            'otpauth_url': otpauth_url,
+            'qr': qr,
+            'secret': secret,
+            'enabled': user.two_factor_enabled,
+        }, status=status.HTTP_200_OK)
+
+
+class TwoFactorConfirmAPI(APIView):
+    permission_classes = (IsAuthenticated,)
+    serializer_class = serializers.TwoFactorConfirmSerializer
+
+    def post(self, request):
+        s = self.serializer_class(data=request.data, context={'request': request})
+        s.is_valid(raise_exception=True)
+        user = request.user
+        if not user.two_factor_secret:
+            raise exceptions.ValidationError('2FA not initialized')
+        if not services.two_factor_verify(secret=user.two_factor_secret, code=s.validated_data['otp']):
+            raise exceptions.ValidationError('Invalid verification code')
+        user.two_factor_enabled = True
+        user.save(update_fields=['two_factor_enabled'])
+        return Response({'enabled': True}, status=status.HTTP_200_OK)
+
+
+class TwoFactorVerifyAPI(APIView):
+    permission_classes = (AllowAny,)
+    serializer_class = serializers.TwoFactorVerifySerializer
+
+    def post(self, request):
+        s = self.serializer_class(data=request.data, context={'request': request})
+        s.is_valid(raise_exception=True)
+        token = s.validated_data['token']
+        otp_code = s.validated_data['otp']
+        try:
+            payload = signing.loads(token, salt='accounts.2fa', max_age=300)
+        except signing.BadSignature:
+            raise exceptions.ValidationError('Invalid or expired token')
+        if payload.get('purpose') != '2fa':
+            raise exceptions.ValidationError('Invalid token')
+        user = models.User.objects.filter(pk=payload.get('uid')).first()
+        if not user or not user.two_factor_enabled:
+            raise exceptions.ValidationError('2FA not enabled')
+        if not services.two_factor_verify(secret=user.two_factor_secret, code=otp_code):
+            raise exceptions.ValidationError('Invalid verification code')
+
+        login(request, user)
+        try:
+            services.log_user_action(user=user, action=models.UserAuditTrail.Actions.LOGIN)
+        except Exception:
+            pass
+        token_obj, token = AuthToken.objects.create(user)
+        return Response({
+            'expiry': token_obj.expiry,
+            'token': token,
+            'user': serializers.UserDetailsSerializer(user).data,
+        }, status=status.HTTP_200_OK)
+
+
+class TwoFactorSetupVerifyAPI(APIView):
+    permission_classes = (AllowAny,)
+    serializer_class = serializers.TwoFactorSetupVerifySerializer
+
+    def post(self, request):
+        s = self.serializer_class(data=request.data, context={'request': request})
+        s.is_valid(raise_exception=True)
+        token = s.validated_data['token']
+        otp_code = s.validated_data['otp']
+        try:
+            payload = signing.loads(token, salt='accounts.2fa', max_age=300)
+        except signing.BadSignature:
+            raise exceptions.ValidationError('Invalid or expired token')
+        if payload.get('purpose') != '2fa-setup':
+            raise exceptions.ValidationError('Invalid token')
+        user = models.User.objects.filter(pk=payload.get('uid')).first()
+        if not user or not user.two_factor_secret:
+            raise exceptions.ValidationError('2FA not initialized')
+        if not services.two_factor_verify(secret=user.two_factor_secret, code=otp_code):
+            raise exceptions.ValidationError('Invalid verification code')
+
+        user.two_factor_enabled = True
+        user.save(update_fields=['two_factor_enabled'])
+        login(request, user)
+        try:
+            services.log_user_action(user=user, action=models.UserAuditTrail.Actions.LOGIN)
+        except Exception:
+            pass
+        token_obj, token = AuthToken.objects.create(user)
+        return Response({
+            'expiry': token_obj.expiry,
+            'token': token,
+            'user': serializers.UserDetailsSerializer(user).data,
+        }, status=status.HTTP_200_OK)
 
 
 class UserListAPI(ListAPIView):
