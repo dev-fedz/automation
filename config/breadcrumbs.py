@@ -26,6 +26,9 @@ def build_breadcrumbs(request):
         'user-detail-page': ('User Management', 'Users', None),
         'user-edit-page': ('User Management', 'Users', None),
     }
+    user_logs_names = {
+        'user-logs-page': ('User Management', 'User Logs', '/user-logs/'),
+    }
     role_names = {
         'role-list-page': ('User Management', 'Role', '/roles/'),
         'role-create-page': ('User Management', 'Role', '/roles/create/'),
@@ -67,6 +70,15 @@ def build_breadcrumbs(request):
         elif name == 'role-detail-page':
             breadcrumbs.append({'label': 'View'})
 
+        return {'BREADCRUMBS': breadcrumbs}
+
+    if name in user_logs_names:
+        group, item_label, url = user_logs_names[name]
+        breadcrumbs.append({'label': group})
+        if url:
+            breadcrumbs.append({'label': item_label, 'url': url})
+        else:
+            breadcrumbs.append({'label': item_label})
         return {'BREADCRUMBS': breadcrumbs}
 
     # Generic mappings for other pages (projects, automation, etc.)

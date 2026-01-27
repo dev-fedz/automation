@@ -15,6 +15,7 @@ from rest_framework.serializers import Serializer as EmptySerializer
 from rest_framework.views import APIView
 
 from django.http import HttpResponseForbidden
+from django.db.models import Q
 
 
 class HasAccountsPermission(BasePermission):
@@ -548,3 +549,29 @@ def user_detail_page(request, pk):
     user = get_object_or_404(models.User, pk=pk)
     role = user.groups.first()
     return render(request, 'users/detail.html', {'user_obj': user, 'role_obj': role})
+
+
+def user_logs_page(request):
+    if not _require_perm(request.user, 'accounts.can_view_user_logs'):
+        return _forbidden_or_login(request)
+    name_query = (request.GET.get('name') or '').strip()
+    action_query = (request.GET.get('action') or '').strip()
+    logs = models.UserAuditTrail.objects.select_related('user')
+    if name_query:
+        logs = logs.filter(
+            Q(user__first_name__icontains=name_query)
+            | Q(user__last_name__icontains=name_query)
+        )
+    if action_query:
+        logs = logs.filter(action=action_query)
+    logs = logs.order_by('-datetime', '-id')
+    return render(
+        request,
+        'users/logs.html',
+        {
+            'logs': logs,
+            'name_query': name_query,
+            'action_query': action_query,
+            'action_choices': models.UserAuditTrail.Actions.choices,
+        },
+    )

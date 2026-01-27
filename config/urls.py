@@ -119,6 +119,7 @@ if django_apps.is_installed('apps.accounts'):
 		path('users/<int:pk>/', account_pages.user_detail_page, name='user-detail-page'),
 		path('users/<int:pk>/edit/', account_pages.user_edit_page, name='user-edit-page'),
 		path('users/<int:pk>/delete/', account_pages.user_delete_page, name='user-delete-page'),
+		path('user-logs/', account_pages.user_logs_page, name='user-logs-page'),
 	]
 
 

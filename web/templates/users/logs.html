@@ -1,0 +1,119 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% block title %}User Logs{% endblock %}
+
+{% block head_css %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'css/automation.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="automation-dashboard user-management-dashboard" id="user-logs-app">
+  <section class="automation-panel user-management-panel" data-panel="user-logs" aria-labelledby="user-logs-heading">
+    <div class="panel-header">
+      <div>
+        <h2 id="user-logs-heading">User Logs</h2>
+        <p class="panel-subtitle">Review user activity and system audit entries.</p>
+      </div>
+      <div class="panel-actions">
+        <form method="get" class="automation-filter" data-testid="user-logs-filter">
+          <input
+            type="search"
+            name="name"
+            id="user-logs-name"
+            class="automation-search"
+            placeholder="Filter by name"
+            aria-label="Filter by name"
+            value="{{ name_query|default:'' }}"
+          >
+          <input
+            type="search"
+            name="action"
+            id="user-logs-action"
+            class="automation-search"
+            placeholder="Filter by action"
+            aria-label="Filter by action"
+            list="user-logs-action-list"
+            value="{{ action_query|default:'' }}"
+          >
+          <datalist id="user-logs-action-list">
+            <option value=""></option>
+            {% for value, label in action_choices %}
+              <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </datalist>
+        </form>
+      </div>
+    </div>
+
+    <div class="card table-card automation-table-card" data-testid="user-logs-card">
+      <table class="table-modern automation-table" data-testid="user-logs-table">
+        <thead>
+          <tr>
+            <th scope="col">ID</th>
+            <th scope="col">Name</th>
+            <th scope="col">Action</th>
+            <th scope="col">Datetime</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if logs %}
+            {% for log in logs %}
+            <tr data-log-id="{{ log.id }}">
+              <td data-label="ID">{{ log.id }}</td>
+              <td data-label="Name">
+                {{ log.user.first_name|default:"" }} {{ log.user.last_name|default:"" }}
+              </td>
+              <td data-label="Action">{{ log.get_action_display }}</td>
+              <td data-label="Datetime">{{ log.datetime|date:"M d, Y h:i A" }}</td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="4" class="empty">No user logs found.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block body_js %}
+  {{ block.super }}
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const nameInput = document.getElementById('user-logs-name');
+      const actionInput = document.getElementById('user-logs-action');
+      if (!nameInput || !actionInput) return;
+
+      let debounceId;
+      const applyFilters = () => {
+        const params = new URLSearchParams(window.location.search);
+        const nameValue = (nameInput.value || '').trim();
+        const actionValue = (actionInput.value || '').trim();
+        if (nameValue) {
+          params.set('name', nameValue);
+        } else {
+          params.delete('name');
+        }
+        if (actionValue) {
+          params.set('action', actionValue);
+        } else {
+          params.delete('action');
+        }
+        const next = `${window.location.pathname}?${params.toString()}`;
+        window.location.assign(next);
+      };
+
+      nameInput.addEventListener('input', () => {
+        window.clearTimeout(debounceId);
+        debounceId = window.setTimeout(applyFilters, 300);
+      });
+      actionInput.addEventListener('change', () => {
+        applyFilters();
+      });
+    });
+  </script>
+{% endblock %}

@@ -366,6 +366,17 @@ body.auth-layout { background:#f5f7fb; min-height:100dvh; display:flex; justify-
 .user-management-panel .panel-subtitle,
 .role-management-panel .panel-subtitle {max-width:32rem;}
 
+.automation-filter .automation-select {
+	height: 38px;
+	padding: 0 0.85rem;
+	border-radius: 8px;
+	border: 1px solid #e2e5ec;
+	background: #fff;
+	font-size: 0.85rem;
+	line-height: 1;
+	min-width: 180px;
+}
+
 .user-management-panel .table-action-group,
 .role-management-panel .table-action-group {justify-content:flex-start;}
 

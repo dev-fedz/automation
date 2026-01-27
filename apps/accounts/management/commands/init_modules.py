@@ -11,6 +11,7 @@ class Command(BaseCommand):
 			('dashboard', ' Dashboard', Module.Categories.DASHBOARD),
 			('user_roles', 'User Roles', Module.Categories.USERMANAGEMENT),
 			('user_accounts', 'User Accounts', Module.Categories.USERMANAGEMENT),
+			('user_logs', 'User Logs', Module.Categories.USERMANAGEMENT),
 			('projects_project', 'Projects', Module.Categories.CORE),
 			('projects_module', 'Modules', Module.Categories.CORE),
 			('projects_scenario', 'Scenarios', Module.Categories.CORE),

@@ -12,6 +12,9 @@
                         {% if 'user_roles' in ENABLED_MODULE_CODENAMES %}
                         <li class="menu-item" data-menu="roles"><a href="/roles/" data-testid="menu-roles">Role</a></li>
                         {% endif %}
+                        {% if 'user_logs' in ENABLED_MODULE_CODENAMES %}
+                        <li class="menu-item" data-menu="user-logs"><a href="{% url 'user-logs-page' %}" data-testid="menu-user-logs">User Logs</a></li>
+                        {% endif %}
         </ul>
     </li>
     {% endif %}

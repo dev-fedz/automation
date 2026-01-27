@@ -26,6 +26,7 @@ class Command(BaseCommand):
 				('Update (Edit)', 'can_change_user'),
 				('Delete (Archive)', 'can_delete_user'),
 			],
+			'user_logs': [('Read (View)', 'can_view_user_logs')],
 			'projects_project': [
 				('Create', 'can_create_project'),
 				('Read (View)', 'can_view_project'),
