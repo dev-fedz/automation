@@ -80,6 +80,21 @@ def _scenario_action_for_request(request, *, scenario_action, module_action):
         pass
     return scenario_action
 
+
+def _automation_run_action(triggered_in: str | None):
+    if not account_models:
+        return None
+    text = (triggered_in or '').lower()
+    if 'project' in text:
+        return account_models.UserAuditTrail.Actions.RUN_AUTOMATION_PROJECT
+    if 'module' in text:
+        return account_models.UserAuditTrail.Actions.RUN_AUTOMATION_MODULE
+    if 'scenario' in text:
+        return account_models.UserAuditTrail.Actions.RUN_AUTOMATION_SCENARIO
+    if 'case' in text or 'testcase' in text:
+        return account_models.UserAuditTrail.Actions.RUN_AUTOMATION_TEST_CASE
+    return None
+
 DEFAULT_AES_KEY = "kRdVzIqmQsfpRGItSLP5SDz0jkRLO9Cm"
 DEFAULT_AES_IV = "1gJFNMeeQODA7wJA"
 DEFAULT_CHANNEL_KEY = "dgzCF9eJw2uX9LNV4JrkQLxSHxBlZeGV"
@@ -1612,6 +1627,9 @@ def automation_reports_export(request):
       - Testcases: child ApiRunResultReport rows
     """
 
+    if account_models:
+        _log_user_action(request, account_models.UserAuditTrail.Actions.EXPORT_AUTOMATED_REPORT)
+
     # Parse date range (inclusive)
     start_str = (request.GET.get("start") or request.GET.get("from") or "").strip()
     end_str = (request.GET.get("end") or request.GET.get("to") or "").strip()
@@ -1916,6 +1934,9 @@ def automation_testcase_reports_export(request):
 
     Summary groups counts by day based on finished timestamp (updated_at).
     """
+
+    if account_models:
+        _log_user_action(request, account_models.UserAuditTrail.Actions.EXPORT_TESTCASE_REPORT)
 
     start_str = (request.GET.get("start") or "").strip()
     end_str = (request.GET.get("end") or "").strip()
@@ -2338,7 +2359,20 @@ class ApiAdhocRequestView(APIView):
         payload = request.data or {}
 
         if account_models:
-            _log_user_action(request, account_models.UserAuditTrail.Actions.RUN_TEST_CASE)
+            action = account_models.UserAuditTrail.Actions.RUN_TEST_CASE
+            report_id = payload.get("automation_report_id") or payload.get("automationReportId")
+            if report_id:
+                try:
+                    report = models.AutomationReport.objects.filter(id=int(report_id)).only("triggered_in").first()
+                    if report and report.triggered_in:
+                        triggered_text = str(report.triggered_in).lower()
+                        if any(token in triggered_text for token in ("project", "module", "scenario", "case", "testcase", "individual", "run")):
+                            action = account_models.UserAuditTrail.Actions.RUN_AUTOMATION_TEST_CASE
+                except Exception:
+                    pass
+
+            if action != account_models.UserAuditTrail.Actions.RUN_AUTOMATION_TEST_CASE:
+                _log_user_action(request, action)
 
         # Temporary debug: log a safe summary of incoming body_transforms and environment
         try:
@@ -3058,6 +3092,10 @@ class AutomationReportCreateView(APIView):
                 triggered_by=request.user if request.user and request.user.is_authenticated else None,
                 started=started_dt,
             )
+            if account_models:
+                action = _automation_run_action(triggered_in)
+                if action:
+                    _log_user_action(request, action)
             serializer = serializers.AutomationReportSerializer(report)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         except Exception as exc:

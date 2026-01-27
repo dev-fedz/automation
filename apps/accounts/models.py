@@ -163,6 +163,12 @@ class UserAuditTrail(models.Model):
         CREATE_PROJECT = 'project_create', 'Project - Create Project'
         UPDATE_PROJECT = 'project_update', 'Project - Update Project'
 
+        # Projects (Automation Runs)
+        RUN_AUTOMATION_PROJECT = 'project_run', 'Projects - Run Automation on Projects'
+        RUN_AUTOMATION_MODULE = 'module_run', 'Projects - Run Automation on Modules'
+        RUN_AUTOMATION_SCENARIO = 'scenario_run', 'Projects - Run Automation on Scenarios'
+        RUN_AUTOMATION_TEST_CASE = 'testcase_run_automation', 'Projects - Run Automation on Test Cases'
+
         # Modules
         CREATE_MODULE = 'module_create', 'Modules - Create Modules'
         UPDATE_MODULE = 'module_update', 'Modules - Update Modules'
@@ -181,6 +187,10 @@ class UserAuditTrail(models.Model):
         UPDATE_TEST_CASE = 'testcase_update', 'Test Case - Update Test Case'
         RUN_TEST_CASE = 'testcase_run', 'Test Case - Run Test Case'
         DELETE_TEST_CASE = 'testcase_delete', 'Test Case - Delete Test Case'
+
+        # Reports
+        EXPORT_AUTOMATED_REPORT = 'report_export_automated', 'Reports - Export Automated Report'
+        EXPORT_TESTCASE_REPORT = 'report_export_testcase', 'Reports - Export Test Case Report'
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='audit_trails')
     action = TextChoiceField(max_length=40, choices_cls=Actions)
