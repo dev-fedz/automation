@@ -159,6 +159,29 @@ class UserAuditTrail(models.Model):
         UPDATE_ROLE = 'role_update', 'Role - Update Role'
         DELETE_ROLE = 'role_delete', 'Role - Delete Role'
 
+        # Project
+        CREATE_PROJECT = 'project_create', 'Project - Create Project'
+        UPDATE_PROJECT = 'project_update', 'Project - Update Project'
+
+        # Modules
+        CREATE_MODULE = 'module_create', 'Modules - Create Modules'
+        UPDATE_MODULE = 'module_update', 'Modules - Update Modules'
+        DELETE_MODULE = 'module_delete', 'Modules - Delete Modules'
+        CREATE_SCENARIO_FROM_MODULE = 'module_scenario_create', 'Modules - Create Scenario from Modules'
+        UPDATE_SCENARIO_FROM_MODULE = 'module_scenario_update', 'Modules - Update Scenario From Modules'
+        DELETE_SCENARIO_FROM_MODULE = 'module_scenario_delete', 'Modules - Delete Scenario From Modules'
+
+        # Scenarios
+        CREATE_SCENARIO = 'scenario_create', 'Scenarios - Create Scenarios'
+        UPDATE_SCENARIO = 'scenario_update', 'Scenarios - Update Scenarios'
+        DELETE_SCENARIO = 'scenario_delete', 'Scenarios - Delete Scenarios'
+
+        # Test Case
+        CREATE_TEST_CASE = 'testcase_create', 'Test Case - Create Test Case'
+        UPDATE_TEST_CASE = 'testcase_update', 'Test Case - Update Test Case'
+        RUN_TEST_CASE = 'testcase_run', 'Test Case - Run Test Case'
+        DELETE_TEST_CASE = 'testcase_delete', 'Test Case - Delete Test Case'
+
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='audit_trails')
     action = TextChoiceField(max_length=40, choices_cls=Actions)
     datetime = models.DateTimeField(auto_now_add=True, db_index=True)

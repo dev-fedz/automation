@@ -43,9 +43,42 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import models, selectors, serializers, services
+try:  # avoid hard dependency at import time
+    from apps.accounts import models as account_models
+    from apps.accounts import services as account_services
+except Exception:  # pragma: no cover
+    account_models = None  # type: ignore
+    account_services = None  # type: ignore
 
 
 logger = logging.getLogger(__name__)
+
+
+def _log_user_action(request, action):
+    if not account_services or not account_models:
+        return
+    try:
+        user = getattr(request, 'user', None)
+        account_services.log_user_action(user=user, action=action)
+    except Exception:
+        pass
+
+
+def _scenario_action_for_request(request, *, scenario_action, module_action):
+    ref = (request.META.get('HTTP_REFERER') or '').lower()
+    if '/data-management/test-modules/' in ref:
+        return module_action
+    if '/automation/test-scenarios/' in ref:
+        return scenario_action
+    # fallback: if the client explicitly sends a module id, treat as module-based
+    try:
+        data = getattr(request, 'data', None) or {}
+        module_id = data.get('module') or data.get('module_id')
+        if module_id not in (None, '', 0):
+            return module_action
+    except Exception:
+        pass
+    return scenario_action
 
 DEFAULT_AES_KEY = "kRdVzIqmQsfpRGItSLP5SDz0jkRLO9Cm"
 DEFAULT_AES_IV = "1gJFNMeeQODA7wJA"
@@ -425,6 +458,18 @@ class ProjectViewSet(viewsets.ModelViewSet):
             raise Http404
         return instance
 
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        if account_models:
+            _log_user_action(self.request, account_models.UserAuditTrail.Actions.CREATE_PROJECT)
+        return instance
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        if account_models:
+            _log_user_action(self.request, account_models.UserAuditTrail.Actions.UPDATE_PROJECT)
+        return instance
+
 
 class TestScenarioViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.TestScenarioSerializer
@@ -445,6 +490,38 @@ class TestScenarioViewSet(viewsets.ModelViewSet):
         if module:
             queryset = queryset.filter(module_id=module)
         return queryset
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        if account_models:
+            action = _scenario_action_for_request(
+                self.request,
+                scenario_action=account_models.UserAuditTrail.Actions.CREATE_SCENARIO,
+                module_action=account_models.UserAuditTrail.Actions.CREATE_SCENARIO_FROM_MODULE,
+            )
+            _log_user_action(self.request, action)
+        return instance
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        if account_models:
+            action = _scenario_action_for_request(
+                self.request,
+                scenario_action=account_models.UserAuditTrail.Actions.UPDATE_SCENARIO,
+                module_action=account_models.UserAuditTrail.Actions.UPDATE_SCENARIO_FROM_MODULE,
+            )
+            _log_user_action(self.request, action)
+        return instance
+
+    def perform_destroy(self, instance):
+        super().perform_destroy(instance)
+        if account_models:
+            action = _scenario_action_for_request(
+                self.request,
+                scenario_action=account_models.UserAuditTrail.Actions.DELETE_SCENARIO,
+                module_action=account_models.UserAuditTrail.Actions.DELETE_SCENARIO_FROM_MODULE,
+            )
+            _log_user_action(self.request, action)
 
     def _is_allowed_scenario_attachment(self, filename: str | None, content_type: str | None) -> bool:
         """Allow images, videos, and common document formats."""
@@ -916,6 +993,8 @@ class TestCaseViewSet(viewsets.ModelViewSet):
             # ignore failures to inspect instance; proceed to allow serializer to handle
             pass
         response = super().update(request, *args, **kwargs)
+        if account_models:
+            _log_user_action(request, account_models.UserAuditTrail.Actions.UPDATE_TEST_CASE)
         # Post-update: ensure owner is set when an authenticated user made
         # the update but the instance has no owner (client may have sent
         # an empty owner value). We do this after the serializer has saved
@@ -954,6 +1033,8 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         except Exception:
             pass
         response = super().partial_update(request, *args, **kwargs)
+        if account_models:
+            _log_user_action(request, account_models.UserAuditTrail.Actions.UPDATE_TEST_CASE)
         # same post-update owner assignment for partial updates
         try:
             inst = self.get_object()
@@ -967,6 +1048,12 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                 inst.save(update_fields=['owner'])
         except Exception:
             pass
+        return response
+
+    def destroy(self, request, *args, **kwargs):
+        response = super().destroy(request, *args, **kwargs)
+        if account_models:
+            _log_user_action(request, account_models.UserAuditTrail.Actions.DELETE_TEST_CASE)
         return response
 
     def get_queryset(self):
@@ -1192,6 +1279,8 @@ class TestCaseViewSet(viewsets.ModelViewSet):
             # never fail the request response because of this best-effort step
             pass
         headers = self.get_success_headers(serializer.data)
+        if account_models:
+            _log_user_action(request, account_models.UserAuditTrail.Actions.CREATE_TEST_CASE)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
 
@@ -1210,6 +1299,23 @@ class TestModulesViewSet(viewsets.ModelViewSet):
             except (TypeError, ValueError) as exc:
                 raise ValidationError({"project": "Project must be an integer."}) from exc
         return queryset
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        if account_models:
+            _log_user_action(self.request, account_models.UserAuditTrail.Actions.CREATE_MODULE)
+        return instance
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        if account_models:
+            _log_user_action(self.request, account_models.UserAuditTrail.Actions.UPDATE_MODULE)
+        return instance
+
+    def perform_destroy(self, instance):
+        super().perform_destroy(instance)
+        if account_models:
+            _log_user_action(self.request, account_models.UserAuditTrail.Actions.DELETE_MODULE)
 
 
 def _prepare_automation_data(*, automated_scenarios_only: bool = False) -> dict[str, Any]:
@@ -2230,6 +2336,9 @@ class ApiAdhocRequestView(APIView):
 
     def post(self, request, *args, **kwargs):  # noqa: D401
         payload = request.data or {}
+
+        if account_models:
+            _log_user_action(request, account_models.UserAuditTrail.Actions.RUN_TEST_CASE)
 
         # Temporary debug: log a safe summary of incoming body_transforms and environment
         try:
