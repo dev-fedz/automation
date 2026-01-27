@@ -192,6 +192,11 @@ class UserAuditTrail(models.Model):
         EXPORT_AUTOMATED_REPORT = 'report_export_automated', 'Reports - Export Automated Report'
         EXPORT_TESTCASE_REPORT = 'report_export_testcase', 'Reports - Export Test Case Report'
 
+        # API Environment
+        CREATE_API_ENVIRONMENT = 'environment_create', 'API Environment - Create Environment'
+        UPDATE_API_ENVIRONMENT = 'environment_update', 'API Environment - Update Environment'
+        DELETE_API_ENVIRONMENT = 'environment_delete', 'API Environment - Delete Environment'
+
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='audit_trails')
     action = TextChoiceField(max_length=40, choices_cls=Actions)
     datetime = models.DateTimeField(auto_now_add=True, db_index=True)

@@ -235,6 +235,21 @@ class ApiEnvironmentViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return selectors.api_environment_list()
 
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        if account_models:
+            _log_user_action(self.request, account_models.UserAuditTrail.Actions.CREATE_API_ENVIRONMENT)
+
+    def perform_update(self, serializer):
+        super().perform_update(serializer)
+        if account_models:
+            _log_user_action(self.request, account_models.UserAuditTrail.Actions.UPDATE_API_ENVIRONMENT)
+
+    def perform_destroy(self, instance):
+        super().perform_destroy(instance)
+        if account_models:
+            _log_user_action(self.request, account_models.UserAuditTrail.Actions.DELETE_API_ENVIRONMENT)
+
 
 class ApiCollectionViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.ApiCollectionSerializer

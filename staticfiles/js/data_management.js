@@ -3850,6 +3850,10 @@
                 return;
             }
             const target = event.target;
+            if (target === els.environmentName) {
+                state.environmentForm.name = target.value;
+                return;
+            }
             if (target === els.environmentDescription) {
                 state.environmentForm.description = target.value;
                 return;
@@ -4893,13 +4897,13 @@
                     const message = error instanceof Error ? error.message : String(error);
                     // Translate DB/DRF unique constraint message into a friendlier UX message
                     if (message && message.toLowerCase().includes('unique')) {
-                        setStatus('This risk → mitigation link already exists.', 'error');
+                        setStatus('Environment name already exists.', 'error');
                     } else {
                         setStatus(message, 'error');
                     }
-                    // Refresh mappings to reflect the true server state
+                    // Refresh environments to reflect the true server state
                     try {
-                        await loadMappings();
+                        await loadEnvironments();
                     } catch (_err) {
                         // ignore
                     }
