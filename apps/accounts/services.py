@@ -31,6 +31,17 @@ RATE_LIMIT_KEY = 'login:rate:{email}'
 RATE_LIMIT_MAX_ATTEMPTS = int(os.environ.get('LOGIN_RATE_LIMIT_MAX', '10'))
 RATE_LIMIT_WINDOW_SEC = int(os.environ.get('LOGIN_RATE_LIMIT_WINDOW', '60'))
 
+
+def log_user_action(*, user: models.User | None, action: models.UserAuditTrail.Actions):
+    if not user:
+        return
+    try:
+        if hasattr(user, 'is_authenticated') and not user.is_authenticated:
+            return
+    except Exception:
+        return
+    models.UserAuditTrail.objects.create(user=user, action=action)
+
 def rate_limit_check(email: str):
     client = _get_redis()
     if not client:

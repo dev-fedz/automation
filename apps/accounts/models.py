@@ -141,3 +141,30 @@ class Assets(models.Model):
 
     def __str__(self):  # pragma: no cover
         return self.name
+
+
+class UserAuditTrail(models.Model):
+    class Actions(models.TextChoices):
+        # Authentication
+        LOGIN = 'auth_login', 'Authentication - Login'
+        LOGOUT = 'auth_logout', 'Authentication - Logout'
+
+        # User Accounts
+        CREATE_USER_ACCOUNT = 'user_create', 'User Accounts - Create User Account'
+        UPDATE_USER_ACCOUNT = 'user_update', 'User Accounts - Update User Account'
+        DELETE_USER_ACCOUNT = 'user_delete', 'User Accounts - Delete User Account'
+
+        # Role
+        CREATE_ROLE = 'role_create', 'Role - Create Role'
+        UPDATE_ROLE = 'role_update', 'Role - Update Role'
+        DELETE_ROLE = 'role_delete', 'Role - Delete Role'
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='audit_trails')
+    action = TextChoiceField(max_length=40, choices_cls=Actions)
+    datetime = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-datetime', '-id']
+
+    def __str__(self):  # pragma: no cover
+        return f"{self.user_id} - {self.action} - {self.datetime}"

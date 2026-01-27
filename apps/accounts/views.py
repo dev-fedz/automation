@@ -60,6 +60,10 @@ class LoginApi(KnoxLoginView):
             update_fields.append('status')
         if update_fields:
             user.save(update_fields=update_fields)
+        try:
+            services.log_user_action(user=user, action=models.UserAuditTrail.Actions.LOGIN)
+        except Exception:
+            pass
         return super().post(request, format=None)
 
     def get_post_response_data(self, request, token, instance):  # add user info
@@ -69,7 +73,14 @@ class LoginApi(KnoxLoginView):
 
 
 class LogoutApi(KnoxLogoutView):
-    pass
+    def post(self, request, format=None):
+        user = getattr(request, 'user', None)
+        response = super().post(request, format=None)
+        try:
+            services.log_user_action(user=user, action=models.UserAuditTrail.Actions.LOGOUT)
+        except Exception:
+            pass
+        return response
 
 
 class ValidatePasswordAPI(APIView):
@@ -169,6 +180,10 @@ class UserCreateAPI(APIView):
         s = self.serializer_class(data=request.data)
         s.is_valid(raise_exception=True)
         user = services.user_create(data=s.validated_data, creator=request.user)
+        try:
+            services.log_user_action(user=request.user, action=models.UserAuditTrail.Actions.CREATE_USER_ACCOUNT)
+        except Exception:
+            pass
         return Response(self.serializer_class(user).data, status=status.HTTP_201_CREATED)
 
 
@@ -194,6 +209,10 @@ class UserUpdateApi(APIView):
         s = self.serializer_class(obj, data=request.data, partial=partial)
         s.is_valid(raise_exception=True)
         services.user_update(user=obj, data=s.validated_data)
+        try:
+            services.log_user_action(user=request.user, action=models.UserAuditTrail.Actions.UPDATE_USER_ACCOUNT)
+        except Exception:
+            pass
         return Response(self.serializer_class(obj).data)
 
 
@@ -207,6 +226,10 @@ class UserDeleteApi(APIView):
         if not obj:
             raise exceptions.NotFound()
         obj.soft_delete()
+        try:
+            services.log_user_action(user=request.user, action=models.UserAuditTrail.Actions.DELETE_USER_ACCOUNT)
+        except Exception:
+            pass
         return Response(status=status.HTTP_200_OK)
 
 
@@ -244,6 +267,10 @@ class RoleCreateAPI(APIView):
         s = self.serializer_class(data=request.data)
         s.is_valid(raise_exception=True)
         role = services.role_create(data=s.validated_data)
+        try:
+            services.log_user_action(user=request.user, action=models.UserAuditTrail.Actions.CREATE_ROLE)
+        except Exception:
+            pass
         return Response({'id': role.id, 'name': role.name}, status=status.HTTP_201_CREATED)
 
 
@@ -266,6 +293,10 @@ class RoleUpdateApi(APIView):
         s = self.serializer_class(obj, data=request.data, partial=partial)
         s.is_valid(raise_exception=True)
         services.role_update(role=obj, data=s.validated_data)
+        try:
+            services.log_user_action(user=request.user, action=models.UserAuditTrail.Actions.UPDATE_ROLE)
+        except Exception:
+            pass
         return Response({'id': obj.id, 'name': obj.name})
 
 
@@ -284,6 +315,10 @@ class RoleDeleteApi(APIView):
         if user_count > 0:
             return Response({'error': 'Cannot delete role assigned to users.'}, status=400)
         services.role_destroy(role=obj)
+        try:
+            services.log_user_action(user=request.user, action=models.UserAuditTrail.Actions.DELETE_ROLE)
+        except Exception:
+            pass
         return Response(status=status.HTTP_200_OK)
 
 
@@ -348,6 +383,10 @@ def role_create_page(request):
             from . import services
             try:
                 services.role_create(data={'name': name, 'role_modules': role_modules_payload})
+                try:
+                    services.log_user_action(user=request.user, action=models.UserAuditTrail.Actions.CREATE_ROLE)
+                except Exception:
+                    pass
                 messages.success(request, 'Role created successfully.')
                 return redirect('/roles/')
             except Exception as e:
@@ -374,6 +413,10 @@ def role_edit_page(request, pk):
             from . import services
             try:
                 services.role_update(role=role, data={'name': name, 'role_modules': role_modules_payload})
+                try:
+                    services.log_user_action(user=request.user, action=models.UserAuditTrail.Actions.UPDATE_ROLE)
+                except Exception:
+                    pass
                 messages.success(request, 'Role updated successfully.')
                 return redirect('/roles/')
             except Exception as e:
@@ -397,7 +440,11 @@ def role_delete_page(request, pk):
         if user_count > 0:
             messages.error(request, 'Cannot delete role assigned to users.')
         else:
-            role.delete()
+            services.role_destroy(role=role)
+            try:
+                services.log_user_action(user=request.user, action=models.UserAuditTrail.Actions.DELETE_ROLE)
+            except Exception:
+                pass
             messages.success(request, 'Role deleted.')
             return redirect('/roles/')
     return render(request, 'roles/delete_confirm.html', {'role': role})
@@ -433,6 +480,10 @@ def user_create_page(request):
                 role_id = int(data.pop('role'))
                 data['role'] = Group.objects.get(pk=role_id)
                 user = services.user_create(data=data, creator=request.user)
+                try:
+                    services.log_user_action(user=request.user, action=models.UserAuditTrail.Actions.CREATE_USER_ACCOUNT)
+                except Exception:
+                    pass
                 messages.success(request, 'User created successfully.')
                 return redirect('/users/')
             except Exception as e:  # broad to surface any validation error quickly
@@ -464,6 +515,10 @@ def user_edit_page(request, pk):
                 role_id = int(data.pop('role'))
                 data['role'] = Group.objects.get(pk=role_id)
                 services.user_update(user=user, data=data)
+                try:
+                    services.log_user_action(user=request.user, action=models.UserAuditTrail.Actions.UPDATE_USER_ACCOUNT)
+                except Exception:
+                    pass
                 messages.success(request, 'User updated successfully.')
                 return redirect('/users/')
             except Exception as e:
@@ -478,6 +533,10 @@ def user_delete_page(request, pk):
     user = get_object_or_404(models.User, pk=pk)
     if request.method == 'POST':
         user.soft_delete()
+        try:
+            services.log_user_action(user=request.user, action=models.UserAuditTrail.Actions.DELETE_USER_ACCOUNT)
+        except Exception:
+            pass
         messages.success(request, 'User deleted.')
         return redirect('/users/')
     return render(request, 'users/delete_confirm.html', {'user_obj': user})
