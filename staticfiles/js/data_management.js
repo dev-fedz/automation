@@ -852,7 +852,7 @@
                         .map((s) => `
                             <tr class="module-scenario-row" data-scenario-id="${s.id}">
                                 <td class="scenario-title">${escapeHtml(s.title || '')}</td>
-                                <td class="scenario-description">${escapeHtml(s.description || '')}</td>
+                                <td class="scenario-description" style="white-space: pre-wrap;">${s.description ? `<div class="table-secondary">${escapeHtml(htmlToFormattedText(s.description))}</div>` : '—'}</td>
                                 <td class="scenario-created">${escapeHtml(formatDateTime(s.created_at || null))}</td>
                                 <td class="scenario-updated">${escapeHtml(formatDateTime(s.updated_at || null))}</td>
                                 <td class="scenario-actions">
@@ -1673,6 +1673,488 @@
             });
         };
 
+        // Scenario Comments Modal (shared with Projects > Scenarios)
+        const getScenarioCommentsCurrentUserId = () => {
+            try {
+                const el = document.getElementById('automation-app') || document.getElementById('data-management-app');
+                const raw = el && el.dataset ? el.dataset.currentUserId : null;
+                if (!raw || raw === 'null') return null;
+                const id = parseInt(raw, 10);
+                return Number.isFinite(id) ? id : null;
+            } catch (e) {
+                return null;
+            }
+        };
+
+        const loadCommentsForScenarioCommentsModal = async (scenarioId) => {
+            const modal = document.querySelector('[data-role="scenario-comments-modal"]');
+            const commentsList = document.getElementById('comments-list');
+            if (!modal || !commentsList) return;
+
+            if (!scenarioId && scenarioId !== 0) {
+                commentsList.innerHTML = '<div class="comment-empty">No scenario selected.</div>';
+                return;
+            }
+
+            commentsList.innerHTML = '<div class="comment-empty">Loading comments…</div>';
+            const currentUserId = getScenarioCommentsCurrentUserId();
+
+            try {
+                const url = `/api/core/scenario-comments/?scenario=${encodeURIComponent(String(scenarioId))}`;
+                const comments = await request(url, { method: 'GET' });
+                const list = Array.isArray(comments) ? comments : [];
+
+                const renderComment = (comment, isReply = false) => {
+                    if (!comment) return '';
+
+                    const canEdit = currentUserId && Number(comment.user) === Number(currentUserId);
+                    const editBtn = canEdit ? `
+                        <button type="button" class="comment-action-btn" data-action="edit-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Edit">
+                            <span>✏️</span>
+                        </button>` : '';
+                    const deleteBtn = canEdit ? `
+                        <button type="button" class="comment-action-btn" data-action="delete-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Delete">
+                            <span>🗑️</span>
+                        </button>` : '';
+
+                    const isLiked = !!comment.user_has_liked;
+                    const likesCount = typeof comment.likes_count === 'number' ? comment.likes_count : 0;
+                    const thumbsUpIconStyle = isLiked ? '' : 'filter: grayscale(1); opacity: 0.45;';
+                    const thumbsUpCountStyle = (isLiked && likesCount > 0) ? 'margin-left: 4px; font-weight: 600;' : 'display: none;';
+
+                    const userReaction = (comment.user_reaction || '').trim();
+                    const reactionsSummary = Array.isArray(comment.reactions_summary) ? comment.reactions_summary : [];
+                    const reactionsSummaryText = reactionsSummary
+                        .filter((x) => x && x.reaction && typeof x.count === 'number' && x.count > 0)
+                        .map((x) => `${x.reaction} ${x.count}`)
+                        .join(' ');
+                    const reactionDisplayText = reactionsSummaryText || '😊';
+
+                    const repliesHtml = (!isReply && Array.isArray(comment.replies) && comment.replies.length > 0)
+                        ? `<div class="comment-replies">${comment.replies.map((reply) => renderComment(reply, true)).join('')}</div>`
+                        : '';
+
+                    const rawHtml = normalizeCommentHtmlForDisplay(comment.content || '');
+
+                    return `
+                        <div class="comment-item ${isReply ? 'comment-reply' : ''}" data-comment-id="${escapeHtml(comment.id || '')}" data-comment-user="${escapeHtml(comment.user || '')}">
+                            <div class="comment-header">
+                                <span class="comment-author">${escapeHtml(comment.user_name || comment.user_email || 'Unknown')}${comment.is_edited ? ' (edited)' : ''}</span>
+                                <span class="comment-date">${escapeHtml(formatDateTime(comment.created_at || null))}</span>
+                            </div>
+                            <div class="comment-content" data-comment-content>${rawHtml || ''}</div>
+                            <div class="comment-actions">
+                                ${!isReply ? `<button type="button" class="comment-action-btn" data-action="reply-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Reply"><span>↩️</span></button>` : ''}
+                                <button type="button" class="comment-action-btn" data-action="thumbs-up-comment" data-comment-id="${escapeHtml(comment.id || '')}" data-liked="${isLiked ? 'true' : 'false'}" data-likes-count="${escapeHtml(String(likesCount))}" aria-pressed="${isLiked ? 'true' : 'false'}" title="Thumbs Up">
+                                    <span data-role="thumbs-up-icon" style="${thumbsUpIconStyle}">👍</span>
+                                    <span data-role="thumbs-up-count" style="${thumbsUpCountStyle}">${escapeHtml(String(likesCount))}</span>
+                                </button>
+                                <button type="button" class="comment-action-btn" data-action="add-reaction-comment" data-comment-id="${escapeHtml(comment.id || '')}" data-user-reaction="${escapeHtml(userReaction)}" title="Add Reaction">
+                                    <span data-role="reaction-display">${escapeHtml(reactionDisplayText)}</span>
+                                </button>
+                                ${editBtn}
+                                ${deleteBtn}
+                            </div>
+                            ${repliesHtml}
+                        </div>
+                    `;
+                };
+
+                commentsList.innerHTML = list.length
+                    ? list.map((c) => renderComment(c, false)).join('')
+                    : '<div class="comment-empty">No comments yet. Be the first to comment!</div>';
+            } catch (e) {
+                commentsList.innerHTML = '<div class="comment-empty">Failed to load comments.</div>';
+            }
+        };
+
+        const closeScenarioCommentsModal = () => {
+            const modal = document.querySelector('[data-role="scenario-comments-modal"]');
+            if (modal) {
+                modal.hidden = true;
+                body.classList.remove('automation-modal-open');
+            }
+            try {
+                if (typeof tinymce !== 'undefined') {
+                    tinymce.remove('#comment-content');
+                    tinymce.remove('#inline-comment-content');
+                }
+            } catch (e) { /* ignore */ }
+
+            try {
+                const addForm = document.getElementById('add-comment-form');
+                if (addForm) addForm.style.display = 'none';
+                const inlineEditor = document.getElementById('inline-comment-editor');
+                if (inlineEditor) inlineEditor.style.display = 'none';
+            } catch (e) { /* ignore */ }
+        };
+
+        const openScenarioCommentsModal = async (scenarioId) => {
+            const modal = document.querySelector('[data-role="scenario-comments-modal"]');
+            if (!modal) return;
+
+            const scenarioIdInput = document.getElementById('comment-scenario-id');
+            const addForm = document.getElementById('add-comment-form');
+            const inlineEditor = document.getElementById('inline-comment-editor');
+            const commentContent = document.getElementById('comment-content');
+
+            if (scenarioIdInput) scenarioIdInput.value = String(scenarioId || '');
+            if (addForm) addForm.style.display = 'none';
+            if (inlineEditor) inlineEditor.style.display = 'none';
+            if (commentContent) commentContent.value = '';
+
+            await loadCommentsForScenarioCommentsModal(scenarioId);
+
+            modal.hidden = false;
+            body.classList.add('automation-modal-open');
+        };
+
+        const initScenarioCommentsInlineEditor = (mode, commentId, content = '', parentCommentId = null) => {
+            const inlineEditor = document.getElementById('inline-comment-editor');
+            const inlineForm = document.getElementById('inline-comment-form');
+            const inlineLabel = document.getElementById('inline-editor-label');
+            const inlineSubmitBtn = document.getElementById('inline-submit-btn');
+            if (!inlineEditor || !inlineForm) return;
+
+            inlineEditor.style.display = 'none';
+            try {
+                if (typeof tinymce !== 'undefined') {
+                    tinymce.remove('#inline-comment-content');
+                }
+            } catch (e) { /* ignore */ }
+
+            inlineForm.setAttribute('data-mode', mode);
+            inlineForm.setAttribute('data-comment-id', commentId || '');
+            inlineForm.setAttribute('data-parent-id', parentCommentId || '');
+
+            if (mode === 'edit') {
+                if (inlineLabel) inlineLabel.textContent = 'Edit Comment';
+                if (inlineSubmitBtn) inlineSubmitBtn.textContent = 'Update Comment';
+            } else if (mode === 'reply') {
+                if (inlineLabel) inlineLabel.textContent = 'Reply to Comment';
+                if (inlineSubmitBtn) inlineSubmitBtn.textContent = 'Post Reply';
+            }
+
+            const anchorId = commentId || parentCommentId;
+            const commentItem = anchorId ? document.querySelector(`[data-comment-id="${(typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(String(anchorId)) : String(anchorId)}"]`) : null;
+            if (commentItem) {
+                const actionsDiv = commentItem.querySelector('.comment-actions');
+                if (actionsDiv) {
+                    actionsDiv.after(inlineEditor);
+                }
+            }
+
+            inlineEditor.style.display = 'block';
+            const textarea = document.getElementById('inline-comment-content');
+
+            if (typeof tinymce !== 'undefined') {
+                tinymce.init({
+                    selector: '#inline-comment-content',
+                    height: 200,
+                    menubar: false,
+                    branding: false,
+                    plugins: [
+                        'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
+                        'searchreplace', 'visualblocks', 'code', 'fullscreen',
+                        'insertdatetime', 'table', 'help', 'wordcount'
+                    ],
+                    toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
+                        'alignleft aligncenter alignright alignjustify | ' +
+                        'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
+                    content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }',
+                    init_instance_callback(editor) {
+                        try { editor.setContent(content || ''); } catch (e) { /* ignore */ }
+                        try { editor.focus(); } catch (e) { /* ignore */ }
+                    },
+                });
+            } else if (textarea) {
+                textarea.value = content || '';
+            }
+        };
+
+        // Open the shared Scenario Comments modal from View Scenario (Modules page)
+        document.addEventListener('click', async (ev) => {
+            const btn = ev && ev.target && ev.target.closest ? ev.target.closest('[data-action="open-scenario-comments-modal"]') : null;
+            if (!btn) return;
+            if (state.moduleScenarioModalMode !== 'view') return;
+            if (!state.moduleScenarioCurrentId) return;
+            ev.preventDefault();
+            await openScenarioCommentsModal(state.moduleScenarioCurrentId);
+        });
+
+        // Scenario Comments modal UI events
+        document.addEventListener('click', async (ev) => {
+            const target = ev && ev.target && ev.target.closest ? ev.target.closest('[data-action],#add-comment-btn,#cancel-add-comment,#cancel-inline-comment') : null;
+            if (!target) return;
+
+            const modalRoot = target.closest('[data-role="scenario-comments-modal"]');
+            if (!modalRoot) return;
+
+            // Close
+            if (target.matches('[data-action="close-scenario-comments-modal"]')) {
+                ev.preventDefault();
+                closeScenarioCommentsModal();
+                return;
+            }
+
+            // Show add form
+            if (target.id === 'add-comment-btn') {
+                ev.preventDefault();
+                const addForm = document.getElementById('add-comment-form');
+                const inlineEditor = document.getElementById('inline-comment-editor');
+                if (inlineEditor) inlineEditor.style.display = 'none';
+                if (addForm) addForm.style.display = 'block';
+
+                try {
+                    if (typeof tinymce !== 'undefined') {
+                        tinymce.remove('#comment-content');
+                        tinymce.init({
+                            selector: '#comment-content',
+                            height: 220,
+                            menubar: false,
+                            branding: false,
+                            plugins: [
+                                'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
+                                'searchreplace', 'visualblocks', 'code', 'fullscreen',
+                                'insertdatetime', 'table', 'help', 'wordcount'
+                            ],
+                            toolbar: 'undo redo | formatselect | bold italic underline strikethrough | ' +
+                                'alignleft aligncenter alignright alignjustify | ' +
+                                'bullist numlist outdent indent | forecolor backcolor | removeformat | help',
+                            content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px }',
+                        });
+                    }
+                } catch (e) { /* ignore */ }
+                return;
+            }
+
+            // Cancel add
+            if (target.id === 'cancel-add-comment') {
+                ev.preventDefault();
+                const addForm = document.getElementById('add-comment-form');
+                if (addForm) addForm.style.display = 'none';
+                try {
+                    if (typeof tinymce !== 'undefined') {
+                        tinymce.remove('#comment-content');
+                    }
+                } catch (e) { /* ignore */ }
+                return;
+            }
+
+            // Cancel inline
+            if (target.id === 'cancel-inline-comment') {
+                ev.preventDefault();
+                const inlineEditor = document.getElementById('inline-comment-editor');
+                if (inlineEditor) inlineEditor.style.display = 'none';
+                try {
+                    if (typeof tinymce !== 'undefined') {
+                        tinymce.remove('#inline-comment-content');
+                    }
+                } catch (e) { /* ignore */ }
+                return;
+            }
+
+            const action = target.dataset.action;
+            const commentId = target.dataset.commentId;
+            const scenarioIdInput = document.getElementById('comment-scenario-id');
+            const scenarioId = scenarioIdInput ? scenarioIdInput.value : null;
+
+            if (action === 'edit-comment' && commentId) {
+                ev.preventDefault();
+                const commentItem = document.querySelector(`[data-comment-id="${(typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(String(commentId)) : String(commentId)}"]`);
+                const contentDiv = commentItem ? commentItem.querySelector('[data-comment-content]') : null;
+                const currentContent = contentDiv ? (contentDiv.innerHTML || '') : '';
+                initScenarioCommentsInlineEditor('edit', String(commentId), currentContent);
+                return;
+            }
+
+            if (action === 'reply-comment' && commentId) {
+                ev.preventDefault();
+                initScenarioCommentsInlineEditor('reply', null, '', String(commentId));
+                return;
+            }
+
+            if (action === 'delete-comment' && commentId) {
+                ev.preventDefault();
+                try {
+                    if (!window.confirm('Are you sure you want to delete this comment?')) return;
+                } catch (e) { /* ignore */ }
+
+                try {
+                    await request(`/api/core/scenario-comments/${encodeURIComponent(String(commentId))}/`, { method: 'DELETE' });
+                    showToast('Comment deleted.', 'success');
+                    if (scenarioId) await loadCommentsForScenarioCommentsModal(scenarioId);
+                } catch (e) {
+                    showToast(e instanceof Error ? e.message : 'Failed to delete comment.', 'error');
+                }
+                return;
+            }
+
+            if (action === 'thumbs-up-comment' && commentId) {
+                ev.preventDefault();
+
+                const wasLiked = target.dataset.liked === 'true';
+                const wasLikesCountRaw = target.dataset.likesCount;
+                const wasLikesCount = Number.isFinite(parseInt(wasLikesCountRaw, 10)) ? parseInt(wasLikesCountRaw, 10) : 0;
+                const optimisticLiked = !wasLiked;
+                const optimisticCount = optimisticLiked ? Math.max(1, wasLikesCount + 1) : Math.max(0, wasLikesCount - 1);
+                updateThumbsUpButtonIcon(target, optimisticLiked, optimisticCount);
+
+                try {
+                    target.disabled = true;
+                    const data = await request(`/api/core/scenario-comments/${encodeURIComponent(String(commentId))}/toggle_like/`, { method: 'POST' });
+                    updateThumbsUpButtonIcon(target, !!(data && data.liked), data && typeof data.likes_count === 'number' ? data.likes_count : null);
+                } catch (e) {
+                    updateThumbsUpButtonIcon(target, wasLiked, wasLikesCount);
+                    showToast(e instanceof Error ? e.message : 'Failed to toggle thumbs up.', 'error');
+                } finally {
+                    target.disabled = false;
+                }
+                return;
+            }
+
+            if (action === 'add-reaction-comment' && commentId) {
+                ev.preventDefault();
+                const current = (target.dataset.userReaction || '').trim() || '😊';
+                const reaction = await openEmojiPickerPopover(target, current);
+                if (!reaction) return;
+                try {
+                    target.disabled = true;
+                    const data = await request(`/api/core/scenario-comments/${encodeURIComponent(String(commentId))}/set_reaction/`, {
+                        method: 'POST',
+                        body: JSON.stringify({ reaction }),
+                    });
+
+                    const displayEl = target.querySelector('[data-role="reaction-display"]');
+                    const nextUserReaction = data && data.reacted ? (data.reaction || reaction) : '';
+                    target.dataset.userReaction = nextUserReaction;
+                    if (displayEl) {
+                        const summary = (data && Array.isArray(data.reactions_summary)) ? data.reactions_summary : [];
+                        const summaryText = summary
+                            .filter((x) => x && x.reaction && typeof x.count === 'number' && x.count > 0)
+                            .map((x) => `${x.reaction} ${x.count}`)
+                            .join(' ');
+                        displayEl.textContent = summaryText || '😊';
+                    }
+                    showToast(data && data.reacted ? 'Reaction saved.' : 'Reaction removed.', 'success');
+                } catch (e) {
+                    showToast(e instanceof Error ? e.message : 'Failed to add reaction.', 'error');
+                } finally {
+                    target.disabled = false;
+                }
+                return;
+            }
+        });
+
+        document.addEventListener('submit', async (ev) => {
+            const form = ev && ev.target ? ev.target : null;
+            if (!form) return;
+
+            const modalRoot = form.closest && form.closest('[data-role="scenario-comments-modal"]');
+            if (!modalRoot) return;
+
+            if (form.id === 'add-comment-form') {
+                ev.preventDefault();
+                const scenarioIdInput = document.getElementById('comment-scenario-id');
+                const scenarioId = scenarioIdInput ? scenarioIdInput.value : null;
+                if (!scenarioId) return;
+
+                let content = '';
+                try {
+                    if (typeof tinymce !== 'undefined' && tinymce.get) {
+                        const ed = tinymce.get('comment-content');
+                        if (ed) content = ed.getContent({ format: 'html' }) || '';
+                    }
+                } catch (e) { /* ignore */ }
+                if (!content) {
+                    const textarea = document.getElementById('comment-content');
+                    content = textarea ? (textarea.value || '').trim() : '';
+                }
+                if (!content) {
+                    showToast('Please enter a comment.', 'error');
+                    return;
+                }
+
+                try {
+                    await request('/api/core/scenario-comments/', {
+                        method: 'POST',
+                        body: JSON.stringify({ scenario: scenarioId, content }),
+                    });
+                    showToast('Comment posted.', 'success');
+                    const addForm = document.getElementById('add-comment-form');
+                    if (addForm) addForm.style.display = 'none';
+                    try {
+                        if (typeof tinymce !== 'undefined') {
+                            tinymce.remove('#comment-content');
+                        }
+                    } catch (e) { /* ignore */ }
+                    await loadCommentsForScenarioCommentsModal(scenarioId);
+                } catch (e) {
+                    showToast(e instanceof Error ? e.message : 'Failed to post comment.', 'error');
+                }
+                return;
+            }
+
+            if (form.id === 'inline-comment-form') {
+                ev.preventDefault();
+                const scenarioIdInput = document.getElementById('comment-scenario-id');
+                const scenarioId = scenarioIdInput ? scenarioIdInput.value : null;
+                if (!scenarioId) return;
+
+                const mode = form.getAttribute('data-mode') || '';
+                const editId = form.getAttribute('data-comment-id') || '';
+                const parentId = form.getAttribute('data-parent-id') || '';
+
+                let content = '';
+                try {
+                    if (typeof tinymce !== 'undefined' && tinymce.get) {
+                        const ed = tinymce.get('inline-comment-content');
+                        if (ed) content = ed.getContent({ format: 'html' }) || '';
+                    }
+                } catch (e) { /* ignore */ }
+                if (!content) {
+                    const textarea = document.getElementById('inline-comment-content');
+                    content = textarea ? (textarea.value || '').trim() : '';
+                }
+                if (!content) {
+                    showToast('Please enter a comment.', 'error');
+                    return;
+                }
+
+                try {
+                    if (mode === 'edit') {
+                        if (!editId) return;
+                        await request(`/api/core/scenario-comments/${encodeURIComponent(String(editId))}/`, {
+                            method: 'PATCH',
+                            body: JSON.stringify({ content }),
+                        });
+                        showToast('Comment updated.', 'success');
+                    } else if (mode === 'reply') {
+                        if (!parentId) return;
+                        await request('/api/core/scenario-comments/', {
+                            method: 'POST',
+                            body: JSON.stringify({ scenario: scenarioId, content, parent: parentId }),
+                        });
+                        showToast('Reply posted.', 'success');
+                    } else {
+                        return;
+                    }
+
+                    const inlineEditor = document.getElementById('inline-comment-editor');
+                    if (inlineEditor) inlineEditor.style.display = 'none';
+                    try {
+                        if (typeof tinymce !== 'undefined') {
+                            tinymce.remove('#inline-comment-content');
+                        }
+                    } catch (e) { /* ignore */ }
+
+                    await loadCommentsForScenarioCommentsModal(scenarioId);
+                } catch (e) {
+                    showToast(e instanceof Error ? e.message : 'Failed to save comment.', 'error');
+                }
+            }
+        });
+
         const normalizeCommentHtmlForDisplay = (value) => {
             if (!value) return '';
             try {
@@ -2038,18 +2520,23 @@
             // It should only be shown when the description is editable (TinyMCE).
             setViewScenarioSaveVisible(modal, false);
 
-            // Comments are shown only in View Scenario.
+            // Comments: use the shared Scenario Comments modal (same as Projects > Scenarios).
+            try {
+                const commentsBtn = modal.querySelector('#module-view-scenario-comments-btn');
+                if (commentsBtn) {
+                    commentsBtn.hidden = !readOnly;
+                    commentsBtn.disabled = !(readOnly && scenario && scenario.id);
+                }
+            } catch (e) { /* ignore */ }
+
+            // Legacy inline comments row (kept in template but unused).
             try {
                 const row = modal.querySelector('#module-view-scenario-comments-row');
                 const container = modal.querySelector('#module-view-scenario-comments');
                 if (row && container) {
-                    row.hidden = !readOnly;
-                    // Hard guarantee: when creating/editing a scenario, never show
-                    // the comments UI (even if inline styles exist on the element).
-                    try {
-                        row.style.display = readOnly ? 'flex' : 'none';
-                    } catch (e) { /* ignore */ }
-                    if (!readOnly) container.innerHTML = '';
+                    row.hidden = true;
+                    try { row.style.display = 'none'; } catch (e) { /* ignore */ }
+                    container.innerHTML = '';
                 }
             } catch (e) { /* ignore */ }
 
@@ -2133,13 +2620,6 @@
             // Enable rich-text editing for description on create/edit.
             // Keep plain textarea for view mode.
             try { initScenarioDescriptionEditor({ readOnly }); } catch (e) { /* ignore */ }
-
-            // Load comments under description in View mode.
-            try {
-                if (readOnly && scenario && scenario.id) {
-                    loadScenarioCommentsForViewModal(scenario.id);
-                }
-            } catch (e) { /* ignore */ }
 
             // focus first input when not viewing
             if (!readOnly && titleInput) titleInput.focus();

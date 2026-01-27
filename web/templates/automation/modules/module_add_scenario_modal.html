@@ -4,7 +4,12 @@
     <div class="automation-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="module-add-scenario-modal-title">
         <header class="automation-modal__header">
             <h2 id="module-add-scenario-modal-title">Add Scenario to Module</h2>
-            <button type="button" class="automation-modal__close" data-action="close-module-add-scenario-modal" aria-label="Close">&times;</button>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <button type="button" class="btn-icon" id="module-view-scenario-comments-btn" data-action="open-scenario-comments-modal" title="Comments" aria-label="Comments" hidden>
+                    <span style="font-size: 18px;">💬</span>
+                </button>
+                <button type="button" class="automation-modal__close" data-action="close-module-add-scenario-modal" aria-label="Close">&times;</button>
+            </div>
         </header>
         <form id="module-add-scenario-form" class="automation-form" autocomplete="off">
             <fieldset>

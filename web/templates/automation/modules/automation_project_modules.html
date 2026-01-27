@@ -84,6 +84,7 @@
 
     {% include "automation/modules/test_modules_modal.html" %}
     {% include "automation/modules/module_add_scenario_modal.html" %}
+    {% include "automation/scenarios/scenario_comments_modal.html" %}
 
 
     {{ initial_metrics|default:"[]"|json_script:"data-management-initial-metrics" }}
@@ -97,5 +98,5 @@
 {% block body_js %}
     {{ block.super }}
     <script src="{% static 'tinymce/tinymce.min.js' %}"></script>
-    <script src="{% static 'js/data_management.js' %}"></script>
+    <script src="{% static 'js/data_management.js' %}?v={{ STATIC_VERSION }}"></script>
 {% endblock %}
