@@ -21,7 +21,7 @@
         <section class="automation-panel data-card" data-entity="test-modules" data-section="test-modules" aria-labelledby="headline-test-modules" id="section-test-modules">
             <div class="panel-header">
                 <div>
-                    <h3 id="headline-test-modules">Test Modules</h3>
+                    <h2 id="headline-test-modules">Modules</h3>
                     <p class="panel-subtitle">Register modules under test to organise test plans and cases.</p>
                 </div>
                 <div class="panel-actions">
@@ -35,7 +35,7 @@
                 </div>
             </div>
             <div class="card table-card automation-table-card" aria-live="polite">
-                <table class="table-modern automation-table" aria-label="Test modules register">
+                <table class="table-modern automation-table" aria-label="Test modules register" id="test-modules-table">
                     <thead>
                         <tr>
                             <th scope="col" class="col-collapse" aria-hidden="true"></th>
@@ -54,7 +54,7 @@
                                     <td class="col-collapse">
                                         <button type="button" class="btn-icon module-toggle" aria-expanded="false" data-action="toggle-module" data-module-id="{{ module.id }}" aria-label="Toggle scenarios for {{ module.title|default:''|escape }}">▸</button>
                                     </td>
-                                    <td data-label="Title">{{ module.title|default:"" }}</td>
+                                        <td data-label="Title">{{ module.title|default:"" }}</td>
                                     <td data-label="Description">{{ module.description|default:"" }}</td>
                                     <td data-label="Project">
                                         {% if module.project_id %}Project {{ module.project_id }}{% else %}&mdash;{% endif %}
@@ -78,7 +78,9 @@
                         {% endif %}
                     </tbody>
                 </table>
+                    <div class="table-pagination module-scenarios-pagination" data-module-id="{{ module.id }}" aria-label="Module scenarios pagination"></div>
             </div>
+            <div class="table-pagination" id="test-modules-pagination" aria-label="Test modules pagination"></div>
         </section>
     </div>
 

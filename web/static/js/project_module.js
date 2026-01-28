@@ -83,6 +83,8 @@
     );
 
     const projectsBody = root.querySelector('[data-role="project-list"]');
+    const projectsTable = root.querySelector('#projects-table');
+    const projectsPagination = root.querySelector('#projects-pagination');
     const modal = root.querySelector('[data-role="project-modal"]');
     const form = modal ? modal.querySelector('#project-form') : null;
     const formAlert = modal ? modal.querySelector('[data-role="form-errors"]') : null;
@@ -153,12 +155,129 @@
         };
     };
 
+    const paginationState = {
+        page: 1,
+        pageSize: 10,
+        rows: [],
+        controls: null,
+    };
+
+    const createPaginationControls = (container, onPrev, onNext, defaultPageSize) => {
+        if (!container) {
+            return null;
+        }
+        container.innerHTML = '';
+        const prev = document.createElement('button');
+        prev.type = 'button';
+        prev.className = 'btn btn-sm';
+        prev.textContent = 'Prev';
+        const info = document.createElement('span');
+        info.className = 'pagination-info';
+        info.style.margin = '0 0.6rem';
+        const next = document.createElement('button');
+        next.type = 'button';
+        next.className = 'btn btn-sm';
+        next.textContent = 'Next';
+        prev.addEventListener('click', onPrev);
+        next.addEventListener('click', onNext);
+
+        const select = document.createElement('select');
+        select.className = 'pagination-pagesize';
+        [10, 20, 30, 40, 50, 100].forEach((n) => {
+            const opt = document.createElement('option');
+            opt.value = n;
+            opt.text = String(n);
+            select.appendChild(opt);
+        });
+        if (defaultPageSize) {
+            select.value = String(defaultPageSize);
+        }
+        select.style.marginLeft = '0.6rem';
+        select.style.padding = '0.25rem 0.5rem';
+        select.title = 'Rows per page';
+
+        container.appendChild(prev);
+        container.appendChild(info);
+        container.appendChild(next);
+        container.appendChild(select);
+        return {
+            prev,
+            info,
+            next,
+            pagesize: select,
+        };
+    };
+
+    const getProjectRows = () => {
+        if (!projectsTable) {
+            return [];
+        }
+        const tbody = projectsTable.querySelector('tbody');
+        if (!tbody) {
+            return [];
+        }
+        return Array.from(tbody.querySelectorAll('tr')).filter((row) => !row.querySelector('.empty'));
+    };
+
+    const renderPagination = () => {
+        if (!projectsPagination || !projectsTable) {
+            return;
+        }
+        if (!paginationState.controls) {
+            paginationState.controls = createPaginationControls(
+                projectsPagination,
+                () => {
+                    if (paginationState.page > 1) {
+                        paginationState.page -= 1;
+                        renderPagination();
+                    }
+                },
+                () => {
+                    const totalPages = Math.max(1, Math.ceil(paginationState.rows.length / paginationState.pageSize));
+                    if (paginationState.page < totalPages) {
+                        paginationState.page += 1;
+                        renderPagination();
+                    }
+                },
+                paginationState.pageSize,
+            ) || { prev: { disabled: true }, next: { disabled: true }, info: { textContent: '' }, pagesize: null };
+
+            if (paginationState.controls.pagesize) {
+                paginationState.controls.pagesize.addEventListener('change', function () {
+                    const v = parseInt(this.value, 10) || 10;
+                    paginationState.pageSize = v;
+                    paginationState.page = 1;
+                    renderPagination();
+                });
+            }
+        }
+
+        const totalPages = Math.max(1, Math.ceil(paginationState.rows.length / paginationState.pageSize));
+        if (paginationState.page > totalPages) {
+            paginationState.page = 1;
+        }
+        const start = (paginationState.page - 1) * paginationState.pageSize;
+        const end = start + paginationState.pageSize;
+        paginationState.rows.forEach((row, index) => {
+            row.style.display = (index >= start && index < end) ? '' : 'none';
+        });
+        paginationState.controls.info.textContent = `${paginationState.page} / ${totalPages}`;
+        paginationState.controls.prev.disabled = paginationState.page <= 1;
+        paginationState.controls.next.disabled = paginationState.page >= totalPages;
+    };
+
+    const refreshPagination = () => {
+        paginationState.rows = getProjectRows();
+        renderPagination();
+    };
+
     const renderProjects = () => {
         if (!projectsBody) {
             return;
         }
         if (!projects.length) {
             projectsBody.innerHTML = renderEmptyRow();
+            refreshPagination();
             return;
         }
         const rows = projects.map((project) => {
@@ -186,6 +305,7 @@
             );
         });
         projectsBody.innerHTML = rows.join('');
+        refreshPagination();
     };
 
     const toggleModal = (visible) => {

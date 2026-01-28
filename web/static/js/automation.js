@@ -582,6 +582,8 @@
             scenarioForm: document.getElementById('automation-scenario-form'),
             scenarioSearch: document.getElementById('scenario-search'),
             scenarioPlan: document.getElementById('scenario-plan'),
+            scenariosTable: document.getElementById('scenarios-table'),
+            scenariosPagination: document.getElementById('scenarios-pagination'),
             caseForm: document.getElementById('automation-case-form'),
             casePlanSelect: document.getElementById('case-plan-select'),
             caseModuleSelect: document.getElementById('case-module-select'),
@@ -597,6 +599,108 @@
             maintenanceFormReset: root.querySelector('[data-action="reset-maintenance-form"]'),
             planRiskMatrix: document.getElementById('plan-risk-matrix'),
         };
+
+        // --- Scenarios List Pagination ---
+        const scenariosPaginationState = {
+            page: 1,
+            pageSize: 10,
+            rows: [],
+            controls: null,
+        };
+
+        function createPaginationControls(container, onPrev, onNext, defaultPageSize) {
+            if (!container) return null;
+            container.innerHTML = '';
+            const prev = document.createElement('button');
+            prev.type = 'button';
+            prev.className = 'btn btn-sm';
+            prev.textContent = 'Prev';
+            const info = document.createElement('span');
+            info.className = 'pagination-info';
+            info.style.margin = '0 0.6rem';
+            const next = document.createElement('button');
+            next.type = 'button';
+            next.className = 'btn btn-sm';
+            next.textContent = 'Next';
+            prev.addEventListener('click', onPrev);
+            next.addEventListener('click', onNext);
+            const select = document.createElement('select');
+            select.className = 'pagination-pagesize';
+            [10, 20, 30, 40, 50, 100].forEach((n) => {
+                const opt = document.createElement('option');
+                opt.value = n;
+                opt.text = String(n);
+                select.appendChild(opt);
+            });
+            if (defaultPageSize) select.value = String(defaultPageSize);
+            select.style.marginLeft = '0.6rem';
+            select.style.padding = '0.25rem 0.5rem';
+            select.title = 'Rows per page';
+            container.appendChild(prev);
+            container.appendChild(info);
+            container.appendChild(next);
+            container.appendChild(select);
+            return { prev, info, next, pagesize: select };
+        }
+
+        function getScenarioRows() {
+            if (!els.scenarioTableBody) return [];
+            return Array.from(els.scenarioTableBody.querySelectorAll('tr[data-scenario-id]'));
+        }
+
+        function renderScenariosPagination() {
+            if (!els.scenariosPagination || !els.scenariosTable || !els.scenarioTableBody) return;
+            if (!scenariosPaginationState.controls) {
+                scenariosPaginationState.controls = createPaginationControls(
+                    els.scenariosPagination,
+                    () => {
+                        if (scenariosPaginationState.page > 1) {
+                            scenariosPaginationState.page -= 1;
+                            renderScenariosPagination();
+                        }
+                    },
+                    () => {
+                        const totalPages = Math.max(1, Math.ceil(scenariosPaginationState.rows.length / scenariosPaginationState.pageSize));
+                        if (scenariosPaginationState.page < totalPages) {
+                            scenariosPaginationState.page += 1;
+                            renderScenariosPagination();
+                        }
+                    },
+                    scenariosPaginationState.pageSize,
+                ) || { prev: { disabled: true }, next: { disabled: true }, info: { textContent: '' }, pagesize: null };
+                if (scenariosPaginationState.controls.pagesize) {
+                    scenariosPaginationState.controls.pagesize.addEventListener('change', function () {
+                        const v = parseInt(this.value, 10) || 10;
+                        scenariosPaginationState.pageSize = v;
+                        scenariosPaginationState.page = 1;
+                        renderScenariosPagination();
+                    });
+                }
+            }
+            const totalPages = Math.max(1, Math.ceil(scenariosPaginationState.rows.length / scenariosPaginationState.pageSize));
+            if (scenariosPaginationState.page > totalPages) {
+                scenariosPaginationState.page = 1;
+            }
+            const start = (scenariosPaginationState.page - 1) * scenariosPaginationState.pageSize;
+            const end = start + scenariosPaginationState.pageSize;
+            scenariosPaginationState.rows.forEach((row, index) => {
+                row.style.display = (index >= start && index < end) ? '' : 'none';
+            });
+            scenariosPaginationState.controls.info.textContent = `${scenariosPaginationState.page} / ${totalPages}`;
+            scenariosPaginationState.controls.prev.disabled = scenariosPaginationState.page <= 1;
+            scenariosPaginationState.controls.next.disabled = scenariosPaginationState.page >= totalPages;
+        }
+
+        function refreshScenariosPagination() {
+            scenariosPaginationState.rows = getScenarioRows();
+            renderScenariosPagination();
+        }
+
+        // Initial pagination setup for scenarios list
+        if (els.scenariosTable && els.scenariosPagination && els.scenarioTableBody) {
+            window.addEventListener('DOMContentLoaded', refreshScenariosPagination);
+            refreshScenariosPagination();
+        }
 
         const planModalCloseButtons = Array.from(root.querySelectorAll('[data-action="close-plan-modal"]'));
         const body = document.body;
