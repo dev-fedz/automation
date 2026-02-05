@@ -2247,7 +2247,7 @@ def automation_test_cases(request):
         ).data
     except Exception:
         context["initial_modules"] = []
-    return render(request, "core/automation_test_cases.html", context)
+    return render(request, "automation/testcases/automation_test_cases.html", context)
 
 
 @ensure_csrf_cookie

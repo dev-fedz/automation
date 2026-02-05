@@ -1,0 +1,25 @@
+<div class="form-row" id="module-view-case-comments-row" hidden style="max-height: 600px; overflow-y: auto;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px;">
+        <span style="font-weight: 600;">COMMENTS</span>
+        <button type="button" class="btn-primary" data-action="toggle-view-case-add-comment">Add Comment</button>
+    </div>
+    <input
+        type="file"
+        id="module-view-case-comment-attachments-input"
+        name="comment_attachments"
+        multiple
+        hidden
+        accept="image/*,video/*,.csv,.xls,.xlsx,.pdf,.doc,.docx"
+    >
+    <div id="module-view-case-add-comment-form" class="automation-form" style="display:none; margin-bottom: 12px;">
+        <input type="hidden" id="module-view-case-comment-case-id" name="test_case">
+        <div class="form-row">
+            <textarea id="module-view-case-comment-content" name="content" rows="6" placeholder="Write your comment here..." class="tinymce-editor"></textarea>
+        </div>
+        <div class="form-actions">
+            <button type="button" class="btn-primary" data-action="post-view-case-add-comment">Post Comment</button>
+            <button type="button" class="btn-secondary" data-action="cancel-view-case-add-comment">Cancel</button>
+        </div>
+    </div>
+    <div id="module-view-case-comments"></div>
+</div>
