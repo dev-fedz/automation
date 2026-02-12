@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
-    <title>{% block title %}App{% endblock %}</title>
+    <title>{% block title %}chronos-QA{% endblock %}</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http://www.w3.org/2000/svg%27%20viewBox%3D%270%200%2064%2064%27%3E%3Crect%20width%3D%2764%27%20height%3D%2764%27%20rx%3D%2712%27%20ry%3D%2712%27%20fill%3D%27%23005498%27/%3E%3Ctext%20x%3D%2732%27%20y%3D%2742%27%20text-anchor%3D%27middle%27%20font-family%3D%27Arial%2C%20sans-serif%27%20font-size%3D%2732%27%20fill%3D%27white%27%3EA%3C/text%3E%3C/svg%3E" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2064%2064%27%3E%3Crect%20width%3D%2764%27%20height%3D%2764%27%20rx%3D%2712%27%20ry%3D%2712%27%20fill%3D%27%23f4b400%27/%3E%3Ccircle%20cx%3D%2732%27%20cy%3D%2732%27%20r%3D%2719%27%20fill%3D%27none%27%20stroke%3D%27%23312400%27%20stroke-width%3D%274%27/%3E%3Cpath%20d%3D%27M32%2032%20V21%27%20stroke%3D%27%23312400%27%20stroke-width%3D%274%27%20stroke-linecap%3D%27round%27/%3E%3Cpath%20d%3D%27M32%2032%20L43%2036%27%20stroke%3D%27%23312400%27%20stroke-width%3D%274%27%20stroke-linecap%3D%27round%27/%3E%3Ccircle%20cx%3D%2732%27%20cy%3D%2732%27%20r%3D%272.5%27%20fill%3D%27%23312400%27/%3E%3C/svg%3E" />
     {% load static %}
     {% block head_css %}<link rel="stylesheet" href="{% static 'css/app.css' %}">{% endblock %}
     {% block head_js %}{% endblock %}
@@ -49,7 +49,12 @@
                         {% endif %}
                     </nav>
                 </div>
-                <div class="brand"></div>
+                <div class="brand">
+                    <a class="brand-link" href="{% url 'dashboard' %}" aria-label="chronos-QA">
+                        <span class="brand-mark" aria-hidden="true"></span>
+                        <span class="brand-text">chronos<span class="brand-sub">-QA</span></span>
+                    </a>
+                </div>
                 <div class="nav-right">
                     <div class="icon-group">
                         <div class="icon-badge" title="Notifications">🔔<span class="badge">7</span></div>

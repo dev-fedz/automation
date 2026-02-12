@@ -603,6 +603,8 @@
             testModulesMeta: root.querySelector('[data-role="test-modules-meta"]'),
             testModulesCreated: root.querySelector('[data-role="test-modules-created"]'),
             testModulesUpdated: root.querySelector('[data-role="test-modules-updated"]'),
+            testModulesTable: root.querySelector('#test-modules-table'),
+            testModulesPagination: root.querySelector('#test-modules-pagination'),
         };
 
         const body = document.body;
@@ -819,6 +821,204 @@
             els.testToolsList.innerHTML = rows;
         };
 
+        const testModulesPaginationState = {
+            page: 1,
+            pageSize: 10,
+            rows: [],
+            controls: null,
+        };
+
+        const createPaginationControls = (container, onPrev, onNext, defaultPageSize) => {
+            if (!container) {
+                return null;
+            }
+            container.innerHTML = '';
+            const prev = document.createElement('button');
+            prev.type = 'button';
+            prev.className = 'btn btn-sm';
+            prev.textContent = 'Prev';
+            const info = document.createElement('span');
+            info.className = 'pagination-info';
+            info.style.margin = '0 0.6rem';
+            const next = document.createElement('button');
+            next.type = 'button';
+            next.className = 'btn btn-sm';
+            next.textContent = 'Next';
+            prev.addEventListener('click', onPrev);
+            next.addEventListener('click', onNext);
+
+            const select = document.createElement('select');
+            select.className = 'pagination-pagesize';
+            [10, 20, 30, 40, 50, 100].forEach((n) => {
+                const opt = document.createElement('option');
+                opt.value = n;
+                opt.text = String(n);
+                select.appendChild(opt);
+            });
+            if (defaultPageSize) {
+                select.value = String(defaultPageSize);
+            }
+            select.style.marginLeft = '0.6rem';
+            select.style.padding = '0.25rem 0.5rem';
+            select.title = 'Rows per page';
+
+            container.appendChild(prev);
+            container.appendChild(info);
+            container.appendChild(next);
+            container.appendChild(select);
+            return { prev, info, next, pagesize: select };
+        };
+
+        const getTestModulesRows = () => {
+            if (!els.testModulesList) {
+                return [];
+            }
+            return Array.from(els.testModulesList.querySelectorAll('tr.module-row'));
+        };
+
+        const renderTestModulesPagination = () => {
+            if (!els.testModulesPagination || !els.testModulesTable || !els.testModulesList) {
+                return;
+            }
+            if (!testModulesPaginationState.controls) {
+                testModulesPaginationState.controls = createPaginationControls(
+                    els.testModulesPagination,
+                    () => {
+                        if (testModulesPaginationState.page > 1) {
+                            testModulesPaginationState.page -= 1;
+                            renderTestModulesPagination();
+                        }
+                    },
+                    () => {
+                        const totalPages = Math.max(1, Math.ceil(testModulesPaginationState.rows.length / testModulesPaginationState.pageSize));
+                        if (testModulesPaginationState.page < totalPages) {
+                            testModulesPaginationState.page += 1;
+                            renderTestModulesPagination();
+                        }
+                    },
+                    testModulesPaginationState.pageSize,
+                ) || { prev: { disabled: true }, next: { disabled: true }, info: { textContent: '' }, pagesize: null };
+
+                if (testModulesPaginationState.controls.pagesize) {
+                    testModulesPaginationState.controls.pagesize.addEventListener('change', function () {
+                        const v = parseInt(this.value, 10) || 10;
+                        testModulesPaginationState.pageSize = v;
+                        testModulesPaginationState.page = 1;
+                        renderTestModulesPagination();
+                    });
+                }
+            }
+
+            const totalPages = Math.max(1, Math.ceil(testModulesPaginationState.rows.length / testModulesPaginationState.pageSize));
+            if (testModulesPaginationState.page > totalPages) {
+                testModulesPaginationState.page = 1;
+            }
+            const start = (testModulesPaginationState.page - 1) * testModulesPaginationState.pageSize;
+            const end = start + testModulesPaginationState.pageSize;
+            testModulesPaginationState.rows.forEach((row, index) => {
+                const show = index >= start && index < end;
+                row.style.display = show ? '' : 'none';
+                const moduleId = row.getAttribute('data-module-id');
+                if (moduleId) {
+                    const bodyRow = els.testModulesList.querySelector(`tr.module-row-body[data-module-body-for="${moduleId}"]`);
+                    if (bodyRow) {
+                        if (!show) {
+                            bodyRow.hidden = true;
+                            bodyRow.style.display = 'none';
+                        } else {
+                            bodyRow.style.display = '';
+                            const btn = row.querySelector('[data-action="toggle-module"]');
+                            const expanded = btn && btn.getAttribute('aria-expanded') === 'true';
+                            bodyRow.hidden = !expanded;
+                        }
+                    }
+                }
+            });
+            testModulesPaginationState.controls.info.textContent = `${testModulesPaginationState.page} / ${totalPages}`;
+            testModulesPaginationState.controls.prev.disabled = testModulesPaginationState.page <= 1;
+            testModulesPaginationState.controls.next.disabled = testModulesPaginationState.page >= totalPages;
+        };
+
+        const moduleScenarioPagers = new Map();
+
+        const getModuleScenarioRows = (bodyRow) => {
+            if (!bodyRow) {
+                return [];
+            }
+            return Array.from(bodyRow.querySelectorAll('tr.module-scenario-row'));
+        };
+
+        const renderModuleScenarioPagination = (moduleId) => {
+            if (!els.testModulesList) {
+                return;
+            }
+            const bodyRow = els.testModulesList.querySelector(`tr.module-row-body[data-module-body-for="${moduleId}"]`);
+            if (!bodyRow) {
+                return;
+            }
+            const container = bodyRow.querySelector(`.module-scenarios-pagination[data-module-id="${moduleId}"]`);
+            if (!container) {
+                return;
+            }
+            const existing = moduleScenarioPagers.get(String(moduleId)) || {
+                page: 1,
+                pageSize: 10,
+                rows: [],
+                controls: null,
+            };
+
+            existing.rows = getModuleScenarioRows(bodyRow);
+
+            if (!existing.controls) {
+                existing.controls = createPaginationControls(
+                    container,
+                    () => {
+                        if (existing.page > 1) {
+                            existing.page -= 1;
+                            renderModuleScenarioPagination(moduleId);
+                        }
+                    },
+                    () => {
+                        const totalPages = Math.max(1, Math.ceil(existing.rows.length / existing.pageSize));
+                        if (existing.page < totalPages) {
+                            existing.page += 1;
+                            renderModuleScenarioPagination(moduleId);
+                        }
+                    },
+                    existing.pageSize,
+                ) || { prev: { disabled: true }, next: { disabled: true }, info: { textContent: '' }, pagesize: null };
+
+                if (existing.controls.pagesize) {
+                    existing.controls.pagesize.addEventListener('change', function () {
+                        const v = parseInt(this.value, 10) || 10;
+                        existing.pageSize = v;
+                        existing.page = 1;
+                        renderModuleScenarioPagination(moduleId);
+                    });
+                }
+            }
+
+            const totalPages = Math.max(1, Math.ceil(existing.rows.length / existing.pageSize));
+            if (existing.page > totalPages) {
+                existing.page = 1;
+            }
+            const start = (existing.page - 1) * existing.pageSize;
+            const end = start + existing.pageSize;
+            existing.rows.forEach((row, index) => {
+                row.style.display = (index >= start && index < end) ? '' : 'none';
+            });
+            existing.controls.info.textContent = `${existing.page} / ${totalPages}`;
+            existing.controls.prev.disabled = existing.page <= 1;
+            existing.controls.next.disabled = existing.page >= totalPages;
+
+            moduleScenarioPagers.set(String(moduleId), existing);
+        };
+
+        const refreshTestModulesPagination = () => {
+            testModulesPaginationState.rows = getTestModulesRows();
+            renderTestModulesPagination();
+        };
+
         const renderTestModulesList = () => {
             if (!els.testModulesList) {
                 return;
@@ -835,6 +1035,7 @@
             }
             if (!filtered.length) {
                 els.testModulesList.innerHTML = '<tr><td colspan="7" class="empty">No test modules match the current filters.</td></tr>';
+                refreshTestModulesPagination();
                 return;
             }
             // render modules as collapsible rows with a nested sublist for scenarios
@@ -905,6 +1106,7 @@
                                                 ${scenarioRows || '<tr><td colspan="5" class="empty">No scenarios yet.</td></tr>'}
                                             </tbody>
                                         </table>
+                                    <div class="table-pagination module-scenarios-pagination" data-module-id="${m.id}" aria-label="Module scenarios pagination"></div>
                                 </div>
                             </div>
                         </td>
@@ -913,6 +1115,10 @@
                 })
                 .join("");
             els.testModulesList.innerHTML = rows;
+            filtered.forEach((m) => {
+                renderModuleScenarioPagination(m.id);
+            });
+            refreshTestModulesPagination();
         };
 
         // Toggle module collapse/expand (supports lazy-loading scenarios on first expand)
@@ -2284,14 +2490,16 @@
                     if (!comment) return '';
 
                     const canEdit = currentUserId && Number(comment.user) === Number(currentUserId);
-                    const editBtn = canEdit ? `
-                        <button type="button" class="comment-action-btn" data-action="view-scenario-edit-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Edit">
+                    const editBtnDisabledAttr = canEdit ? '' : 'disabled aria-disabled="true"';
+                    const deleteBtnDisabledAttr = canEdit ? '' : 'disabled aria-disabled="true"';
+                    const editBtn = `
+                        <button type="button" class="comment-action-btn" data-action="view-scenario-edit-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Edit" ${editBtnDisabledAttr}>
                             <span>✏️</span>
-                        </button>` : '';
-                    const deleteBtn = canEdit ? `
-                        <button type="button" class="comment-action-btn" data-action="view-scenario-delete-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Delete">
+                        </button>`;
+                    const deleteBtn = `
+                        <button type="button" class="comment-action-btn" data-action="view-scenario-delete-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Delete" ${deleteBtnDisabledAttr}>
                             <span>🗑️</span>
-                        </button>` : '';
+                        </button>`;
 
                     const attachBtn = `
                         <button type="button" class="comment-action-btn" data-action="view-scenario-attach-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Attach file">
@@ -2388,7 +2596,7 @@
                             </div>
                             <div class="comment-content" data-comment-content data-raw-html="${escapeHtml(rawCommentHtml)}">${commentDisplayHtml}</div>
                             <div class="comment-actions">
-                                ${!isReply ? `<button type="button" class="comment-action-btn" data-action="view-scenario-reply-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Reply"><span>↩️</span></button>` : ''}
+                                <button type="button" class="comment-action-btn" data-action="view-scenario-reply-comment" data-comment-id="${escapeHtml(comment.id || '')}" title="Reply" ${isReply ? 'disabled aria-disabled="true"' : ''}><span>↩️</span></button>
                                 <button type="button" class="comment-action-btn" data-action="view-scenario-thumbs-up-comment" data-comment-id="${escapeHtml(comment.id || '')}" data-liked="${isLiked ? 'true' : 'false'}" data-likes-count="${escapeHtml(String(likesCount))}" aria-pressed="${isLiked ? 'true' : 'false'}" title="Thumbs Up">
                                     <span data-role="thumbs-up-icon" style="${thumbsUpIconStyle}">👍</span>
                                     <span data-role="thumbs-up-count" style="${thumbsUpCountStyle}">${escapeHtml(String(likesCount))}</span>

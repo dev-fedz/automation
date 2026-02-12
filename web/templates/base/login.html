@@ -4,7 +4,10 @@
 <div class="auth-center">
   <div class="login-card">
     <div class="login-left">
-        <div class="login-brand inline">Automation<span>App</span></div>
+                <div class="login-brand inline">
+                        <span class="brand-mark brand-mark--lg" aria-hidden="true"></span>
+                        <span class="login-brand__text">chronos<span>-QA</span></span>
+                </div>
         <h1 class="login-heading">Log In</h1>
         <p class="login-welcome">Welcome back! Please enter your details</p>
         <form method="post" id="login-form" class="login-form">{% csrf_token %}
@@ -27,18 +30,16 @@
         </form>
     <p class="signup-hint">Don't have account? <a href="#">Sign up</a></p>
         <footer class="login-footer">
-            <small>&copy; {{ year|default:2025 }} AutomationApp · <a href="#">Terms</a> · <a href="#">Privacy</a></small>
+            <small>&copy; {{ year|default:2026 }} chronos-QA · <a href="#">Terms</a> · <a href="#">Privacy</a></small>
         </footer>
     </div>
     <div class="login-visual">
         <div class="scene" aria-hidden="true">
-            <div class="rocket-shell">
-                <div class="window"></div>
-                <div class="fins"></div>
-                <div class="flame-stack">
-                    <div class="flame fx1"></div>
-                    <div class="flame fx2"></div>
-                </div>
+            <div class="chronos-shell" aria-hidden="true">
+                <div class="chronos-face"></div>
+                <div class="chronos-hand chronos-hand--hour"></div>
+                <div class="chronos-hand chronos-hand--minute"></div>
+                <div class="chronos-center"></div>
             </div>
             <!-- Pointy gears (SVG) -->
         </div>
