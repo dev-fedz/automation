@@ -1,4 +1,7 @@
 (function () {
+    // ---------------------------------------------------------------------
+    // Configuration constants
+    // ---------------------------------------------------------------------
     const DEFAULT_HEADERS = [
         { key: 'Content-Type', value: 'application/json', description: '' },
         { key: 'Accept', value: '*/*', description: '' },
@@ -40,6 +43,51 @@
     const VARIABLE_TEMPLATE_PATTERN = /{{\s*([\w\.-]+)\s*}}/g;
     const GLOBAL_STORAGE_KEY = 'automation.apiTester.globals';
     const VARIABLE_SERIALIZE_MAX_DEPTH = 10;
+
+    // ---------------------------------------------------------------------
+    // Runtime helpers
+    // ---------------------------------------------------------------------
+    const getHostWindow = () => (typeof window !== 'undefined'
+        ? window
+        : typeof globalThis !== 'undefined'
+            ? globalThis
+            : undefined);
+
+    const getGlobalByName = (name) => {
+        const hostWindow = getHostWindow();
+        if (hostWindow && hostWindow[name]) {
+            return hostWindow[name];
+        }
+        if (typeof self !== 'undefined' && self[name]) {
+            return self[name];
+        }
+        return undefined;
+    };
+
+    const scheduleNextFrameOrTimeout = (callback) => {
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(callback);
+            return;
+        }
+        setTimeout(callback, 50);
+    };
+
+    const waitForValue = (getter, timeoutMs = 3000) => new Promise((resolve) => {
+        const start = Date.now();
+        const check = () => {
+            const value = getter();
+            if (value) {
+                resolve(value);
+                return;
+            }
+            if (Date.now() - start >= timeoutMs) {
+                resolve(undefined);
+                return;
+            }
+            scheduleNextFrameOrTimeout(check);
+        };
+        check();
+    });
 
     const shouldMirrorAutomationLog = (level) => {
         if (level === 'error' || level === 'warn') {
@@ -441,36 +489,17 @@
             .join('');
     };
 
-    const getCryptoJs = () => {
-        if (typeof window !== 'undefined' && window.CryptoJS) {
-            return window.CryptoJS;
-        }
-        if (typeof globalThis !== 'undefined' && globalThis.CryptoJS) {
-            return globalThis.CryptoJS;
-        }
-        if (typeof self !== 'undefined' && self.CryptoJS) {
-            return self.CryptoJS;
-        }
-        return undefined;
-    };
+    // ---------------------------------------------------------------------
+    // Third-party dependency discovery/loaders
+    // ---------------------------------------------------------------------
+    const getCryptoJs = () => getGlobalByName('CryptoJS');
 
     const CRYPTO_JS_CDN_URL = 'https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js';
     let cachedCryptoJsInstance = null;
     let cryptoJsReadyPromise = null;
     const cryptoJsLoadedSources = new Set();
 
-    const getMoment = () => {
-        if (typeof window !== 'undefined' && window.moment) {
-            return window.moment;
-        }
-        if (typeof globalThis !== 'undefined' && globalThis.moment) {
-            return globalThis.moment;
-        }
-        if (typeof self !== 'undefined' && self.moment) {
-            return self.moment;
-        }
-        return undefined;
-    };
+    const getMoment = () => getGlobalByName('moment');
 
     const MOMENT_LOCAL_URL = '/static/js/vendor/moment.min.js';
     const MOMENT_CDN_URL = 'https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js';
@@ -534,7 +563,7 @@
             return;
         }
         const { skipIfIntercepted = false } = options;
-        const hostWindow = (typeof window !== 'undefined' ? window : typeof globalThis !== 'undefined' ? globalThis : undefined);
+        const hostWindow = getHostWindow();
         if (!hostWindow) {
             return;
         }
@@ -580,26 +609,7 @@
         }
     };
 
-    const waitForCryptoJsInstance = (timeoutMs = 3000) => new Promise((resolve) => {
-        const start = Date.now();
-        const check = () => {
-            const instance = getCryptoJs();
-            if (instance) {
-                resolve(instance);
-                return;
-            }
-            if (Date.now() - start >= timeoutMs) {
-                resolve(undefined);
-                return;
-            }
-            if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-                window.requestAnimationFrame(check);
-            } else {
-                setTimeout(check, 50);
-            }
-        };
-        check();
-    });
+    const waitForCryptoJsInstance = (timeoutMs = 3000) => waitForValue(getCryptoJs, timeoutMs);
 
     const loadCryptoJsFromSource = async (src) => {
         if (!src || typeof document === 'undefined') {
@@ -675,7 +685,7 @@
             return;
         }
 
-        const hostWindow = (typeof window !== 'undefined' ? window : typeof globalThis !== 'undefined' ? globalThis : undefined);
+        const hostWindow = getHostWindow();
         const amdRequire = hostWindow && (hostWindow.requirejs || hostWindow.require);
         let resolved = false;
         const finish = (instance) => {
@@ -714,27 +724,9 @@
             }
         }
 
-        const start = Date.now();
-        const poll = () => {
-            if (resolved) {
-                return;
-            }
-            const instance = getMoment();
-            if (instance) {
-                finish(instance);
-                return;
-            }
-            if (Date.now() - start >= timeoutMs) {
-                finish(undefined);
-                return;
-            }
-            if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-                window.requestAnimationFrame(poll);
-            } else {
-                setTimeout(poll, 50);
-            }
-        };
-        poll();
+        waitForValue(getMoment, timeoutMs).then((instance) => {
+            finish(instance);
+        });
     });
 
     const loadMomentFromSource = async (src) => {
@@ -1196,62 +1188,7 @@
         }
     };
 
-    // Format JSON even when it contains template tokens like {{var}}.
-    // Strategy: replace template tokens with temporary placeholders (keeping
-    // track whether the token was originally quoted), parse & pretty-print,
-    // then restore the template tokens with correct quoting.
-    const formatJsonWithTemplates = (text) => {
-        if (typeof text !== 'string' || !text.trim()) return '';
-        const VARIABLE_RE = /{{\s*([\w\.-]+)\s*}}/g;
-        const tokens = [];
-        let m;
-        let out = '';
-        let lastIndex = 0;
-        let id = 0;
-        while ((m = VARIABLE_RE.exec(text)) !== null) {
-            const matchIndex = m.index;
-            const matchText = m[0];
-            // push preceding text
-            out += text.slice(lastIndex, matchIndex);
-            // inspect surrounding characters to determine if token is quoted
-            const beforeChar = text[matchIndex - 1] || '';
-            const afterChar = text[matchIndex + matchText.length] || '';
-            const insideQuotes = beforeChar === '"' || afterChar === '"';
-            const placeholder = `__TEMPLATE_${id}__`;
-            // if token is inside quotes, replace token with placeholder (no extra quotes)
-            // otherwise replace with quoted placeholder so JSON remains valid
-            if (insideQuotes) {
-                out += placeholder;
-            } else {
-                out += `"${placeholder}"`;
-            }
-            tokens.push({ placeholder, original: matchText, insideQuotes });
-            lastIndex = matchIndex + matchText.length;
-            id += 1;
-        }
-        out += text.slice(lastIndex);
-        try {
-            const parsed = JSON.parse(out);
-            const formatted = prettyJson(parsed);
-            let result = formatted;
-            // restore tokens: for each token replace the string literal "__TEMPLATE_n__"
-            // with either "{{...}}" (if originally inside quotes) or {{...}} (no quotes)
-            tokens.forEach((t) => {
-                if (t.insideQuotes) {
-                    // replace "__TEMPLATE__" with "{{...}}"
-                    result = result.replace(new RegExp(`\\"${t.placeholder}\\"`, 'g'), `\"${t.original}\"`);
-                } else {
-                    // replace "__TEMPLATE__" (including quotes) with {{...}} (no quotes)
-                    result = result.replace(new RegExp(`\\"${t.placeholder}\\"`, 'g'), t.original);
-                }
-            });
-            return result;
-        } catch (e) {
-            return text;
-        }
-    };
-
-    // Try to convert a JS-style object literal into JSON. This handles simple
+    // Convert a JS-style object literal into JSON. This handles simple
     // cases like unquoted keys and values like pm.environment.get('name') by
     // converting them to quoted keys and "{{name}}" template tokens.
     const convertJsObjectLikeToJson = (text) => {
@@ -1355,18 +1292,6 @@
             return JSON.stringify(value ?? {}, null, 2);
         } catch (error) {
             return String(value);
-        }
-    };
-
-    const parseJsonField = (text, fallback) => {
-        if (!text || !text.trim()) {
-            return fallback;
-        }
-        try {
-            return JSON.parse(text);
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Invalid JSON payload';
-            throw new Error(message);
         }
     };
 
