@@ -785,3 +785,61 @@ class TestCaseAttachment(TimeStampedModel):
 
     def __str__(self) -> str:  # pragma: no cover
         return self.original_name or (self.file.name if self.file else "Attachment")
+
+
+class LoadTestRun(TimeStampedModel):
+    """Represents a Locust-powered load test execution initiated from the UI."""
+
+    class Status(models.TextChoices):
+        CREATED = "created", "Created"
+        RUNNING = "running", "Running"
+        FINISHED = "finished", "Finished"
+        STOPPED = "stopped", "Stopped"
+        FAILED = "failed", "Failed"
+        ERROR = "error", "Error"
+
+    class Scope(models.TextChoices):
+        PROJECT = "project", "Project"
+        MODULE = "module", "Module"
+        SCENARIO = "scenario", "Scenario"
+        TESTCASE = "testcase", "Test Case"
+
+    name = models.CharField(max_length=180, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.CREATED)
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="load_test_runs",
+    )
+
+    scope = models.CharField(max_length=20, choices=Scope.choices, default=Scope.TESTCASE)
+    selection = models.JSONField(default=dict, blank=True)
+
+    users = models.PositiveIntegerField(default=1)
+    ramp_up_seconds = models.PositiveIntegerField(default=0)
+    duration_seconds = models.PositiveIntegerField(default=60)
+    spawn_rate = models.FloatField(default=1.0)
+
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    locust_pid = models.IntegerField(null=True, blank=True)
+    exit_code = models.IntegerField(null=True, blank=True)
+    knox_token_key = models.CharField(max_length=64, blank=True)
+
+    workdir = models.CharField(max_length=500, blank=True)
+    report_html_relpath = models.CharField(max_length=500, blank=True)
+    csv_prefix_relpath = models.CharField(max_length=500, blank=True)
+    log_relpath = models.CharField(max_length=500, blank=True)
+
+    error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        label = self.name or f"LoadTestRun {self.pk}"
+        return f"{label} ({self.status})"

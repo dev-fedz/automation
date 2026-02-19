@@ -10,7 +10,13 @@ import io
 import json
 import logging
 import os
+import signal
+import subprocess
+import sys
+import threading
 import time
+from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
@@ -41,6 +47,11 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+try:  # optional at import time; present via django-rest-knox
+    from knox.models import AuthToken
+except Exception:  # pragma: no cover
+    AuthToken = None  # type: ignore
 
 from . import models, selectors, serializers, services
 try:  # avoid hard dependency at import time
@@ -1397,6 +1408,11 @@ def _prepare_automation_data(*, automated_scenarios_only: bool = False) -> dict[
         "risk_mitigations": "",
         "test_tools": "",
         "test_modules": reverse("core:core-test-modules-list"),
+        # non-router endpoints
+        "tester_execute": reverse("core:core-request-execute"),
+        "automation_report_finalize": reverse("core:core-automation-report-finalize"),
+        "automation_report_create": reverse("core:core-automation-report-create"),
+        "load_tests": reverse("core:core-load-tests"),
     }
 
     selected_plan = projects_payload[0] if projects_payload else None
@@ -1447,6 +1463,18 @@ def automation_run(request):
         "initial_environments": data["environments"],
     }
     return render(request, "core/automation_run.html", context)
+
+
+@login_required
+def automation_load_testing(request):
+    """Render the Automation load testing workspace (Locust-based)."""
+
+    data = _prepare_automation_data(automated_scenarios_only=True)
+    context = {
+        "initial_projects": data["plans"],
+        "api_endpoints": data["api_endpoints"],
+    }
+    return render(request, "core/automation_load_testing.html", context)
 
 
 
@@ -3244,3 +3272,567 @@ class AutomationReportTestcaseDetailView(APIView):
 
         serializer = serializers.AutomationReportSerializer(report, context={})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+def _pid_is_running(pid: int | None) -> bool:
+    if not pid or pid <= 0:
+        return False
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except OSError:
+        return False
+
+
+def _safe_mkdir(path: Path) -> None:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        # Let callers fail later when writing files.
+        pass
+
+
+def _loadtest_collect_testcases(*, scope: str, selection: dict[str, Any]) -> list[models.TestCase]:
+    """Return testcases from the hierarchy selection.
+
+    Selection payload keys (all optional): project_ids, module_ids, scenario_ids, testcase_ids.
+    """
+
+    qs = models.TestCase.objects.select_related("scenario", "related_api_request")
+    qs = qs.filter(scenario__is_automated=True)
+
+    def as_int_list(value: Any) -> list[int]:
+        if value in (None, ""):
+            return []
+        if isinstance(value, (list, tuple)):
+            raw = list(value)
+        else:
+            raw = [value]
+        out: list[int] = []
+        for v in raw:
+            try:
+                out.append(int(v))
+            except Exception:
+                continue
+        return out
+
+    if scope == models.LoadTestRun.Scope.TESTCASE:
+        ids = as_int_list(selection.get("testcase_ids"))
+        if ids:
+            qs = qs.filter(pk__in=ids)
+    elif scope == models.LoadTestRun.Scope.SCENARIO:
+        ids = as_int_list(selection.get("scenario_ids"))
+        if ids:
+            qs = qs.filter(scenario_id__in=ids)
+    elif scope == models.LoadTestRun.Scope.MODULE:
+        ids = as_int_list(selection.get("module_ids"))
+        if ids:
+            qs = qs.filter(scenario__module_id__in=ids)
+    elif scope == models.LoadTestRun.Scope.PROJECT:
+        ids = as_int_list(selection.get("project_ids"))
+        if ids:
+            qs = qs.filter(scenario__project_id__in=ids)
+
+    # Only include testcases that have a related request.
+    qs = qs.filter(related_api_request__isnull=False)
+    return list(qs.order_by("scenario_id", "id"))
+
+
+def _loadtest_build_execute_payloads(*, testcases: list[models.TestCase], environment_id: int | None) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for tc in testcases:
+        req = getattr(tc, "related_api_request", None)
+        if not req:
+            continue
+        payload: dict[str, Any] = {
+            "request_id": req.id,
+            "collection_id": req.collection_id,
+            "method": req.method or "GET",
+            "url": req.url or "",
+            "headers": req.headers or {},
+            "params": req.query_params or {},
+            "timeout": max(1, float(getattr(req, "timeout_ms", 30000) or 30000) / 1000.0),
+        }
+        if environment_id is not None:
+            payload["environment"] = int(environment_id)
+
+        # Attach body content per request config
+        body_type = str(getattr(req, "body_type", "") or "").lower()
+        if body_type == "json":
+            payload["json"] = req.body_json or {}
+        elif body_type == "form":
+            form_entries = []
+            try:
+                if isinstance(req.body_form, dict):
+                    for k, v in (req.body_form or {}).items():
+                        form_entries.append({"key": k, "type": "text", "value": v})
+            except Exception:
+                form_entries = []
+            payload["form_data"] = form_entries
+        elif body_type == "raw":
+            if req.body_raw:
+                payload["body"] = req.body_raw
+            if getattr(req, "body_raw_type", None):
+                payload["body_raw_type"] = req.body_raw_type
+
+        # Attach transforms so the execute endpoint can apply them
+        if getattr(req, "body_transforms", None):
+            payload["body_transforms"] = req.body_transforms
+
+        # Authorization headers for configured request auth
+        try:
+            auth_type = str(getattr(req, "auth_type", "") or "").lower()
+            if auth_type == "bearer" and getattr(req, "auth_bearer", ""):
+                payload["headers"] = payload.get("headers") or {}
+                payload["headers"]["Authorization"] = f"Bearer {req.auth_bearer}"
+            elif auth_type == "basic" and isinstance(getattr(req, "auth_basic", None), dict):
+                ab = req.auth_basic or {}
+                username = ab.get("username") or ""
+                password = ab.get("password") or ""
+                token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("utf-8")
+                payload["headers"] = payload.get("headers") or {}
+                payload["headers"]["Authorization"] = f"Basic {token}"
+        except Exception:
+            pass
+
+        # Helpful label for Locust stats grouping
+        payload["_locust_name"] = f"{tc.testcase_id or tc.id} · {req.name or req.id}"
+        payloads.append(payload)
+    return payloads
+
+
+def _write_locustfile(*, dest: Path, auth_token: str, payloads: list[dict[str, Any]], host: str) -> None:
+    """Write a locustfile that posts to our own tester execute endpoint."""
+
+    safe_payloads = []
+    for p in payloads:
+        # Ensure non-serializable values won't break locustfile creation.
+        try:
+            json.dumps(p)
+            safe_payloads.append(p)
+        except TypeError:
+            safe_payloads.append({k: v for k, v in p.items() if isinstance(v, (str, int, float, bool, type(None), dict, list))})
+
+    # IMPORTANT: embed payloads as JSON text and parse with json.loads.
+    # This avoids invalid Python literals like `null`, `true`, `false`.
+    payloads_json_text = json.dumps(safe_payloads, ensure_ascii=False)
+
+    content = """# Auto-generated by Automation Load Testing\n\nimport json\nimport random\nfrom locust import HttpUser, task, constant\n\nAUTH_TOKEN = {auth_token!r}\nHOST = {host!r}\nPAYLOADS = json.loads({payloads_json_text!r})\n\n\nclass AutomationLoadTestUser(HttpUser):\n    host = HOST\n    wait_time = constant(0)\n\n    @task\n    def execute_testcase(self):\n        payload = random.choice(PAYLOADS)\n        name = payload.get('_locust_name') or 'tester.execute'\n        headers = {{\n            'Authorization': f'Token {{AUTH_TOKEN}}',\n            'Content-Type': 'application/json',\n            'Accept': 'application/json',\n        }}\n        # The server returns 200 even when the upstream request fails; treat\n        # execute HTTP errors as failures, and also treat execute responses that\n        # carry an `error` field as failures for the Locust report.\n        with self.client.post('/api/core/tester/execute/', json=payload, headers=headers, name=name, catch_response=True) as resp:\n            if not resp.ok:\n                resp.failure(f'execute failed HTTP {{resp.status_code}}')\n                return\n            try:\n                data = resp.json()\n            except Exception:\n                data = None\n            if isinstance(data, dict) and data.get('error'):\n                resp.failure(str(data.get('error'))[:300])\n                return\n            resp.success()\n""".format(
+        auth_token=auth_token,
+        host=host,
+        payloads_json_text=payloads_json_text,
+    )
+    dest.write_text(content, encoding="utf-8")
+
+
+def _tail_text_file(path: Path, *, max_bytes: int = 8000) -> str:
+    try:
+        if not path.exists() or not path.is_file():
+            return ""
+        size = path.stat().st_size
+        start = max(0, size - max_bytes)
+        with open(path, "rb") as f:
+            f.seek(start)
+            data = f.read(max_bytes)
+        text = data.decode("utf-8", errors="replace")
+        return text.strip()
+    except Exception:
+        return ""
+
+
+def _revoke_knox_token(token_key: str) -> None:
+    if not token_key or not AuthToken:
+        return
+    try:
+        AuthToken.objects.filter(token_key=token_key).delete()
+    except Exception:
+        pass
+
+
+class LoadTestRunsApiView(APIView):
+    """Create and list LoadTestRun records."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        media_url = getattr(settings, "MEDIA_URL", None) or "/media/"
+        qs = models.LoadTestRun.objects.select_related("created_by").order_by("-created_at")[:50]
+
+        # Refresh status for stale RUNNING rows (e.g., locust crashed early).
+        try:
+            media_root = Path(settings.MEDIA_ROOT or "media")
+        except Exception:
+            media_root = Path("media")
+
+        for obj in qs:
+            if obj.status != models.LoadTestRun.Status.RUNNING:
+                continue
+            if _pid_is_running(obj.locust_pid):
+                continue
+            # Locust exited; mark as finished or error based on exit_code/log.
+            log_tail = ""
+            try:
+                if obj.log_relpath:
+                    log_tail = _tail_text_file(media_root / obj.log_relpath)
+            except Exception:
+                log_tail = ""
+            # If locust crashed, the log will contain a traceback.
+            new_status = models.LoadTestRun.Status.FINISHED
+            if obj.exit_code not in (None, 0):
+                new_status = models.LoadTestRun.Status.ERROR
+            if "Traceback" in log_tail or "Error" in log_tail:
+                new_status = models.LoadTestRun.Status.ERROR
+            obj.status = new_status
+            obj.finished_at = obj.finished_at or timezone.now()
+            if new_status == models.LoadTestRun.Status.ERROR and not obj.error:
+                obj.error = (log_tail.splitlines()[-1] if log_tail else "Locust exited with an error")[:2000]
+            try:
+                obj.save(update_fields=["status", "finished_at", "error", "updated_at"])
+            except Exception:
+                pass
+            _revoke_knox_token(obj.knox_token_key)
+
+        items = []
+        for obj in qs:
+            items.append(
+                {
+                    "id": obj.id,
+                    "name": obj.name,
+                    "status": obj.status,
+                    "scope": obj.scope,
+                    "selection": obj.selection,
+                    "users": obj.users,
+                    "ramp_up_seconds": obj.ramp_up_seconds,
+                    "duration_seconds": obj.duration_seconds,
+                    "spawn_rate": obj.spawn_rate,
+                    "started_at": obj.started_at.isoformat() if obj.started_at else None,
+                    "finished_at": obj.finished_at.isoformat() if obj.finished_at else None,
+                    "pid": obj.locust_pid,
+                    "exit_code": obj.exit_code,
+                    "report_html": (media_url + obj.report_html_relpath) if obj.report_html_relpath else None,
+                    "csv_prefix": (media_url + obj.csv_prefix_relpath) if obj.csv_prefix_relpath else None,
+                    "log": (media_url + obj.log_relpath) if obj.log_relpath else None,
+                    "error": obj.error,
+                }
+            )
+        return Response(items, status=status.HTTP_200_OK)
+
+    def post(self, request, *args, **kwargs):
+        if not AuthToken:
+            return Response({"error": "Knox is not available"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        data = request.data or {}
+        scope = str(data.get("scope") or models.LoadTestRun.Scope.TESTCASE).strip().lower()
+        if scope not in {
+            models.LoadTestRun.Scope.PROJECT,
+            models.LoadTestRun.Scope.MODULE,
+            models.LoadTestRun.Scope.SCENARIO,
+            models.LoadTestRun.Scope.TESTCASE,
+        }:
+            return Response({"scope": "Invalid scope"}, status=status.HTTP_400_BAD_REQUEST)
+
+        selection = data.get("selection") if isinstance(data.get("selection"), dict) else {}
+
+        # Config
+        try:
+            users = int(data.get("users") or 1)
+        except Exception:
+            users = 1
+        users = max(1, min(users, 50000))
+
+        try:
+            ramp_up_seconds = int(data.get("ramp_up_seconds") or 0)
+        except Exception:
+            ramp_up_seconds = 0
+        ramp_up_seconds = max(0, ramp_up_seconds)
+
+        # Optional: explicit spawn rate (users/sec). If provided, it takes
+        # precedence over ramp_up_seconds.
+        spawn_rate_override = data.get("spawn_rate")
+        spawn_rate: float | None
+        try:
+            spawn_rate = float(spawn_rate_override) if spawn_rate_override not in (None, "") else None
+        except Exception:
+            spawn_rate = None
+        if spawn_rate is not None and spawn_rate <= 0:
+            spawn_rate = None
+
+        try:
+            duration_seconds = int(data.get("duration_seconds") or 60)
+        except Exception:
+            duration_seconds = 60
+        duration_seconds = max(1, duration_seconds)
+
+        if spawn_rate is None:
+            # Ensure ramp-up window isn't longer than the test itself; otherwise
+            # Locust may never reach the requested user count.
+            if ramp_up_seconds > duration_seconds:
+                ramp_up_seconds = duration_seconds
+            # Derived spawn rate (users per second)
+            spawn_rate = float(users) if ramp_up_seconds <= 0 else max(0.1, float(users) / float(ramp_up_seconds))
+        else:
+            # Derive ramp seconds for recordkeeping.
+            try:
+                ramp_up_seconds = int(max(0, min(duration_seconds, int((float(users) / float(spawn_rate)) + 0.9999))))
+            except Exception:
+                ramp_up_seconds = 0
+
+        environment_id = None
+
+        name = str(data.get("name") or "").strip()[:180]
+
+        run = models.LoadTestRun.objects.create(
+            name=name,
+            status=models.LoadTestRun.Status.CREATED,
+            created_by=(request.user if request.user and request.user.is_authenticated else None),
+            scope=scope,
+            selection=selection,
+            users=users,
+            ramp_up_seconds=ramp_up_seconds,
+            duration_seconds=duration_seconds,
+            spawn_rate=spawn_rate,
+        )
+
+        # Resolve testcases
+        testcases = _loadtest_collect_testcases(scope=scope, selection=selection)
+        if not testcases:
+            run.status = models.LoadTestRun.Status.FAILED
+            run.error = "No automated test cases found for selection (or no related API request configured)."
+            run.finished_at = timezone.now()
+            run.save(update_fields=["status", "error", "finished_at", "updated_at"])
+            return Response({"error": run.error, "id": run.id}, status=status.HTTP_400_BAD_REQUEST)
+
+        payloads = _loadtest_build_execute_payloads(testcases=testcases, environment_id=environment_id)
+        if not payloads:
+            run.status = models.LoadTestRun.Status.FAILED
+            run.error = "No executable payloads could be built (missing related API requests)."
+            run.finished_at = timezone.now()
+            run.save(update_fields=["status", "error", "finished_at", "updated_at"])
+            return Response({"error": run.error, "id": run.id}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Work directory under MEDIA_ROOT
+        media_root = Path(settings.MEDIA_ROOT or "media")
+        workdir = media_root / "load_tests" / f"run_{run.id}"
+        _safe_mkdir(workdir)
+
+        # Locust artifacts
+        locustfile = workdir / "locustfile.py"
+        csv_prefix = workdir / "stats"
+        report_html = workdir / "report.html"
+        log_file = workdir / "locust.log"
+
+        # Mint a token for this run (revoked after completion/stop)
+        token_obj, token = AuthToken.objects.create(request.user)
+        run.knox_token_key = getattr(token_obj, "token_key", "") or ""
+
+        # Determine our own host for locust to call into.
+        # Use the current request host (works both local and in docker).
+        # If the app is behind a proxy, ensure Django is configured for correct scheme.
+        override_host = os.environ.get("AUTOMATION_LOADTEST_HOST")
+        scheme = "https" if request.is_secure() else "http"
+        host = str(override_host).strip() if override_host else f"{scheme}://{request.get_host()}"
+        try:
+            parsed = urlparse(host)
+            if not parsed.scheme or not parsed.netloc:
+                host = "http://localhost:8000"
+        except Exception:
+            host = "http://localhost:8000"
+
+        try:
+            _write_locustfile(dest=locustfile, auth_token=token, payloads=payloads, host=host)
+        except Exception as exc:
+            _revoke_knox_token(run.knox_token_key)
+            run.status = models.LoadTestRun.Status.FAILED
+            run.error = f"Failed to write locustfile: {exc}"
+            run.finished_at = timezone.now()
+            run.save(update_fields=["status", "error", "finished_at", "updated_at", "knox_token_key"])
+            return Response({"error": run.error, "id": run.id}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Build locust command (headless)
+        cmd = [
+            sys.executable,
+            "-m",
+            "locust",
+            "-f",
+            str(locustfile),
+            "--headless",
+            "--users",
+            str(users),
+            "--spawn-rate",
+            str(spawn_rate),
+            "--run-time",
+            f"{duration_seconds}s",
+            "--csv",
+            str(csv_prefix),
+            "--html",
+            str(report_html),
+            "--only-summary",
+        ]
+
+        try:
+            with open(log_file, "w", encoding="utf-8") as lf:
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=str(workdir),
+                    stdout=lf,
+                    stderr=subprocess.STDOUT,
+                    env={**os.environ},
+                )
+        except Exception as exc:
+            _revoke_knox_token(run.knox_token_key)
+            run.status = models.LoadTestRun.Status.FAILED
+            run.error = f"Failed to start locust: {exc}"
+            run.finished_at = timezone.now()
+            run.save(update_fields=["status", "error", "finished_at", "updated_at", "knox_token_key"])
+            return Response({"error": run.error, "id": run.id}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        run.status = models.LoadTestRun.Status.RUNNING
+        run.started_at = timezone.now()
+        run.locust_pid = int(proc.pid)
+        run.workdir = str(workdir)
+        run.report_html_relpath = str(report_html.relative_to(media_root))
+        # Prefix (csv) is multiple files; store directory/prefix relative for UI links
+        run.csv_prefix_relpath = str(csv_prefix.relative_to(media_root))
+        run.log_relpath = str(log_file.relative_to(media_root))
+        run.save(
+            update_fields=[
+                "status",
+                "started_at",
+                "locust_pid",
+                "workdir",
+                "report_html_relpath",
+                "csv_prefix_relpath",
+                "log_relpath",
+                "knox_token_key",
+                "updated_at",
+            ]
+        )
+
+        def _waiter(run_id: int, proc_handle: subprocess.Popen, token_key: str, log_path: Path):
+            exit_code: int | None = None
+            try:
+                # Wait for locust to exit. Add buffer to allow html/csv flush.
+                exit_code = proc_handle.wait(timeout=float(duration_seconds) + 120.0)
+            except Exception:
+                # If it didn't exit, just fall back to pid polling.
+                try:
+                    for _ in range(0, duration_seconds + 3600):
+                        if not _pid_is_running(proc_handle.pid):
+                            break
+                        time.sleep(1)
+                except Exception:
+                    pass
+                try:
+                    exit_code = proc_handle.poll()
+                except Exception:
+                    exit_code = None
+
+            try:
+                obj = models.LoadTestRun.objects.filter(pk=run_id).first()
+                if not obj:
+                    return
+                if obj.status == models.LoadTestRun.Status.STOPPED:
+                    return
+                # Determine final status
+                tail = _tail_text_file(log_path)
+                final_status = models.LoadTestRun.Status.FINISHED
+                if exit_code not in (None, 0):
+                    final_status = models.LoadTestRun.Status.ERROR
+                if "Traceback" in tail or "NameError" in tail or "Exception" in tail:
+                    final_status = models.LoadTestRun.Status.ERROR
+
+                obj.exit_code = exit_code
+                obj.status = final_status
+                obj.finished_at = timezone.now()
+                if final_status == models.LoadTestRun.Status.ERROR:
+                    # keep a short summary
+                    if tail:
+                        last_line = tail.splitlines()[-1]
+                        obj.error = (last_line or "Locust exited with an error")[:2000]
+                    else:
+                        obj.error = "Locust exited with an error"
+                obj.save(update_fields=["status", "exit_code", "finished_at", "error", "updated_at"])
+            finally:
+                _revoke_knox_token(token_key)
+
+        try:
+            t = threading.Thread(
+                target=_waiter,
+                args=(run.id, proc, run.knox_token_key, log_file),
+                daemon=True,
+            )
+            t.start()
+        except Exception:
+            pass
+
+        return Response({"id": run.id, "status": run.status}, status=status.HTTP_201_CREATED)
+
+
+class LoadTestRunDetailApiView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk=None, *args, **kwargs):
+        media_url = getattr(settings, "MEDIA_URL", None) or "/media/"
+        try:
+            obj = models.LoadTestRun.objects.get(pk=int(pk))
+        except (ValueError, models.LoadTestRun.DoesNotExist):
+            raise NotFound("Load test run not found")
+
+        # Refresh running state if PID is dead.
+        if obj.status == models.LoadTestRun.Status.RUNNING and not _pid_is_running(obj.locust_pid):
+            obj.status = models.LoadTestRun.Status.FINISHED
+            obj.finished_at = obj.finished_at or timezone.now()
+            obj.save(update_fields=["status", "finished_at", "updated_at"])
+            _revoke_knox_token(obj.knox_token_key)
+
+        payload = {
+            "id": obj.id,
+            "name": obj.name,
+            "status": obj.status,
+            "scope": obj.scope,
+            "selection": obj.selection,
+            "users": obj.users,
+            "ramp_up_seconds": obj.ramp_up_seconds,
+            "duration_seconds": obj.duration_seconds,
+            "spawn_rate": obj.spawn_rate,
+            "started_at": obj.started_at.isoformat() if obj.started_at else None,
+            "finished_at": obj.finished_at.isoformat() if obj.finished_at else None,
+            "pid": obj.locust_pid,
+            "exit_code": obj.exit_code,
+            "report_html": (media_url + obj.report_html_relpath) if obj.report_html_relpath else None,
+            "csv_prefix": (media_url + obj.csv_prefix_relpath) if obj.csv_prefix_relpath else None,
+            "log": (media_url + obj.log_relpath) if obj.log_relpath else None,
+            "error": obj.error,
+        }
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class LoadTestRunStopApiView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk=None, *args, **kwargs):
+        try:
+            obj = models.LoadTestRun.objects.get(pk=int(pk))
+        except (ValueError, models.LoadTestRun.DoesNotExist):
+            raise NotFound("Load test run not found")
+
+        pid = obj.locust_pid
+        if obj.status != models.LoadTestRun.Status.RUNNING or not _pid_is_running(pid):
+            # ensure consistent state
+            if obj.status == models.LoadTestRun.Status.RUNNING:
+                obj.status = models.LoadTestRun.Status.FINISHED
+                obj.finished_at = obj.finished_at or timezone.now()
+                obj.save(update_fields=["status", "finished_at", "updated_at"])
+            _revoke_knox_token(obj.knox_token_key)
+            return Response({"status": obj.status}, status=status.HTTP_200_OK)
+
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+        except Exception as exc:
+            return Response({"error": f"Failed to stop locust: {exc}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        obj.status = models.LoadTestRun.Status.STOPPED
+        obj.finished_at = timezone.now()
+        obj.save(update_fields=["status", "finished_at", "updated_at"])
+        _revoke_knox_token(obj.knox_token_key)
+        return Response({"status": obj.status}, status=status.HTTP_200_OK)

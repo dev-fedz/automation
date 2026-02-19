@@ -1,0 +1,129 @@
+{% extends "base/base.html" %}
+{% load static %}
+
+{% block title %}Automation · Load Testing{% endblock %}
+
+{% block head_css %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'css/automation.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="automation-dashboard" id="automation-load-testing">
+    <div class="automation-run-grid" data-role="automation-loadtest-grid">
+        <section class="automation-panel automation-run__card automation-run__card--top" data-panel="projects" aria-labelledby="automation-loadtest-projects-title">
+            <div class="panel-header">
+                <h2 id="automation-loadtest-projects-title">Projects</h2>
+            </div>
+            <div class="automation-card-body">
+                <div class="automation-run__list" data-role="project-list" aria-live="polite" aria-label="Projects"></div>
+            </div>
+        </section>
+
+        <section class="automation-panel automation-run__card automation-run__card--top" data-panel="modules" aria-labelledby="automation-loadtest-modules-title">
+            <div class="panel-header">
+                <div>
+                    <h2 id="automation-loadtest-modules-title">Modules</h2>
+                    <p class="panel-subtitle" data-role="module-subtitle"></p>
+                </div>
+                <div class="panel-actions">
+                    <button type="button" class="btn-primary automation-run__bulk-action" data-action="module-loadtest-all" data-role="module-loadtest-all" style="display:none;">Load Test All</button>
+                </div>
+            </div>
+            <div class="automation-card-body">
+                <div class="automation-run__list" data-role="module-list" aria-live="polite" aria-label="Modules"></div>
+            </div>
+        </section>
+
+        <section class="automation-panel automation-run__card automation-run__card--top" data-panel="scenarios" aria-labelledby="automation-loadtest-scenarios-title">
+            <div class="panel-header">
+                <div>
+                    <h2 id="automation-loadtest-scenarios-title">Scenarios</h2>
+                    <p class="panel-subtitle" data-role="scenario-subtitle"></p>
+                </div>
+                <div class="panel-actions">
+                    <button type="button" class="btn-primary automation-run__bulk-action" data-action="scenario-loadtest-all" data-role="scenario-loadtest-all" style="display:none;">Load Test All</button>
+                </div>
+            </div>
+            <div class="automation-card-body">
+                <div class="automation-run__list" data-role="scenario-list" aria-live="polite" aria-label="Scenarios"></div>
+            </div>
+        </section>
+
+        <section class="automation-panel automation-run__card automation-run__card--bottom" data-panel="cases" aria-labelledby="automation-loadtest-cases-title">
+            <div class="panel-header">
+                <div>
+                    <h2 id="automation-loadtest-cases-title">Test Cases</h2>
+                    <p class="panel-subtitle" data-role="case-subtitle">Select test cases to include in the load test.</p>
+                </div>
+                <div class="panel-actions">
+                    <button type="button" class="btn-primary automation-run__bulk-action" data-action="start-load-test" data-role="start-load-test">Run Load Test</button>
+                </div>
+            </div>
+            <div class="automation-card-body">
+                <div class="automation-list" data-role="case-list" aria-live="polite">
+                    <div class="panel-subtitle" data-role="status" style="margin-bottom: 12px;">Ready.</div>
+
+                    <div data-role="case-table"></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="automation-panel automation-run__card automation-run__card--bottom" data-panel="runs" aria-labelledby="automation-loadtest-runs-title">
+            <div class="panel-header">
+                <div>
+                    <h2 id="automation-loadtest-runs-title">Recent Load Tests</h2>
+                    <p class="panel-subtitle">Runs will appear here while running and after completion.</p>
+                </div>
+            </div>
+            <div class="automation-card-body">
+                <div data-role="runs-list" aria-live="polite"></div>
+            </div>
+        </section>
+    </div>
+
+    {{ initial_projects|json_script:"automation-loadtest-projects" }}
+    {{ api_endpoints|json_script:"automation-api-endpoints" }}
+</div>
+
+<div class="modal" id="loadtest-config-modal" hidden aria-hidden="true" tabindex="-1">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="loadtest-config-title">
+        <div class="modal-header">
+            <h3 id="loadtest-config-title">Run Load Test</h3>
+            <button type="button" class="modal-close" data-action="loadtest-modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-row" style="display:flex; flex-wrap:wrap; gap: 12px; align-items: end;">
+                <div class="form-group">
+                    <label for="loadtest-users">Users</label>
+                    <input id="loadtest-users" data-role="users" class="form-control" type="number" min="1" value="10" />
+                </div>
+                <div class="form-group">
+                    <label for="loadtest-ramp">Ramp up (users/sec)</label>
+                    <input id="loadtest-ramp" data-role="ramp" class="form-control" type="number" min="0" step="0.1" value="1" />
+                </div>
+                <div class="form-group">
+                    <label for="loadtest-duration">Duration</label>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <input id="loadtest-duration" data-role="duration" class="form-control" type="number" min="1" value="1" style="width: 110px;" />
+                        <select data-role="duration-unit" class="form-control" style="width: 120px;">
+                            <option value="seconds">Seconds</option>
+                            <option value="minutes">Minutes</option>
+                            <option value="hours">Hours</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:10px;">
+            <button type="button" class="action-button" data-action="loadtest-modal-close">Cancel</button>
+            <button type="button" class="btn-primary" data-action="loadtest-modal-run">Run Load Test</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block body_js %}
+    {{ block.super }}
+    <script src="{% static 'js/automation_load_testing.js' %}?v={{ STATIC_VERSION }}"></script>
+{% endblock %}

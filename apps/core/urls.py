@@ -25,4 +25,7 @@ urlpatterns += [
 	path("automation-report/finalize/", views.AutomationReportFinalizeView.as_view(), name="core-automation-report-finalize"),
 	path("automation-report/create/", views.AutomationReportCreateView.as_view(), name="core-automation-report-create"),
 	path("automation-report/<int:pk>/testcase/<str:testcase_id>/", views.AutomationReportTestcaseDetailView.as_view(), name="core-automation-report-testcase-detail"),
+	path("load-tests/", views.LoadTestRunsApiView.as_view(), name="core-load-tests"),
+	path("load-tests/<int:pk>/", views.LoadTestRunDetailApiView.as_view(), name="core-load-test-detail"),
+	path("load-tests/<int:pk>/stop/", views.LoadTestRunStopApiView.as_view(), name="core-load-test-stop"),
 ]

@@ -133,6 +133,7 @@ urlpatterns = [
 	path('logout/', logout_view, name='logout'),
 	path('automation/', app_views.automation_overview, name='automation-overview'),
 	path('automation/run/', app_views.automation_run, name='automation-run'),
+	path('automation/load-testing/', app_views.automation_load_testing, name='automation-load-testing'),
 	path('automation/reports/', app_views.automation_reports, name='automation-reports'),
 	path('automation/reports/export/', app_views.automation_reports_export, name='automation-reports-export'),
 	path('automation/reports/testcases/export/', app_views.automation_testcase_reports_export, name='automation-testcase-reports-export'),
