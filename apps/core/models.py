@@ -843,3 +843,29 @@ class LoadTestRun(TimeStampedModel):
     def __str__(self) -> str:  # pragma: no cover
         label = self.name or f"LoadTestRun {self.pk}"
         return f"{label} ({self.status})"
+
+
+class UITestingRecord(TimeStampedModel):
+    """UI Testing record with flowchart steps and component tracking."""
+
+    name = models.CharField(max_length=200)
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="ui_testing_records")
+    module = models.ForeignKey(
+        "TestModules",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ui_testing_records",
+    )
+    scenario = models.ForeignKey(TestScenario, on_delete=models.CASCADE, related_name="ui_testing_records")
+    steps = models.JSONField(default=list, blank=True, help_text="List of UI testing steps with flowchart data")
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        verbose_name = "UI Testing Record"
+        verbose_name_plural = "UI Testing Records"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.name} - {self.project.name}"

@@ -17,6 +17,7 @@ router.register(r"scenario-comments", views.ScenarioCommentViewSet, basename="co
 router.register(r"test-case-comments", views.TestCaseCommentViewSet, basename="core-test-case-comments")
 router.register(r"test-cases", views.TestCaseViewSet, basename="core-test-cases")
 router.register(r"test-modules", views.TestModulesViewSet, basename="core-test-modules")
+router.register(r"ui-testing-records", views.UITestingRecordViewSet, basename="core-ui-testing-records")
 
 urlpatterns = router.urls
 

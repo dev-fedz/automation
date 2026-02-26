@@ -589,6 +589,11 @@
     gap: 1.05rem;
 }
 
+/* UI Testing Records panel should be full width */
+.automation-panel[data-panel="records"] {
+    grid-column: 1 / -1;
+}
+
 /* Layout breathing room: avoid panels sticking to the viewport edge */
 .automation-reports {
     padding: 1rem 1rem; /* small padding on mobile */
@@ -687,8 +692,8 @@
     border: none;
 }
 .reports-tabs-panels { padding: 0; }
-.report-panel { padding: 0.75rem 0.5rem 1rem; }
-.report-panel .panel-controls { padding: 0.6rem 0; margin-top: 2rem; }
+ .report-panel { padding: 0.75rem 0.5rem 1rem; }
+ .report-panel .panel-controls { padding: 0.6rem 0; margin-top: 2rem; }
 
 /* Reports (Automation > Reports): simple one-row controls */
 .automation-reports .report-panel .panel-controls,
@@ -1571,6 +1576,187 @@
     padding: 0.85rem 0.5rem;
 }
 
+/* Basic modal styles for UI Testing modals */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    background: rgba(24, 18, 0, 0.55);
+    padding: 2rem;
+}
+
+.modal .modal-content {
+    background: #fffef8;
+    border-radius: 18px;
+    border: 1px solid rgba(209, 180, 88, 0.45);
+    padding: 1.4rem 1.55rem 1.65rem;
+    box-shadow: 0 22px 40px -18px rgba(60, 43, 0, 0.45);
+    width: min(640px, 70vw);
+    max-width: 90vw;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+/* Stronger, specific rules for the record modal to ensure it's centered */
+/* Keep record modal hidden by default; only show when `.is-open` is present */
+#record-modal {
+    display: none;
+}
+
+/* Specific rules for the record modal when open */
+#record-modal.is-open {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 3000;
+    background: rgba(24, 18, 0, 0.55);
+    padding: 2rem;
+}
+
+#record-modal.is-open .modal-content {
+    min-width: 30vw; /* at least 30% of viewport width */
+    width: min(640px, 70vw);
+    max-width: 90vw;
+    margin: 0 auto;
+}
+
+/* Normalize modal visibility globally: hide all modals by default and
+   only show when `.is-open` is present. This prevents mixed approaches
+   (inline style / hidden attribute) from causing inconsistent behavior. */
+.modal {
+    display: none;
+}
+
+.modal.is-open {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+/* Keep step modal hidden by default; only show when `.is-open` is present */
+#step-modal {
+    display: none;
+}
+
+#step-modal.is-open {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 3000;
+    background: rgba(24, 18, 0, 0.55);
+    padding: 2rem;
+}
+
+#step-modal.is-open .modal-content {
+    min-width: 30vw;
+    width: min(640px, 70vw);
+    max-width: 90vw;
+    margin: 0 auto;
+}
+
+.modal .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+}
+
+.modal .modal-header h2 {
+    margin: 0;
+    font-size: 1.15rem;
+    letter-spacing: 0.045em;
+    text-transform: uppercase;
+    color: var(--automation-accent-dark);
+}
+
+.modal .modal-close {
+    background: transparent;
+    border: none;
+    font-size: 1.35rem;
+    line-height: 1;
+    color: var(--automation-accent-dark);
+    cursor: pointer;
+}
+
+.modal .modal-close:hover {
+    color: #b97c00;
+}
+
+.modal .modal-body {
+    margin-bottom: 1.5rem;
+}
+
+.modal .modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(0, 0, 0, 0.07);
+}
+
+.modal .form-group {
+    margin-bottom: 1rem;
+}
+
+.modal .form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+    color: var(--automation-text);
+}
+
+.modal .form-group input,
+.modal .form-group select {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--automation-border);
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+
+.modal .btn-primary,
+.modal .btn-secondary {
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s ease;
+}
+
+.modal .btn-primary {
+    background: var(--automation-accent);
+    color: white;
+}
+
+.modal .btn-primary:hover {
+    background: var(--automation-accent-dark);
+}
+
+.modal .btn-secondary {
+    background: #f3f4f6;
+    color: var(--automation-text);
+    border: 1px solid var(--automation-border);
+}
+
+.modal .btn-secondary:hover {
+    background: #e5e7eb;
+}
+
 .automation-modal {
     position: fixed;
     inset: 0;
@@ -2128,7 +2314,6 @@ body.automation-modal-open {
     line-height: 1.4;
 }
 
-
 .panel-controls {
     display: flex;
     align-items: center;
@@ -2149,7 +2334,222 @@ body.automation-modal-open {
     max-width: 100%;
 }
 
+
 /* Optional: make date inputs compact */
 .panel-controls input[type="date"] {
     width: 150px;
+}
+
+/* Scenario/TestCase comments: keep action buttons visible (wrap instead of clipping) */
+.comment-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.comment-action-btn[disabled],
+.comment-action-btn[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* UI Testing Module Styles */
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+.form-group input,
+.form-group select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.record-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    background-color: #f9f9f9;
+}
+
+.record-info h3 {
+    margin: 0 0 5px 0;
+    color: #333;
+}
+
+.record-info p {
+    margin: 2px 0;
+    color: #666;
+    font-size: 14px;
+}
+
+.record-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.record-actions button {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.record-actions button:first-child {
+    background-color: #007bff;
+    color: white;
+}
+
+.record-actions button:nth-child(2) {
+    background-color: #dc3545;
+    color: white;
+}
+
+.record-actions button:last-child {
+    background-color: #28a745;
+    color: white;
+}
+
+#pagination-controls {
+    display: flex;
+    justify-content: center;
+    gap: 5px;
+    margin-top: 20px;
+}
+
+#pagination-controls button {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    background-color: white;
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+#pagination-controls button.active {
+    background-color: #007bff;
+    color: white;
+    border-color: #007bff;
+}
+
+#flowchart-canvas-container {
+    margin: 20px 0;
+    text-align: center;
+}
+
+#flowchart-canvas {
+    border: 1px solid #ddd;
+    background-color: #fafafa;
+    cursor: move;
+}
+
+#canvas-controls {
+    margin-top: 10px;
+}
+
+#canvas-controls button {
+    margin: 0 5px;
+    padding: 8px 16px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+#canvas-controls button:hover {
+    background-color: #0056b3;
+}
+
+#generated-script-section {
+    margin-top: 30px;
+}
+
+#generated-script {
+    background-color: #f8f8f8;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 15px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+#step-form {
+    background-color: #f0f8ff;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    border: 1px solid #ddd;
+}
+
+#step-form h3 {
+    margin-top: 0;
+    color: #333;
+}
+
+#image-preview {
+    margin: 10px 0;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: #f9f9f9;
+    min-height: 50px;
+}
+
+.btn-primary {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.btn-primary:hover {
+    background-color: #0056b3;
+}
+
+.btn-secondary {
+    background-color: #6c757d;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.btn-secondary:hover {
+    background-color: #545b62;
+}
+
+.btn-success {
+    background-color: #28a745;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.btn-success:hover {
+    background-color: #1e7e34;
 }

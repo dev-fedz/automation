@@ -46,12 +46,14 @@ function setupLogin() {
     if (modalQr) modalQr.src = showQr && qrSrc ? qrSrc : '';
     if (modalOtp) modalOtp.value = '';
     modal.setAttribute('aria-hidden', 'false');
+    modal.classList.add('is-open');
     if (modalOtp) modalOtp.focus();
   }
 
   function closeModal() {
     if (!modal) return;
     modal.setAttribute('aria-hidden', 'true');
+    modal.classList.remove('is-open');
   }
 
   if (modalCloseButtons.length) {
@@ -126,15 +128,39 @@ function setupLogin() {
   });
 }
 
+// Global modal helpers: use class `is-open` to control visibility across the app.
+window.openModalById = function (id) {
+  try {
+    const el = document.getElementById(id);
+    if (!el) return false;
+    el.classList.add('is-open');
+    el.setAttribute('aria-hidden', 'false');
+    return true;
+  } catch (e) { return false; }
+};
+
+window.closeModalById = function (id) {
+  try {
+    const el = document.getElementById(id);
+    if (!el) return false;
+    el.classList.remove('is-open');
+    el.setAttribute('aria-hidden', 'true');
+    return true;
+  } catch (e) { return false; }
+};
+
 function setupLogoutLinks() {
   document.querySelectorAll('[data-logout]')?.forEach(el => {
     el.addEventListener('click', async (e) => {
       e.preventDefault();
       const token = authToken();
+      // If token auth is active, tell the API to invalidate the token.
       if (token) {
         try { await apiFetch('/api/accounts/auth/logout/', { method: 'POST' }); } catch (_) { }
       }
       localStorage.removeItem('authToken');
+      // Always clear the Django session as well.
+      // Without this, hitting /login/ may redirect back to / because the user is still authenticated.
       window.location = '/logout/?force=1';
     });
   });
@@ -155,6 +181,7 @@ function setupUserMenus() {
 
     function toggle() {
       const willOpen = dropdown.hidden;
+      // close first (ensures consistent state)
       dropdown.hidden = true;
       button.setAttribute('aria-expanded', 'false');
       if (willOpen) {

@@ -47,6 +47,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.pagination import LimitOffsetPagination
 
 try:  # optional at import time; present via django-rest-knox
     from knox.models import AuthToken
@@ -3844,3 +3845,66 @@ class LoadTestRunStopApiView(APIView):
         obj.save(update_fields=["status", "finished_at", "updated_at"])
         _revoke_knox_token(obj.knox_token_key)
         return Response({"status": obj.status}, status=status.HTTP_200_OK)
+
+
+class UITestingRecordViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.UITestingRecordSerializer
+    permission_classes = [IsAuthenticated]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+    # Paginate UI testing records with a small default page size for the UI
+    class _SmallLimitOffsetPagination(LimitOffsetPagination):
+        default_limit = 3
+        max_limit = 3
+        def get_limit(self, request):
+            """Ignore client-supplied `limit` and always use the server default."""
+            return int(self.default_limit)
+
+    pagination_class = _SmallLimitOffsetPagination
+
+    def get_queryset(self):
+        queryset = models.UITestingRecord.objects.select_related(
+            "project", "module", "scenario"
+        ).order_by("-created_at", "-id")
+
+        # Filter by project if provided
+        project_param = self.request.query_params.get("project")
+        if project_param:
+            try:
+                queryset = queryset.filter(project_id=int(project_param))
+            except (TypeError, ValueError):
+                raise ValidationError({"project": "Project must be an integer."})
+
+        # Filter by module if provided
+        module_param = self.request.query_params.get("module")
+        if module_param:
+            queryset = queryset.filter(module_id=module_param)
+
+        # Filter by scenario if provided
+        scenario_param = self.request.query_params.get("scenario")
+        if scenario_param:
+            try:
+                queryset = queryset.filter(scenario_id=int(scenario_param))
+            except (TypeError, ValueError):
+                raise ValidationError({"scenario": "Scenario must be an integer."})
+
+        return queryset
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        # Log user action if account models exist
+        if account_models:
+            _log_user_action(self.request, account_models.UserAuditTrail.Actions.CREATE_UI_TESTING_RECORD)
+        return instance
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        # Log user action if account models exist
+        if account_models:
+            _log_user_action(self.request, account_models.UserAuditTrail.Actions.UPDATE_UI_TESTING_RECORD)
+        return instance
+
+    def perform_destroy(self, instance):
+        super().perform_destroy(instance)
+        # Log user action if account models exist
+        if account_models:
+            _log_user_action(self.request, account_models.UserAuditTrail.Actions.DELETE_UI_TESTING_RECORD)

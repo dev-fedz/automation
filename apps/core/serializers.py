@@ -1119,3 +1119,28 @@ class ProjectSerializer(serializers.ModelSerializer):
             return len(related)
         except TypeError:
             return obj.scenarios.count()
+
+
+class UITestingRecordSerializer(serializers.ModelSerializer):
+    project_name = serializers.CharField(source="project.name", read_only=True)
+    module_name = serializers.CharField(source="module.title", read_only=True)
+    scenario_name = serializers.CharField(source="scenario.title", read_only=True)
+
+    class Meta:
+        model = models.UITestingRecord
+        fields = [
+            "id",
+            "name",
+            "project",
+            "project_name",
+            "module",
+            "module_name",
+            "scenario",
+            "scenario_name",
+            "steps",
+            "description",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at", "project_name", "module_name", "scenario_name"]

@@ -199,6 +199,11 @@ class UserAuditTrail(models.Model):
         UPDATE_API_ENVIRONMENT = 'environment_update', 'API Environment - Update Environment'
         DELETE_API_ENVIRONMENT = 'environment_delete', 'API Environment - Delete Environment'
 
+        # UI Testing Records
+        CREATE_UI_TESTING_RECORD = 'ui_testing_create', 'UI Testing - Create Record'
+        UPDATE_UI_TESTING_RECORD = 'ui_testing_update', 'UI Testing - Update Record'
+        DELETE_UI_TESTING_RECORD = 'ui_testing_delete', 'UI Testing - Delete Record'
+
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='audit_trails')
     action = TextChoiceField(max_length=40, choices_cls=Actions)
     datetime = models.DateTimeField(auto_now_add=True, db_index=True)

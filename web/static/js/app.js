@@ -46,12 +46,14 @@ function setupLogin() {
     if (modalQr) modalQr.src = showQr && qrSrc ? qrSrc : '';
     if (modalOtp) modalOtp.value = '';
     modal.setAttribute('aria-hidden', 'false');
+    modal.classList.add('is-open');
     if (modalOtp) modalOtp.focus();
   }
 
   function closeModal() {
     if (!modal) return;
     modal.setAttribute('aria-hidden', 'true');
+    modal.classList.remove('is-open');
   }
 
   if (modalCloseButtons.length) {
@@ -125,6 +127,27 @@ function setupLogin() {
     } catch (_) { alert('Network error'); }
   });
 }
+
+// Global modal helpers: use class `is-open` to control visibility across the app.
+window.openModalById = function (id) {
+  try {
+    const el = document.getElementById(id);
+    if (!el) return false;
+    el.classList.add('is-open');
+    el.setAttribute('aria-hidden', 'false');
+    return true;
+  } catch (e) { return false; }
+};
+
+window.closeModalById = function (id) {
+  try {
+    const el = document.getElementById(id);
+    if (!el) return false;
+    el.classList.remove('is-open');
+    el.setAttribute('aria-hidden', 'true');
+    return true;
+  } catch (e) { return false; }
+};
 
 function setupLogoutLinks() {
   document.querySelectorAll('[data-logout]')?.forEach(el => {

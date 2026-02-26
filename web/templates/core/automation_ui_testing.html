@@ -8,36 +8,138 @@
     <link rel="stylesheet" href="{% static 'css/automation.css' %}">
 {% endblock %}
 
+{% block head_js %}
+    {{ block.super }}
+    <script src="{% static 'js/automation_ui_testing.js' %}"></script>
+{% endblock %}
+
 {% block content %}
 <div class="automation-dashboard" id="automation-ui-testing">
-    <div class="automation-run-grid">
-        <section class="automation-panel automation-run__card automation-run__card--top">
+
+    <div class="automation-grid">
+        <section class="automation-panel" data-panel="records" aria-labelledby="headline-records">
             <div class="panel-header">
-                <h2>UI Testing</h2>
+                <h2 id="headline-records">UI Testing Records</h2>
+                <button type="button" class="automation-action" onclick="showCreateRecordModal()">Create Record</button>
             </div>
-            <div class="automation-card-body">
-                <div class="automation-ui-testing-content">
-                    <h3>Playwright E2E Tests</h3>
-                    <h4>Setup</h4>
-                    <ol>
-                        <li>Ensure node.js (16+) is installed.</li>
-                        <li>From the project root install dev deps: <code>npm install</code></li>
-                        <li>Install Playwright browser binaries: <code>npx playwright install</code></li>
-                    </ol>
-                    <h4>Running Tests</h4>
-                    <ul>
-                        <li>Run headless: <code>npm run test:e2e</code></li>
-                        <li>Run headed: <code>npm run test:e2e:headed</code></li>
-                        <li>Run debug: <code>npm run test:e2e:debug</code></li>
-                    </ul>
-                    <h4>Configuration</h4>
-                    <ul>
-                        <li>Edit <code>playwright.config.js</code> to change <code>baseURL</code> or set environment <code>E2E_BASE_URL</code>.</li>
-                        <li>Tests assume a test user exists (username <code>tester</code>, password <code>pw</code>). Create this user in your DB before running tests or extend tests to create UI users via admin API.</li>
-                    </ul>
+            <div class="automation-list" data-role="records-list" aria-live="polite">
+                <div id="ui-testing-records-list">
+                    <!-- Records will be loaded here -->
+                </div>
+                <div id="pagination-controls">
+                    <!-- Pagination will be loaded here -->
                 </div>
             </div>
         </section>
+
+        <section class="automation-panel" data-panel="flowchart" aria-labelledby="headline-flowchart">
+            <div class="panel-header">
+                <h2 id="headline-flowchart">Flowchart Designer</h2>
+                <div class="panel-actions">
+                    <button type="button" class="automation-action" id="add-step-btn" onclick="addStep()" disabled>Add Step</button>
+                </div>
+            </div>
+            <div class="automation-canvas" data-role="flowchart-canvas">
+                <canvas id="flowchart-canvas" width="800" height="600"></canvas>
+            </div>
+        </section>
+    </div>
+
+    <!-- Create/Edit Record Modal -->
+    <div id="record-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="record-modal-title">Create UI Testing Record</h2>
+                <button type="button" class="modal-close" onclick="closeRecordModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="record-form">
+                    {% csrf_token %}
+                    <div class="form-group">
+                        <label for="record-name">Record Name:</label>
+                        <input type="text" id="record-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="test-project">Project:</label>
+                        <select id="test-project" onchange="loadModules(document.getElementById('test-project').value)" required>
+                            <option value="">Select Project</option>
+                            <!-- Projects will be loaded dynamically -->
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="test-module">Module:</label>
+                        <select id="test-module" onchange="loadScenarios(document.getElementById('test-project').value, document.getElementById('test-module').value)" disabled required>
+                            <option value="">Select Module</option>
+                            <!-- Modules will be loaded based on project -->
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="test-scenario">Test Scenario:</label>
+                        <select id="test-scenario" disabled required>
+                            <option value="">Select Scenario</option>
+                            <!-- Scenarios will be loaded based on project and module -->
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" onclick="closeRecordModal()">Cancel</button>
+                <button type="button" class="btn-primary" onclick="saveRecord()">Save Record</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step Creation Modal -->
+    <div id="step-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="step-modal-title">Add Step</h2>
+                <button type="button" class="modal-close" onclick="closeStepModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="add-step-form">
+                    <div class="form-group">
+                        <label for="step-name">Step Name:</label>
+                        <input type="text" id="step-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="step-type">Step Type:</label>
+                        <select id="step-type" required>
+                            <option value="">Select Type</option>
+                            <option value="click">Click</option>
+                            <option value="input">Input Text</option>
+                            <option value="wait">Wait</option>
+                            <option value="assert">Assert</option>
+                            <option value="navigate">Navigate</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="step-description">Description:</label>
+                        <textarea id="step-description" rows="3"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="component-type">Component Type:</label>
+                        <select id="component-type">
+                            <option value="">Select Component Type</option>
+                            <option value="button">Button</option>
+                            <option value="input">Input Field</option>
+                            <option value="link">Link</option>
+                            <option value="dropdown">Dropdown</option>
+                            <option value="checkbox">Checkbox</option>
+                            <option value="image">Image</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="component-selector">Component Selector:</label>
+                        <input type="text" id="component-selector" placeholder="CSS selector or XPath">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" onclick="closeStepModal()">Cancel</button>
+                <button type="button" class="btn-primary" onclick="saveStep()">Save Step</button>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
