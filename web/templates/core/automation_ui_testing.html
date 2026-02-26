@@ -1,0 +1,43 @@
+{% extends "base/base.html" %}
+{% load static %}
+
+{% block title %}Automation · UI Testing{% endblock %}
+
+{% block head_css %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'css/automation.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="automation-dashboard" id="automation-ui-testing">
+    <div class="automation-run-grid">
+        <section class="automation-panel automation-run__card automation-run__card--top">
+            <div class="panel-header">
+                <h2>UI Testing</h2>
+            </div>
+            <div class="automation-card-body">
+                <div class="automation-ui-testing-content">
+                    <h3>Playwright E2E Tests</h3>
+                    <h4>Setup</h4>
+                    <ol>
+                        <li>Ensure node.js (16+) is installed.</li>
+                        <li>From the project root install dev deps: <code>npm install</code></li>
+                        <li>Install Playwright browser binaries: <code>npx playwright install</code></li>
+                    </ol>
+                    <h4>Running Tests</h4>
+                    <ul>
+                        <li>Run headless: <code>npm run test:e2e</code></li>
+                        <li>Run headed: <code>npm run test:e2e:headed</code></li>
+                        <li>Run debug: <code>npm run test:e2e:debug</code></li>
+                    </ul>
+                    <h4>Configuration</h4>
+                    <ul>
+                        <li>Edit <code>playwright.config.js</code> to change <code>baseURL</code> or set environment <code>E2E_BASE_URL</code>.</li>
+                        <li>Tests assume a test user exists (username <code>tester</code>, password <code>pw</code>). Create this user in your DB before running tests or extend tests to create UI users via admin API.</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}

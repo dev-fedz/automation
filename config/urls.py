@@ -135,6 +135,7 @@ urlpatterns = [
 	path('automation/run/', app_views.automation_run, name='automation-run'),
 	path('automation/load-testing/', app_views.automation_load_testing, name='automation-load-testing'),
 	path('automation/reports/', app_views.automation_reports, name='automation-reports'),
+	path('automation/ui-testing/', app_views.automation_ui_testing, name='automation-ui-testing'),
 	path('automation/reports/export/', app_views.automation_reports_export, name='automation-reports-export'),
 	path('automation/reports/testcases/export/', app_views.automation_testcase_reports_export, name='automation-testcase-reports-export'),
 	path('automation/test-plans/', app_views.automation_projects, name='automation-test-plans'),

@@ -1657,6 +1657,14 @@ def automation_reports(request):
 
 
 @login_required
+def automation_ui_testing(request):
+    """Render the Automation UI testing page (Playwright-based)."""
+
+    context = {}
+    return render(request, "core/automation_ui_testing.html", context)
+
+
+@login_required
 def automation_reports_export(request):
     """Export Automated Reports to an Excel file.
 

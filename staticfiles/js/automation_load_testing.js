@@ -66,6 +66,8 @@
         runsPollTimer: null,
         runsPollInFlight: false,
         pendingRunSelection: null,
+        runsPage: 1,
+        runsPerPage: 10,
     };
 
     const elements = {
@@ -257,6 +259,18 @@
                 loadTestBtn.disabled = true;
                 loadTestBtn.title = 'Link this test case to an API request to enable load tests.';
             }
+            // Set default users=1 and duration=10s on click
+            loadTestBtn.addEventListener('click', function (ev) {
+                // Only set if the button is enabled
+                if (!loadTestBtn.disabled) {
+                    const usersInput = document.querySelector('[data-role="users"]');
+                    const durationInput = document.querySelector('[data-role="duration"]');
+                    const durationUnit = document.querySelector('[data-role="duration-unit"]');
+                    if (usersInput) usersInput.value = 1;
+                    if (durationInput) durationInput.value = 10;
+                    if (durationUnit) durationUnit.value = 'seconds';
+                }
+            });
             actionGroup.appendChild(loadTestBtn);
             actionsCell.appendChild(actionGroup);
             tr.appendChild(actionsCell);
@@ -502,6 +516,124 @@
             sel.selection.testcases = testcasePayloads;
         }
 
+        // Print diagnostics: for each testcase, attempt to fetch linked request,
+        // print resolved authorization, headers and any pre-request console logs.
+        try {
+            const endpointsLocal = getJsonScript('automation-api-endpoints') || {};
+            const requestsBase = endpointsLocal.requests || '/api/core/requests/';
+            const collectionsBase = endpointsLocal.collections || '/api/core/collections/';
+            for (const tc of (sel.selection.testcases || [])) {
+                try {
+                    const caseId = tc && tc.id ? String(tc.id) : null;
+                    const caseObj = (Array.isArray(state.projects) ? state.projects : []).flatMap(p => (Array.isArray(p.scenarios) ? p.scenarios : []).flatMap(s => (Array.isArray(s.cases) ? s.cases : []))).find(c => String(c.id) === String(caseId));
+                    const reqId = caseObj && (caseObj.related_api_request || caseObj.requestId || null);
+                    const envId = tc.environment_id || (caseObj && (caseObj.environment_id || caseObj.envId)) || null;
+                    if (!reqId) {
+                        console.info('[loadtest] testcase', caseId, 'has no linked API request');
+                        continue;
+                    }
+                    const reqUrl = requestsBase.endsWith('/') ? `${requestsBase}${encodeURIComponent(String(reqId))}/` : `${requestsBase}/${encodeURIComponent(String(reqId))}/`;
+                    let requestObj = null;
+                    try {
+                        const r = await fetch(reqUrl, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                        if (r.ok) requestObj = await r.json();
+                    } catch (_e) { requestObj = null; }
+
+                    console.group(`[loadtest] case ${caseId} -> request ${reqId}`);
+                    console.log('resolved_environment_id:', envId);
+                    if (!requestObj) {
+                        console.warn('unable to fetch request details for', reqId);
+                        console.groupEnd();
+                        continue;
+                    }
+
+                    // Base headers from request definition
+                    const baseHeaders = requestObj.headers ? { ...requestObj.headers } : {};
+
+                    // If request belongs to a collection, try to determine collection variables
+                    let collectionVars = null;
+                    if (requestObj.collection_id) {
+                        try {
+                            const colUrl = collectionsBase.endsWith('/') ? `${collectionsBase}${encodeURIComponent(String(requestObj.collection_id))}/` : `${collectionsBase}/${encodeURIComponent(String(requestObj.collection_id))}/`;
+                            const colResp = await fetch(colUrl, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+                            if (colResp.ok) {
+                                const colData = await colResp.json();
+                                const envs = Array.isArray(colData.environments) ? colData.environments : [];
+                                if (envs.length) {
+                                    // attempt to match envId, else pick first
+                                    let chosen = null;
+                                    if (envId) chosen = envs.find(e => String(e.id) === String(envId)) || null;
+                                    if (!chosen) chosen = envs[0];
+                                    collectionVars = chosen ? (chosen.variables || {}) : {};
+                                }
+                            }
+                        } catch (_e) { collectionVars = null; }
+                    }
+
+                    // Resolve auth headers (basic / bearer) similar to testcase-runner
+                    const resolveTemplate = (v, vars) => {
+                        if (!v || typeof v !== 'string') return v;
+                        const m = v.match(/^\{\{\s*([\w\.\-]+)\s*\}\}$/);
+                        if (!m) return v;
+                        const key = m[1];
+                        if (vars && Object.prototype.hasOwnProperty.call(vars, key)) return vars[key];
+                        return v;
+                    };
+
+                    const headersResolved = { ...baseHeaders };
+                    if (requestObj.auth_type === 'basic' && requestObj.auth_basic) {
+                        try {
+                            const ab = requestObj.auth_basic || {};
+                            const resolvedUsername = resolveTemplate(typeof ab.username === 'string' ? ab.username : '', collectionVars);
+                            const resolvedPassword = resolveTemplate(typeof ab.password === 'string' ? ab.password : '', collectionVars);
+                            if (resolvedUsername || resolvedPassword) {
+                                const token = btoa(`${resolvedUsername}:${resolvedPassword}`);
+                                headersResolved['Authorization'] = `Basic ${token}`;
+                            }
+                        } catch (_e) { }
+                    }
+                    if (requestObj.auth_type === 'bearer' && requestObj.auth_bearer) {
+                        try {
+                            const resolved = resolveTemplate(requestObj.auth_bearer, collectionVars);
+                            if (resolved) headersResolved['Authorization'] = `Bearer ${resolved}`;
+                        } catch (_e) { }
+                    }
+
+                    console.log('request.definition.headers:', baseHeaders);
+                    console.log('request.resolved.headers:', headersResolved);
+
+                    // Pre-request script: if present, try to run via available script helpers
+                    if (requestObj.pre_request_script && requestObj.pre_request_script.trim()) {
+                        try {
+                            const helpers = (window.__automationHelpers && window.__automationHelpers.scriptRunner) ? window.__automationHelpers.scriptRunner : null;
+                            if (helpers && typeof helpers.runPreRequestScript === 'function') {
+                                const requestSnapshot = (typeof helpers.buildScriptRequestSnapshot === 'function') ? helpers.buildScriptRequestSnapshot(requestObj, helpers) : null;
+                                const environmentSnapshot = collectionVars ? { id: envId, variables: collectionVars } : null;
+                                const scriptContext = await helpers.runPreRequestScript(requestObj.pre_request_script, {
+                                    environmentId: envId ?? null,
+                                    environmentSnapshot,
+                                    requestSnapshot,
+                                });
+                                console.log('pre-request script logs:', Array.isArray(scriptContext && scriptContext.logs) ? scriptContext.logs : []);
+                            } else {
+                                console.log('pre-request script exists but script runner helpers unavailable. Script text:', requestObj.pre_request_script.slice(0, 400));
+                            }
+                        } catch (err) {
+                            console.warn('pre-request script execution failed:', err && err.message ? err.message : err);
+                        }
+                    } else {
+                        console.log('no pre-request script for this request');
+                    }
+
+                    console.groupEnd();
+                } catch (_caseErr) {
+                    try { console.warn('[loadtest] diagnostics error for testcase', tc && tc.id); } catch (_e) { }
+                }
+            }
+        } catch (_diagErr) {
+            try { console.warn('[loadtest] diagnostics failed', _diagErr); } catch (_e) { }
+        }
+
         setStatus(`Starting load test… Users=${users} SpawnRate=${spawnRate.toFixed(2)}/s (Ramp≈${derivedRampSeconds}s) Duration=${durationSeconds}s`, 'info');
 
         const csrftoken = readCsrfToken();
@@ -536,6 +668,48 @@
         await refreshRuns();
     };
 
+    const renderPagination = (totalPages) => {
+        const currentPage = state.runsPage;
+        let paginationHtml = '<div class="pagination" style="display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 20px; padding: 10px;">';
+
+        // Previous button
+        if (currentPage > 1) {
+            paginationHtml += `<button type="button" class="btn-secondary" data-action="runs-prev-page" style="padding: 5px 10px;">Previous</button>`;
+        }
+
+        // Page numbers
+        const startPage = Math.max(1, currentPage - 2);
+        const endPage = Math.min(totalPages, currentPage + 2);
+
+        if (startPage > 1) {
+            paginationHtml += `<button type="button" class="btn-secondary" data-action="runs-go-to-page" data-page="1" style="padding: 5px 10px;">1</button>`;
+            if (startPage > 2) {
+                paginationHtml += '<span style="padding: 5px 10px;">...</span>';
+            }
+        }
+
+        for (let i = startPage; i <= endPage; i++) {
+            const isActive = i === currentPage;
+            const activeClass = isActive ? 'btn-primary' : 'btn-secondary';
+            paginationHtml += `<button type="button" class="${activeClass}" data-action="runs-go-to-page" data-page="${i}" style="padding: 5px 10px;">${i}</button>`;
+        }
+
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) {
+                paginationHtml += '<span style="padding: 5px 10px;">...</span>';
+            }
+            paginationHtml += `<button type="button" class="btn-secondary" data-action="runs-go-to-page" data-page="${totalPages}" style="padding: 5px 10px;">${totalPages}</button>`;
+        }
+
+        // Next button
+        if (currentPage < totalPages) {
+            paginationHtml += `<button type="button" class="btn-secondary" data-action="runs-next-page" style="padding: 5px 10px;">Next</button>`;
+        }
+
+        paginationHtml += '</div>';
+        return paginationHtml;
+    };
+
     const renderRuns = () => {
         if (!elements.runsList) return;
         const runs = Array.isArray(state.runs) ? state.runs : [];
@@ -543,6 +717,11 @@
             elements.runsList.innerHTML = '<div class="empty-state">No load tests yet.</div>';
             return;
         }
+
+        const totalPages = Math.ceil(runs.length / state.runsPerPage);
+        const startIndex = (state.runsPage - 1) * state.runsPerPage;
+        const endIndex = startIndex + state.runsPerPage;
+        const paginatedRuns = runs.slice(startIndex, endIndex);
 
         const statusLabel = (value) => {
             const s = (value || '').toString().toLowerCase();
@@ -556,7 +735,7 @@
             return s.charAt(0).toUpperCase() + s.slice(1);
         };
 
-        const html = runs.map((r) => {
+        const html = paginatedRuns.map((r) => {
             const id = r.id;
             const status = statusLabel(r.status || '');
             const started = r.started_at ? new Date(r.started_at).toLocaleString() : '—';
@@ -580,7 +759,9 @@
             );
         }).join('');
 
-        elements.runsList.innerHTML = html;
+        const paginationHtml = totalPages > 1 ? renderPagination(totalPages) : '';
+
+        elements.runsList.innerHTML = html + paginationHtml;
     };
 
     const refreshRuns = async () => {
@@ -595,6 +776,7 @@
             if (!resp.ok) throw new Error('Failed to load runs');
             const data = await resp.json();
             state.runs = Array.isArray(data) ? data : [];
+            state.runsPage = 1; // Reset to first page when loading new data
             renderRuns();
         } catch (_e) {
             // keep old
@@ -785,6 +967,33 @@
         if (action === 'stop-run') {
             const id = btn.getAttribute('data-run-id');
             await stopRun(id);
+            return;
+        }
+
+        if (action === 'runs-prev-page') {
+            if (state.runsPage > 1) {
+                state.runsPage--;
+                renderRuns();
+            }
+            return;
+        }
+
+        if (action === 'runs-next-page') {
+            const totalPages = Math.ceil((Array.isArray(state.runs) ? state.runs.length : 0) / state.runsPerPage);
+            if (state.runsPage < totalPages) {
+                state.runsPage++;
+                renderRuns();
+            }
+            return;
+        }
+
+        if (action === 'runs-go-to-page') {
+            const page = parseInt(btn.getAttribute('data-page'), 10);
+            const totalPages = Math.ceil((Array.isArray(state.runs) ? state.runs.length : 0) / state.runsPerPage);
+            if (page >= 1 && page <= totalPages) {
+                state.runsPage = page;
+                renderRuns();
+            }
             return;
         }
     };
