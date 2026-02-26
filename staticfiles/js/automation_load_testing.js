@@ -276,15 +276,13 @@
             const isActive = String(pid) === String(state.activeProjectId);
             const isChecked = state.selectedProjectIds.has(String(pid));
             return (
-                `<div class="automation-item${isActive ? ' is-active' : ''}" data-project-id="${escapeHtml(pid)}">` +
+                `<div class="automation-item${isActive ? ' is-active' : ''} automation-item--selectable" data-action="project-select" data-project-id="${escapeHtml(pid)}">` +
                 '<div class="automation-run__item-header">' +
-                `<label class="automation-run__checkbox-group" for="automation-loadtest-project-${escapeHtml(pid)}">` +
+                `<label class="automation-run__checkbox-group" for="automation-loadtest-project-${escapeHtml(pid)}" onclick="event.stopPropagation();">` +
                 `<input type="checkbox" id="automation-loadtest-project-${escapeHtml(pid)}" data-action="project-checkbox" data-project-id="${escapeHtml(pid)}" ${isChecked ? 'checked' : ''}>` +
                 '</label>' +
-                `<button type="button" class="automation-run__item-select" data-action="project-select" data-project-id="${escapeHtml(pid)}">` +
-                `<strong>${escapeHtml(title)}</strong>` +
-                '</button>' +
-                `<button type="button" class="action-button" data-action="project-loadtest" data-project-id="${escapeHtml(pid)}">Load Test</button>` +
+                `<span class="automation-run__item-select-label"><strong>${escapeHtml(title)}</strong></span>` +
+                `<button type="button" class="action-button" data-action="project-loadtest" data-project-id="${escapeHtml(pid)}" onclick="event.stopPropagation();">Load Test</button>` +
                 '</div>' +
                 '</div>'
             );
@@ -315,15 +313,13 @@
             const isActive = String(mid) === String(state.activeModuleId);
             const isChecked = state.selectedModuleIds.has(String(mid));
             return (
-                `<div class="automation-item${isActive ? ' is-active' : ''}" data-module-id="${escapeHtml(mid)}">` +
+                `<div class="automation-item${isActive ? ' is-active' : ''} automation-item--selectable" data-action="module-select" data-module-id="${escapeHtml(mid)}">` +
                 '<div class="automation-run__item-header">' +
-                `<label class="automation-run__checkbox-group" for="automation-loadtest-module-${escapeHtml(mid)}">` +
+                `<label class="automation-run__checkbox-group" for="automation-loadtest-module-${escapeHtml(mid)}" onclick="event.stopPropagation();">` +
                 `<input type="checkbox" id="automation-loadtest-module-${escapeHtml(mid)}" data-action="module-checkbox" data-module-id="${escapeHtml(mid)}" ${isChecked ? 'checked' : ''}>` +
                 '</label>' +
-                `<button type="button" class="automation-run__item-select" data-action="module-select" data-module-id="${escapeHtml(mid)}">` +
-                `<strong>${escapeHtml(title)}</strong>` +
-                '</button>' +
-                `<button type="button" class="action-button" data-action="module-loadtest" data-module-id="${escapeHtml(mid)}">Load Test</button>` +
+                `<span class="automation-run__item-select-label"><strong>${escapeHtml(title)}</strong></span>` +
+                `<button type="button" class="action-button" data-action="module-loadtest" data-module-id="${escapeHtml(mid)}" onclick="event.stopPropagation();">Load Test</button>` +
                 '</div>' +
                 '</div>'
             );
@@ -356,15 +352,13 @@
             const isActive = String(sid) === String(state.activeScenarioId);
             const isChecked = state.selectedScenarioIds.has(String(sid));
             return (
-                `<div class="automation-item${isActive ? ' is-active' : ''}" data-scenario-id="${escapeHtml(sid)}">` +
+                `<div class="automation-item${isActive ? ' is-active' : ''} automation-item--selectable" data-action="scenario-select" data-scenario-id="${escapeHtml(sid)}">` +
                 '<div class="automation-run__item-header">' +
-                `<label class="automation-run__checkbox-group" for="automation-loadtest-scenario-${escapeHtml(sid)}">` +
+                `<label class="automation-run__checkbox-group" for="automation-loadtest-scenario-${escapeHtml(sid)}" onclick="event.stopPropagation();">` +
                 `<input type="checkbox" id="automation-loadtest-scenario-${escapeHtml(sid)}" data-action="scenario-checkbox" data-scenario-id="${escapeHtml(sid)}" ${isChecked ? 'checked' : ''}>` +
                 '</label>' +
-                `<button type="button" class="automation-run__item-select" data-action="scenario-select" data-scenario-id="${escapeHtml(sid)}">` +
-                `<strong>${escapeHtml(title)}</strong>` +
-                '</button>' +
-                `<button type="button" class="action-button" data-action="scenario-loadtest" data-scenario-id="${escapeHtml(sid)}">Load Test</button>` +
+                `<span class="automation-run__item-select-label"><strong>${escapeHtml(title)}</strong></span>` +
+                `<button type="button" class="action-button" data-action="scenario-loadtest" data-scenario-id="${escapeHtml(sid)}" onclick="event.stopPropagation();">Load Test</button>` +
                 '</div>' +
                 '</div>'
             );
@@ -467,6 +461,45 @@
         const sel = determineSelection(overrideScope, overrideIds);
         if (!sel.selection || (!sel.selection.testcase_ids && !sel.selection.scenario_ids && !sel.selection.module_ids && !sel.selection.project_ids)) {
             // allow empty selection only if user checked nothing; backend will reject.
+        }
+
+        // Use run menu's logic for environment_id resolution
+        if (sel.selection && sel.selection.testcase_ids) {
+            // Dynamically import run menu helpers if available
+            let buildCaseDescriptor = null;
+            let collectProjectCases = null;
+            let collectModuleCases = null;
+            let collectScenarioCases = null;
+            try {
+                buildCaseDescriptor = window.automationRunBuildCaseDescriptor || null;
+                collectProjectCases = window.automationRunCollectProjectCases || null;
+                collectModuleCases = window.automationRunCollectModuleCases || null;
+                collectScenarioCases = window.automationRunCollectScenarioCases || null;
+            } catch (_e) { /* ignore */ }
+
+            const project = getActiveProject();
+            let cases = [];
+            if (buildCaseDescriptor && collectProjectCases) {
+                cases = collectProjectCases(project);
+            } else {
+                // fallback to local logic
+                const scenarios = collectScenariosForProject(project, state.activeModuleId);
+                if (state.activeScenarioId) {
+                    const activeScenario = scenarios.find(s => String(s && s.id) === String(state.activeScenarioId));
+                    cases = collectCasesForScenario(activeScenario);
+                } else {
+                    cases = scenarios.flatMap(s => collectCasesForScenario(s));
+                }
+            }
+            // Build testcase payloads with environment_id
+            const testcasePayloads = sel.selection.testcase_ids.map(tcId => {
+                const caseObj = cases.find(c => String(c.id) === String(tcId) || String(c.caseId) === String(tcId));
+                return {
+                    id: tcId,
+                    environment_id: caseObj && (caseObj.environment_id || caseObj.envId) ? (caseObj.environment_id || caseObj.envId) : null,
+                };
+            });
+            sel.selection.testcases = testcasePayloads;
         }
 
         setStatus(`Starting load test… Users=${users} SpawnRate=${spawnRate.toFixed(2)}/s (Ramp≈${derivedRampSeconds}s) Duration=${durationSeconds}s`, 'info');
